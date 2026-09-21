@@ -1,0 +1,16 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+
+# 日志与本地配置
+*.log
+*.local
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+
+# TypeScript 增量构建缓存
+*.tsbuildinfo

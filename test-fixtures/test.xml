@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TextureAtlas imagePath="test.png" width="512" height="512">
+  <sprite n="hero.png" x="98" y="126" w="64" h="64"/>
+  <sprite n="sword.png" x="10" y="126" w="24" h="72" r="y" oX="0" oY="0" oW="72" oH="24"/>
+  <sprite n="shield.png" x="44" y="126" w="44" h="44" oX="8" oY="4" oW="60" oH="52"/>
+  <sprite n="run_01.png" x="10" y="10" w="48" h="48"/>
+  <sprite n="run_02.png" x="68" y="10" w="48" h="48"/>
+  <sprite n="run_03.png" x="126" y="10" w="48" h="48"/>
+  <sprite n="run_04.png" x="184" y="10" w="48" h="48"/>
+  <sprite n="run_05.png" x="242" y="10" w="48" h="48"/>
+  <sprite n="run_06.png" x="300" y="10" w="48" h="48"/>
+  <sprite n="run_07.png" x="358" y="10" w="48" h="48"/>
+  <sprite n="run_08.png" x="416" y="10" w="48" h="48"/>
+  <sprite n="run_09.png" x="10" y="68" w="48" h="48"/>
+  <sprite n="run_10.png" x="68" y="68" w="48" h="48"/>
+  <sprite n="jump_01.png" x="126" y="68" w="32" h="48"/>
+  <sprite n="jump_02.png" x="168" y="68" w="32" h="48"/>
+  <sprite n="jump_03.png" x="210" y="68" w="32" h="48"/>
+  <sprite n="idle_01.png" x="252" y="68" w="40" h="48"/>
+  <sprite n="idle_02.png" x="302" y="68" w="40" h="48"/>
+  <sprite n="coin_01.png" x="352" y="68" w="32" h="32"/>
+  <sprite n="coin_02.png" x="394" y="68" w="32" h="32"/>
+  <sprite n="coin_03.png" x="436" y="68" w="32" h="32"/>
+</TextureAtlas>
