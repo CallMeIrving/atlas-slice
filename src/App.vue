@@ -5,6 +5,9 @@ import CanvasStage from '@/components/CanvasStage.vue'
 import Inspector from '@/components/Inspector.vue'
 import PreviewPlayer from '@/components/PreviewPlayer.vue'
 import { store, dismissError } from '@/store/atlas'
+import MattePage from '@/components/MattePage.vue'
+import VideoPage from '@/components/VideoPage.vue'
+import { workspace } from '@/store/workspace'
 
 const progressPct = () => {
   if (!store.progress || store.progress.total === 0) return 0
@@ -15,7 +18,7 @@ const progressPct = () => {
 <template>
   <div class="app">
     <TopBar />
-    <div class="workspace">
+    <div v-if="workspace.page === 'atlas'" class="workspace">
       <aside class="rail panel">
         <FrameList />
       </aside>
@@ -26,7 +29,9 @@ const progressPct = () => {
         <Inspector />
       </aside>
     </div>
-    <PreviewPlayer />
+    <PreviewPlayer v-if="workspace.page === 'atlas'" />
+    <MattePage v-else-if="workspace.page === 'matte'" />
+    <VideoPage v-else />
 
     <div class="progress-bar" v-if="store.progress" :style="{ width: progressPct() + '%' }"></div>
     <div class="toast-wrap">
