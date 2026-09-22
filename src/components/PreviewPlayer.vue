@@ -12,7 +12,10 @@ const dragIdx = ref<number | null>(null)
 
 let timer: number | null = null
 
-const frames = computed(() => orderedFrames.value)
+const frames = computed(() => {
+  const selected = new Set(store.selectedIds)
+  return orderedFrames.value.filter((frame) => selected.has(frame.id))
+})
 const current = computed(() => frames.value[index.value] ?? null)
 
 function clampIndex(): void {
@@ -148,7 +151,9 @@ onBeforeUnmount(() => {
     <div v-if="open" class="preview-body">
       <div class="preview-stage">
         <canvas ref="previewRef" class="preview-canvas"></canvas>
-        <div v-if="!current" class="preview-empty faint">导入帧后在此预览动画</div>
+        <div v-if="!current" class="preview-empty faint">
+          {{ store.frames.length ? '请在帧列表勾选要预览的帧' : '导入帧后在此预览动画' }}
+        </div>
       </div>
       <div class="preview-controls">
         <div class="play-row">

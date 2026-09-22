@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import BatchResizeModal from '@/components/BatchResizeModal.vue'
+import SpriteSheetModal from '@/components/SpriteSheetModal.vue'
 import {
   store,
   selectedFrame,
@@ -9,12 +11,13 @@ import {
   deletePreset,
   persistExportSettings,
   deleteFrame,
-  autoDetectFrames,
 } from '@/store/atlas'
 import type { CropMode } from '@/core/crop'
 
 const presetName = ref('')
 const presetSelect = ref('')
+const resizeOpen = ref(false)
+const spriteOpen = ref(false)
 
 const sel = computed(() => selectedFrame.value)
 
@@ -43,6 +46,11 @@ function onDeletePreset(): void {
 
 function onDeleteSelected(): void {
   if (store.selectedId) deleteFrame(store.selectedId)
+}
+
+function onExport(): void {
+  if (store.exportTarget === 'spritesheet') spriteOpen.value = true
+  else runExport()
 }
 </script>
 
@@ -77,6 +85,14 @@ function onDeleteSelected(): void {
     <!-- 导出设置 -->
     <section class="section">
       <h2 class="section-title">导出设置</h2>
+      <div class="field">
+        <span class="field-label">导出类型</span>
+        <select v-model="store.exportTarget" class="select">
+          <option value="all">导出全部</option>
+          <option value="selected">导出勾选</option>
+          <option value="spritesheet">导出雪碧图</option>
+        </select>
+      </div>
       <div class="field">
         <span class="field-label">裁切模式</span>
         <div class="seg seg-wide">
@@ -144,10 +160,10 @@ function onDeleteSelected(): void {
       </div>
       <button
         class="btn btn-primary export-btn"
-        :disabled="!store.source || store.frames.length === 0 || store.busy"
-        @click="runExport()"
+        :disabled="!store.source || store.frames.length === 0 || store.busy || (store.exportTarget === 'selected' && store.selectedIds.length === 0)"
+        @click="onExport()"
       >
-        {{ store.progress ? `导出中 ${store.progress.done}/${store.progress.total}` : '开始导出' }}
+        {{ store.progress ? `导出中 ${store.progress.done}/${store.progress.total}` : store.exportTarget === 'spritesheet' ? '设置并导出雪碧图' : '开始导出' }}
       </button>
     </section>
 
@@ -177,12 +193,17 @@ function onDeleteSelected(): void {
     <!-- 批量工具 -->
     <section class="section">
       <h2 class="section-title">批量工具</h2>
-      <button class="btn" :disabled="!store.source || store.busy" @click="autoDetectFrames()">
-        重新自动识别全部帧
+      <button
+        class="btn"
+        :disabled="store.selectedIds.length === 0 || store.busy"
+        @click="resizeOpen = true"
+      >
+        统一选中帧尺寸<span v-if="store.selectedIds.length">（{{ store.selectedIds.length }}）</span>
       </button>
-      <p class="hint faint">将清空当前帧列表，按透明边缘重新拆分</p>
     </section>
   </div>
+  <BatchResizeModal v-if="resizeOpen" @close="resizeOpen = false" />
+  <SpriteSheetModal v-if="spriteOpen" @close="spriteOpen = false" />
 </template>
 
 <style scoped>

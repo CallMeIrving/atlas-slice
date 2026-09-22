@@ -3,10 +3,11 @@ import type { AtlasFrame, FrameRect } from '@/types/atlas'
 import { parseAtlasFile, type AtlasFormat } from '@/core/parsers'
 import { detectSprites, MIN_FRAME_SIZE } from '@/core/trim'
 import { naturalCompare } from '@/core/sort'
-import { exportFrames, type ExportOptions, type ExportProgress } from '@/core/export'
+import { exportFrames, exportSpriteSheet, type ExportOptions, type ExportProgress, type SpriteSheetOptions } from '@/core/export'
 import type { CropMode } from '@/core/crop'
 
 export type ViewMode = 'view' | 'box'
+export type ExportTarget = 'all' | 'selected' | 'spritesheet'
 
 export interface Preset {
   name: string
@@ -23,6 +24,7 @@ interface PersistedExport {
   folder: string
   withMetaJson: boolean
   withMetaPlist: boolean
+  exportTarget?: ExportTarget
 }
 
 const PRESETS_KEY = 'atlas-slice:presets'
@@ -44,6 +46,7 @@ interface State {
   frames: AtlasFrame[]
   metaFormat: AtlasFormat | null
   selectedId: string | null
+  selectedIds: string[]
   // 导出设置
   mode: CropMode
   padding: number
@@ -53,6 +56,7 @@ interface State {
   withMetaJson: boolean
   /** 导出时附带元数据 plist */
   withMetaPlist: boolean
+  exportTarget: ExportTarget
   presets: Preset[]
   // 画布交互
   viewMode: ViewMode
@@ -79,12 +83,14 @@ export const store = reactive<State>({
   frames: [],
   metaFormat: null,
   selectedId: null,
+  selectedIds: [],
   mode: last?.mode ?? 'content',
   padding: last?.padding ?? 0,
   pattern: last?.pattern ?? '{name}',
   folder: last?.folder ?? '',
   withMetaJson: last?.withMetaJson ?? true,
   withMetaPlist: last?.withMetaPlist ?? false,
+  exportTarget: last?.exportTarget ?? 'all',
   presets: loadJSON<Preset[]>(PRESETS_KEY) ?? [],
   viewMode: 'view',
   zoom: 1,
@@ -182,6 +188,7 @@ export async function loadImage(file: File): Promise<void> {
       clearFrames()
       autoDetectFrames()
     }
+    store.selectedIds = []
     fitView()
   } catch (e) {
     store.error = e instanceof Error ? e.message : '图片解析失败'
@@ -225,12 +232,14 @@ export async function loadMetaFile(file: File): Promise<void> {
       store.frames = parsed.frames
       store.metaFormat = fmt
       store.selectedId = parsed.frames[0]?.id ?? null
+      store.selectedIds = []
       clearCropCache()
       setNotice(`已解析 ${parsed.frames.length} 帧（${fmt}）`)
     } else {
       store.metaFormat = fmt
       store.frames = parsed.frames
       store.selectedId = parsed.frames[0]?.id ?? null
+      store.selectedIds = []
     }
   } catch (e) {
     store.error = e instanceof Error ? e.message : '元数据解析失败'
@@ -243,6 +252,7 @@ export async function loadMetaFile(file: File): Promise<void> {
 export function clearFrames(): void {
   store.frames = []
   store.selectedId = null
+  store.selectedIds = []
   store.orderIds = null
   store.draftBox = null
   store.metaFormat = null
@@ -269,6 +279,7 @@ export function autoDetectFrames(): void {
   store.frames = frames
   store.metaFormat = null
   store.selectedId = frames[0]?.id ?? null
+  store.selectedIds = []
   store.orderIds = null
   clearCropCache()
   setNotice(
@@ -309,6 +320,7 @@ export function addManualFrame(rect: FrameRect): void {
   const frame = makeManualFrame({ x, y, w: x2 - x, h: y2 - y })
   store.frames = [...store.frames, frame]
   store.selectedId = frame.id
+  store.selectedIds = []
   store.orderIds = null
   clearCropCache()
 }
@@ -316,8 +328,62 @@ export function addManualFrame(rect: FrameRect): void {
 export function deleteFrame(id: string): void {
   store.frames = store.frames.filter((f) => f.id !== id)
   if (store.selectedId === id) store.selectedId = store.frames[0]?.id ?? null
+  store.selectedIds = store.selectedIds.filter((selectedId) => selectedId !== id)
   store.orderIds = store.orderIds?.filter((oid) => oid !== id) ?? null
   clearCropCache()
+}
+
+export function toggleFrameSelection(id: string): void {
+  store.selectedIds = store.selectedIds.includes(id)
+    ? store.selectedIds.filter((selectedId) => selectedId !== id)
+    : [...store.selectedIds, id]
+}
+
+export function selectAllFrames(): void {
+  store.selectedIds = store.frames.map((frame) => frame.id)
+}
+
+export function clearFrameSelection(): void {
+  store.selectedIds = []
+}
+
+/** 将选中帧调整为统一的输出尺寸，保持每帧中心位置并限制在图集范围内。 */
+export function normalizeSelectedFrames(targetW: number, targetH: number): boolean {
+  const source = store.source
+  const ids = new Set(store.selectedIds)
+  if (!source || ids.size === 0) return false
+
+  const w = Math.round(targetW)
+  const h = Math.round(targetH)
+  if (w < MIN_FRAME_SIZE || h < MIN_FRAME_SIZE) return false
+
+  const selected = store.frames.filter((frame) => ids.has(frame.id))
+  const canFit = selected.every((frame) => {
+    const rawW = frame.rotated ? h : w
+    const rawH = frame.rotated ? w : h
+    return rawW <= source.width && rawH <= source.height
+  })
+  if (!canFit) return false
+
+  store.frames = store.frames.map((frame) => {
+    if (!ids.has(frame.id)) return frame
+    const rawW = frame.rotated ? h : w
+    const rawH = frame.rotated ? w : h
+    const centerX = frame.rect.x + frame.rect.w / 2
+    const centerY = frame.rect.y + frame.rect.h / 2
+    const x = Math.max(0, Math.min(source.width - rawW, Math.round(centerX - rawW / 2)))
+    const y = Math.max(0, Math.min(source.height - rawH, Math.round(centerY - rawH / 2)))
+    return {
+      ...frame,
+      rect: { x, y, w: rawW, h: rawH },
+      sourceSize: { w, h },
+      contentInFrame: { x: 0, y: 0, w, h },
+      contentInOriginal: { x: 0, y: 0, w, h },
+    }
+  })
+  clearCropCache()
+  setNotice(`已将 ${ids.size} 帧统一为 ${w}×${h}`)
+  return true
 }
 
 /** 微调选中帧矩形（键盘像素级调整），shift 为 10px 步进 */
@@ -387,6 +453,7 @@ export function persistExportSettings(): void {
         folder: store.folder,
         withMetaJson: store.withMetaJson,
         withMetaPlist: store.withMetaPlist,
+        exportTarget: store.exportTarget,
       } satisfies PersistedExport),
     )
   } catch {
@@ -394,17 +461,27 @@ export function persistExportSettings(): void {
   }
 }
 
-export async function runExport(): Promise<void> {
+export async function runExport(spriteOptions?: SpriteSheetOptions): Promise<void> {
   const source = store.source
-  if (!source || store.frames.length === 0) {
+  const frames =
+    store.exportTarget === 'selected' || (store.exportTarget === 'spritesheet' && spriteOptions?.scope === 'selected')
+      ? orderedFrames.value.filter((frame) => store.selectedIds.includes(frame.id))
+      : orderedFrames.value
+  if (!source || frames.length === 0) {
     store.error = '请先导入图集图片并载入帧'
     return
   }
   store.busy = true
-  store.progress = { done: 0, total: store.frames.length }
+  store.progress = { done: 0, total: frames.length }
   store.error = null
   persistExportSettings()
   try {
+    if (store.exportTarget === 'spritesheet') {
+      if (!spriteOptions) throw new Error('请先设置雪碧图布局')
+      await exportSpriteSheet(source, frames, spriteOptions)
+      setNotice(`已导出雪碧图（${frames.length} 帧）`)
+      return
+    }
     const opts: ExportOptions = {
       mode: store.mode,
       padding: store.padding,
@@ -413,9 +490,9 @@ export async function runExport(): Promise<void> {
       withMetaJson: store.withMetaJson,
       withMetaPlist: store.withMetaPlist,
     }
-    await exportFrames(source, store.frames, opts, (p) => (store.progress = p))
-    const zipped = store.frames.length > 1 || store.withMetaJson || store.withMetaPlist
-    setNotice(zipped ? `已导出 ${store.frames.length} 帧 ZIP` : '已导出 PNG')
+    await exportFrames(source, frames, opts, (p) => (store.progress = p))
+    const zipped = frames.length > 1 || store.withMetaJson || store.withMetaPlist
+    setNotice(zipped ? `已导出 ${frames.length} 帧 ZIP` : '已导出 PNG')
   } catch (e) {
     store.error = e instanceof Error ? e.message : '导出失败'
   } finally {

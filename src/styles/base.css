@@ -1,6 +1,7 @@
 /* ===== 基础布局与通用控件样式 ===== */
 
 .app {
+  min-width: 1440px;
   display: flex;
   flex-direction: column;
   height: 100%;

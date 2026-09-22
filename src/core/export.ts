@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import type { AtlasFrame } from '@/types/atlas'
 import { cropFrame, type CropMode } from './crop'
+import { layoutSpriteFrames, type SpriteSheetLayout } from './spritesheet'
 
 export interface ExportOptions {
   mode: CropMode
@@ -15,6 +16,21 @@ export interface ExportOptions {
   withMetaPlist: boolean
 }
 
+export interface SpriteSheetOptions {
+  scope: 'all' | 'selected'
+  layout: SpriteSheetLayout
+  mode: CropMode
+  padding: number
+  cellW: number
+  cellH: number
+  columns: number
+  gap: number
+  margin: number
+  filename: string
+  withMetaJson: boolean
+  withMetaPlist: boolean
+}
+
 /** 应用命名模板 */
 export function applyNaming(pattern: string, name: string, index: number): string {
   const base = name.replace(/\.[^.]+$/, '')
@@ -26,6 +42,10 @@ export function applyNaming(pattern: string, name: string, index: number): strin
 
 function ensurePng(name: string): string {
   return /\.png$/i.test(name) ? name : `${name}.png`
+}
+
+function baseName(name: string): string {
+  return name.replace(/\.[^.]+$/, '') || 'spritesheet'
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
@@ -171,4 +191,76 @@ export async function exportFrames(
   }
   const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
   downloadBlob(content, `${folder || 'atlas'}-export.zip`)
+}
+
+/** 将帧按固定网格排版为一张雪碧图，可选附带 JSON / plist 坐标元数据。 */
+export async function exportSpriteSheet(
+  source: HTMLCanvasElement,
+  frames: AtlasFrame[],
+  opts: SpriteSheetOptions,
+): Promise<void> {
+  if (frames.length === 0) throw new Error('没有可导出的帧')
+  const cellW = Math.round(opts.cellW)
+  const cellH = Math.round(opts.cellH)
+  if (cellW < 1 || cellH < 1) throw new Error('雪碧图单元格尺寸必须大于 0')
+
+  const layout = layoutSpriteFrames(frames, opts)
+  const canvas = document.createElement('canvas')
+  canvas.width = layout.width
+  canvas.height = layout.height
+  const ctx = canvas.getContext('2d')!
+  ctx.imageSmoothingEnabled = false
+  const meta: Record<string, FrameMeta> = {}
+
+  for (let i = 0; i < layout.placements.length; i++) {
+    const placement = layout.placements[i]
+    const frame = placement.frame
+    const sprite = cropFrame(source, frame, { mode: opts.mode, padding: opts.padding })
+    if (opts.layout === 'grid' && (sprite.width > placement.w || sprite.height > placement.h)) {
+      throw new Error(`帧「${frame.name}」超过单元格尺寸 ${cellW}×${cellH}`)
+    }
+    const x = placement.x
+    const y = placement.y
+    ctx.drawImage(sprite, x + Math.floor((placement.w - sprite.width) / 2), y + Math.floor((placement.h - sprite.height) / 2))
+    const name = ensurePng(applyNaming('{name}', frame.name, i))
+    meta[name] = {
+      frame: { x, y, w: placement.w, h: placement.h },
+      rotated: false,
+      trimmed: frame.trimmed,
+      spriteSourceSize: {
+        x: Math.floor((placement.w - sprite.width) / 2),
+        y: Math.floor((placement.h - sprite.height) / 2),
+        w: sprite.width,
+        h: sprite.height,
+      },
+      sourceSize: { w: placement.w, h: placement.h },
+      manual: frame.manual,
+    }
+  }
+
+  const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+  if (!png) throw new Error('雪碧图 PNG 生成失败')
+  const filename = baseName(opts.filename)
+  const pngName = `${filename}.png`
+  if (!opts.withMetaJson && !opts.withMetaPlist) {
+    downloadBlob(png, pngName)
+    return
+  }
+
+  const zip = new JSZip()
+  zip.file(pngName, png)
+  const atlasSize = { w: canvas.width, h: canvas.height }
+  if (opts.withMetaJson) {
+    zip.file(
+      `${filename}.json`,
+      JSON.stringify(
+        { frames: meta, meta: { app: 'atlas-slice', format: 'RGBA8888', size: atlasSize } },
+        null,
+        2,
+      ),
+    )
+  }
+  if (opts.withMetaPlist) zip.file(`${filename}.plist`, buildPlist(meta, atlasSize))
+  const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
+  downloadBlob(content, `${filename}.zip`)
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { store, loadImage, loadMetaFile, autoDetectFrames, runExport } from '@/store/atlas'
+import { store, loadImage, loadMetaFile, autoDetectFrames } from '@/store/atlas'
 
 const imgInput = ref<HTMLInputElement>()
 const metaInput = ref<HTMLInputElement>()
@@ -42,13 +42,6 @@ defineExpose({})
       <button class="btn" :disabled="store.busy" @click="metaInput?.click()">导入元数据</button>
       <button class="btn" :disabled="!store.source || store.busy" @click="autoDetectFrames()">
         自动识别
-      </button>
-      <button
-        class="btn btn-primary"
-        :disabled="!store.source || store.frames.length === 0 || store.busy"
-        @click="runExport()"
-      >
-        导出{{ store.frames.length ? `（${store.frames.length} 帧）` : '' }}
       </button>
     </div>
   </header>

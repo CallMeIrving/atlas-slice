@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { store, selectedFrame, deleteFrame, selectFrame, getCropCanvas, clearFrames } from '@/store/atlas'
+import {
+  store,
+  selectedFrame,
+  deleteFrame,
+  selectFrame,
+  getCropCanvas,
+  clearFrames,
+  toggleFrameSelection,
+  selectAllFrames,
+  clearFrameSelection,
+} from '@/store/atlas'
 import { naturalCompare } from '@/core/sort'
 
 const list = computed(() => [...store.frames].sort((a, b) => naturalCompare(a.name, b.name)))
@@ -27,6 +37,14 @@ const total = computed(() =>
       <span class="head-right">
         <span class="mono faint">{{ store.frames.length }} 帧</span>
         <button
+          v-if="store.frames.length"
+          class="clear-btn"
+          :title="store.selectedIds.length === store.frames.length ? '取消全选' : '全选帧'"
+          @click="store.selectedIds.length === store.frames.length ? clearFrameSelection() : selectAllFrames()"
+        >
+          {{ store.selectedIds.length === store.frames.length ? '取消全选' : '全选' }}
+        </button>
+        <button
           class="clear-btn"
           title="清空全部帧"
           :disabled="store.frames.length === 0"
@@ -48,6 +66,14 @@ const total = computed(() =>
         :class="{ active: frame.id === selectedFrame?.id }"
         @click="selectFrame(frame.id)"
       >
+        <input
+          class="frame-check"
+          type="checkbox"
+          :checked="store.selectedIds.includes(frame.id)"
+          :aria-label="`选择 ${frame.name}`"
+          @click.stop
+          @change="toggleFrameSelection(frame.id)"
+        />
         <img class="thumb" :src="thumb(frame.id)" alt="" draggable="false" />
         <div class="item-body">
           <p class="item-name" :title="frame.name">{{ frame.name }}</p>
@@ -156,6 +182,11 @@ const total = computed(() =>
   background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 10px 10px;
   border: 1px solid var(--border);
   border-radius: 3px;
+}
+
+.frame-check {
+  flex: none;
+  accent-color: var(--accent);
 }
 
 .item-body {
