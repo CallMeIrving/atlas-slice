@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { workspace, type VideoFrame, persistMediaSettings } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
+import { solidColorKey } from '@/core/color-key'
 
 const input = ref<HTMLInputElement>()
 const video = ref<HTMLVideoElement>()
@@ -44,8 +45,9 @@ function captureFrame(element: HTMLVideoElement, timestamp: number): VideoFrame 
     const ctx = canvas.getContext('2d')!; ctx.imageSmoothingEnabled = false; ctx.save(); ctx.translate(canvas.width / 2, canvas.height / 2); ctx.rotate(workspace.video.rotation * Math.PI / 180); ctx.scale(workspace.video.flipX ? -1 : 1, 1)
     const scale = Math.min(baseW / sourceW, baseH / sourceH); ctx.drawImage(element, -sourceW * scale / 2, -sourceH * scale / 2, sourceW * scale, sourceH * scale); ctx.restore()
     if (workspace.video.batchMatte) {
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height); const r = data.data[0]; const g = data.data[1]; const b = data.data[2]
-      for (let i = 0; i < data.data.length; i += 4) if (Math.abs(data.data[i] - r) + Math.abs(data.data[i + 1] - g) + Math.abs(data.data[i + 2] - b) < workspace.video.matteTolerance * 3) data.data[i + 3] = 0
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      // 纯色背景抠图：自动采样边缘主色，适合视频帧批量抠图
+      solidColorKey(data, workspace.video.matteTolerance)
       ctx.putImageData(data, 0, 0)
     }
     return { id: `${timestamp}-${Math.random()}`, url: canvas.toDataURL('image/png'), timestamp, selected: true }
