@@ -69,8 +69,8 @@ export const workspace = reactive({
   matte: {
     fileName: '', sourceUrl: '', resultUrl: '', mode: 'auto', background: 'checker',
     tolerance: 24, cropTransparent: true, brushSize: 24, sampledColor: '', status: 'empty',
-    aiMaxSide: 0, imglyModel: 'isnet_fp16', imglyPublicPath: '', aiDevice: 'cpu', aiDtype: 'fp32', aiModelHost: 'huggingface.co',
-    birefnetModelId: 'onnx-community/BiRefNet_lite', rmbgModelId: 'briaai/RMBG-1.4', samModelId: 'Xenova/sam-vit-base',
+    aiMaxSide: 0, imglyModel: 'isnet_fp16', imglyPublicPath: '', aiDevice: 'cpu', aiDtype: 'fp16', aiModelHost: 'huggingface.co',
+    birefnetModelId: 'onnx-community/BiRefNet_lite-ONNX', rmbgModelId: 'briaai/RMBG-1.4', samModelId: 'Xenova/sam-vit-base',
     samBoxes: [], samPoints: [], samTool: 'box', aiStatus: '', aiProgress: -1,
   } as MatteState,
   video: {

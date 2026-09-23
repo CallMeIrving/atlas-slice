@@ -3,7 +3,7 @@
  *
  * 支持的引擎：
  * - imgly     : @imgly/background-removal（ISNet，MIT 可商用）
- * - birefnet  : transformers.js + BiRefNet_lite（MIT 可商用，质量最高）
+ * - birefnet  : transformers.js + BiRefNet_lite-ONNX（MIT 可商用，质量高）
  * - rmbg      : transformers.js + BRIA RMBG-1.4（效果顶尖，⚠️不可商用）
  * - sam       : transformers.js + SAM（框选/提示点分割，可多区域一起抠图）
  *
@@ -99,12 +99,19 @@ export interface EngineMeta {
 /** 引擎元信息，供界面"模型状态"区展示 */
 export const AI_ENGINES: EngineMeta[] = [
   { key: 'imgly', label: 'ISNet（imgly）', license: '免费可用', size: '约 30-170MB', description: '速度快，通用背景分离' },
-  { key: 'birefnet', label: 'BiRefNet', license: 'MIT 可商用', size: '约 85MB', description: '质量最高，细节保留好' },
-  { key: 'rmbg', label: 'RMBG-1.4（BRIA）', license: '⚠️不可商用', size: '约 44MB', description: '效果顶尖，注意许可限制' },
-  { key: 'sam', label: 'SAM 框选分割', license: 'Apache-2.0', size: '约 150MB', description: '框选/点击区域精确分割' },
+  { key: 'birefnet', label: 'BiRefNet', license: 'MIT 可商用', size: '约 115MB（FP16）', description: '高质量分割，细节保留好' },
+  { key: 'rmbg', label: 'RMBG-1.4（BRIA）', license: '⚠️不可商用', size: '约 44-176MB（Q8-FP32）', description: '效果顶尖，注意许可限制' },
+  { key: 'sam', label: 'SAM 框选分割', license: 'Apache-2.0', size: '约 110MB（Q8）', description: '框选/点击区域精确分割' },
 ]
 
 type CanvasSource = HTMLImageElement | HTMLCanvasElement
+
+type TransformerPipeline = (input: unknown) => Promise<unknown>
+
+const transformerPipelineCache = new Map<string, TransformerPipeline>()
+const transformerPipelineLoading = new Map<string, Promise<TransformerPipeline>>()
+const samRuntimeCache = new Map<string, { processor: SamProcessorLike; model: SamModelLike }>()
+const samRuntimeLoading = new Map<string, Promise<{ processor: SamProcessorLike; model: SamModelLike }>>()
 
 /** transformers.js Tensor 的轻量视图 */
 interface AnyTensor {
@@ -207,6 +214,86 @@ function transformersProgress(onProgress?: (progress: MatteProgress) => void) {
   }
 }
 
+function transformerCacheKey(options: Pick<TransformersOptions, 'modelId' | 'dtype' | 'device' | 'modelHost'>): string {
+  return `${options.modelId}|${options.dtype}|${options.device}|${options.modelHost}`
+}
+
+async function getTransformerPipeline(options: TransformersOptions): Promise<TransformerPipeline> {
+  const key = transformerCacheKey(options)
+  const cached = transformerPipelineCache.get(key)
+  if (cached) return cached
+  const loading = transformerPipelineLoading.get(key)
+  if (loading) return loading
+  const task = (async () => {
+    const transformers = await import('@huggingface/transformers')
+    transformers.env.allowLocalModels = true
+    transformers.env.remoteHost = modelHostUrl(options.modelHost)
+    const progress = transformersProgress(options.onProgress)
+    const pipelineOptions: Parameters<typeof transformers.pipeline>[2] = {
+      dtype: options.dtype,
+      device: mapDevice(options.device),
+      progress_callback: progress,
+    }
+    if (options.modelId.toLowerCase() === 'briaai/rmbg-1.4') {
+      const config = await transformers.AutoConfig.from_pretrained(options.modelId, { progress_callback: progress })
+      if (config.model_type === 'SegformerForSemanticSegmentation') config.model_type = 'segformer'
+      pipelineOptions.config = config
+    }
+    const pipeline = (await transformers.pipeline('image-segmentation', options.modelId, pipelineOptions)) as unknown as TransformerPipeline
+    transformerPipelineCache.set(key, pipeline)
+    return pipeline
+  })()
+  transformerPipelineLoading.set(key, task)
+  try { return await task } finally { transformerPipelineLoading.delete(key) }
+}
+
+function samCacheKey(options: Pick<SamOptions, 'modelId' | 'device' | 'modelHost'>): string {
+  return `${options.modelId}|${options.device}|${options.modelHost}`
+}
+
+async function getSamRuntime(options: SamOptions): Promise<{ processor: SamProcessorLike; model: SamModelLike }> {
+  const key = samCacheKey(options)
+  const cached = samRuntimeCache.get(key)
+  if (cached) return cached
+  const loading = samRuntimeLoading.get(key)
+  if (loading) return loading
+  const task = (async () => {
+    const transformers = await import('@huggingface/transformers')
+    transformers.env.allowLocalModels = true
+    transformers.env.remoteHost = modelHostUrl(options.modelHost)
+    const progress = transformersProgress(options.onProgress)
+    const processor = (await transformers.AutoProcessor.from_pretrained(options.modelId, { progress_callback: progress })) as unknown as SamProcessorLike
+    const model = (await transformers.SamModel.from_pretrained(options.modelId, { device: mapDevice(options.device), dtype: 'q8', progress_callback: progress })) as unknown as SamModelLike
+    const runtime = { processor, model }
+    samRuntimeCache.set(key, runtime)
+    return runtime
+  })()
+  samRuntimeLoading.set(key, task)
+  try { return await task } finally { samRuntimeLoading.delete(key) }
+}
+
+export type PreloadOptions =
+  | ({ engine: 'imgly' } & ImglyOptions)
+  | ({ engine: 'birefnet' | 'rmbg' } & TransformersOptions)
+  | ({ engine: 'sam' } & SamOptions)
+
+/** 下载并初始化指定模型。重复调用会复用已初始化的实例。 */
+export async function preloadMattingModel(options: PreloadOptions): Promise<void> {
+  if (options.engine === 'imgly') {
+    // IMG.LY exposes loading through removeBackground itself; a 1px warmup causes
+    // its model files to be downloaded and kept in its internal cache.
+    const canvas = document.createElement('canvas')
+    canvas.width = 1; canvas.height = 1
+    await removeWithImgly(canvas, { ...options, maxSide: 1 })
+    return
+  }
+  if (options.engine === 'sam') {
+    await getSamRuntime(options)
+    return
+  }
+  await getTransformerPipeline(options)
+}
+
 /**
  * imgly / @imgly/background-removal：ISNet 模型
  */
@@ -214,7 +301,10 @@ export async function removeWithImgly(source: CanvasSource, options: ImglyOption
   const canvas = sourceToCanvas(source, options.maxSide)
   options.onProgress?.({ phase: 'loading', text: '加载 ISNet 模型…' })
   const { removeBackground } = await import('@imgly/background-removal')
-  const blob = await removeBackground(canvas, {
+  // IMG.LY 1.7 decodes Blob/URL inputs into its internal HWC tensor; a canvas
+  // is returned unchanged by its decoder and later fails when reading shape.
+  const inputBlob = await canvasToBlob(canvas)
+  const blob = await removeBackground(inputBlob, {
     model: options.model,
     device: options.device,
     output: { format: 'image/png' },
@@ -231,23 +321,45 @@ export async function removeWithImgly(source: CanvasSource, options: ImglyOption
 }
 
 /**
- * transformers.js 背景移除（BiRefNet / RMBG）
- * 两者共用 pipeline('background-removal', ...)，返回已带 alpha 的 RGBA RawImage。
+ * transformers.js 显著性分割（BiRefNet / RMBG）。
+ * 这两个模型输出分割蒙版，需通过 image-segmentation 管线取 mask，再与原图合成 alpha。
  */
 export async function removeWithTransformers(source: CanvasSource, options: TransformersOptions): Promise<AiMattingResult> {
   const canvas = sourceToCanvas(source, options.maxSide)
-  options.onProgress?.({ phase: 'loading', text: `加载 ${options.modelId} 模型…` })
-  const transformers = await import('@huggingface/transformers')
-  transformers.env.allowLocalModels = false
-  transformers.env.remoteHost = modelHostUrl(options.modelHost)
-  const pipeline = await transformers.pipeline('background-removal', options.modelId, {
-    dtype: options.dtype,
-    device: mapDevice(options.device),
-    progress_callback: transformersProgress(options.onProgress),
-  })
+  options.onProgress?.({ phase: 'loading', text: `检查 ${options.modelId} 模型…` })
+  const pipeline = await getTransformerPipeline(options)
   options.onProgress?.({ phase: 'processing', text: 'AI 推理中…' })
-  const output = (await pipeline(canvas)) as { toBlob(type: string): Promise<Blob> }
-  const blob = await output.toBlob('image/png')
+  const outputs = (await pipeline(canvas)) as Array<{ mask: { data: Uint8Array | Uint8ClampedArray; width: number; height: number; channels: number } }>
+  const output = outputs[0]
+  if (!output?.mask?.data?.length) throw new Error(`${options.modelId} 没有返回有效的分割蒙版`)
+
+  const { data, width, height, channels } = output.mask
+  const mask = new Uint8ClampedArray(canvas.width * canvas.height)
+  // The image-segmentation pipeline returns the mask resized to the input image.
+  // Handle a possible dimension mismatch with canvas interpolation for robustness.
+  const maskCanvas = document.createElement('canvas')
+  maskCanvas.width = width
+  maskCanvas.height = height
+  const maskCtx = maskCanvas.getContext('2d')!
+  const rgba = new Uint8ClampedArray(width * height * 4)
+  for (let i = 0; i < width * height; i += 1) {
+    const value = data[i * channels]
+    const offset = i * 4
+    rgba[offset] = value
+    rgba[offset + 1] = value
+    rgba[offset + 2] = value
+    rgba[offset + 3] = 255
+  }
+  maskCtx.putImageData(new ImageData(rgba, width, height), 0, 0)
+  const scaledMask = document.createElement('canvas')
+  scaledMask.width = canvas.width
+  scaledMask.height = canvas.height
+  const scaledCtx = scaledMask.getContext('2d')!
+  scaledCtx.drawImage(maskCanvas, 0, 0, canvas.width, canvas.height)
+  const scaledData = scaledCtx.getImageData(0, 0, canvas.width, canvas.height).data
+  for (let i = 0; i < mask.length; i += 1) mask[i] = scaledData[i * 4]
+
+  const blob = await canvasToBlob(composeAlphaCanvas(canvas, mask))
   return { blob }
 }
 
@@ -257,7 +369,13 @@ export async function removeWithTransformers(source: CanvasSource, options: Tran
  * 按 iou 分数选最优 mask，正区域取并集(union)，再减去背景点区域，得到最终透明图。
  */
 export async function segmentWithSam(source: CanvasSource, options: SamOptions): Promise<AiMattingResult> {
-  const canvas = sourceToCanvas(source, options.maxSide)
+  const sourceWidth = source instanceof HTMLImageElement ? source.naturalWidth : source.width
+  const sourceHeight = source instanceof HTMLImageElement ? source.naturalHeight : source.height
+  // SAM restores candidate masks to its input size. Cap that intermediate size so
+  // high-resolution inputs and multiple prompts cannot allocate several full-size masks.
+  const configuredMaxSide = options.maxSide ?? 0
+  const requestedMaxSide = configuredMaxSide > 0 ? configuredMaxSide : 1024
+  const canvas = sourceToCanvas(source, Math.min(requestedMaxSide, 1024))
   const { boxes, points, onProgress } = options
   if (boxes.length === 0 && points.length === 0) {
     throw new Error('请先框选区域或添加提示点')
@@ -265,26 +383,29 @@ export async function segmentWithSam(source: CanvasSource, options: SamOptions):
 
   onProgress?.({ phase: 'loading', text: `加载 ${options.modelId} 模型…` })
   const transformers = await import('@huggingface/transformers')
-  transformers.env.allowLocalModels = false
-  transformers.env.remoteHost = modelHostUrl(options.modelHost)
-  const progress = transformersProgress(onProgress)
-  const processor = (await transformers.AutoProcessor.from_pretrained(options.modelId, { progress_callback: progress })) as unknown as SamProcessorLike
-  const model = (await transformers.SamModel.from_pretrained(options.modelId, { device: mapDevice(options.device), progress_callback: progress })) as unknown as SamModelLike
+  const { processor, model } = await getSamRuntime(options)
+  const rawImage = transformers.RawImage.fromCanvas(canvas)
 
   onProgress?.({ phase: 'processing', text: 'AI 推理中…' })
 
+  // 标注始终记录在原图像素空间。模型输入可能经 maxSide 缩放，提示点也必须使用同一图像空间。
+  const scaleX = canvas.width / sourceWidth
+  const scaleY = canvas.height / sourceHeight
+  const modelBoxes = boxes.map((box) => ({ x1: box.x1 * scaleX, y1: box.y1 * scaleY, x2: box.x2 * scaleX, y2: box.y2 * scaleY }))
+  const modelPoints = points.map((point) => ({ x: point.x * scaleX, y: point.y * scaleY, label: point.label }))
+
   // 先用任一个提示点预处理一次，拿到图像特征与尺寸信息
-  const firstPrompt = boxes.length > 0 ? boxes[0] : points[0]
+  const firstPrompt = modelBoxes.length > 0 ? modelBoxes[0] : modelPoints[0]
   const firstPoints = 'x1' in firstPrompt ? [[firstPrompt.x1, firstPrompt.y1], [firstPrompt.x2, firstPrompt.y2]] : [[firstPrompt.x, firstPrompt.y]]
   const firstLabels = 'x1' in firstPrompt ? [2, 3] : [firstPrompt.label]
-  const preprocessed = await processor(canvas, { input_points: [firstPoints], input_labels: [firstLabels] })
+  const preprocessed = await processor(rawImage, { input_points: [firstPoints], input_labels: [firstLabels] })
   const { image_embeddings, image_positional_embeddings } = await model.get_image_embeddings({ pixel_values: preprocessed.pixel_values })
   const originalSizes = preprocessed.original_sizes
   const reshapedInputSizes = preprocessed.reshaped_input_sizes
 
   /** 对单个 prompt 推理，返回 H×W 的软蒙版（0-1） */
   async function runPrompt(promptPoints: number[][], promptLabels: number[]): Promise<{ mask: Float32Array; width: number; height: number }> {
-    const inputs = await processor(canvas, { input_points: [promptPoints], input_labels: [promptLabels] })
+    const inputs = await processor(rawImage, { input_points: [promptPoints], input_labels: [promptLabels] })
     const outputs = await model({ image_embeddings, image_positional_embeddings, input_points: inputs.input_points, input_labels: inputs.input_labels })
     // iou_scores: [1, 1, 3]（num_multimask_outputs = 3）
     const iou = outputs.iou_scores.data
@@ -317,10 +438,10 @@ export async function segmentWithSam(source: CanvasSource, options: SamOptions):
     for (let p = 0; p < stride; p += 1) if (mask[p] > target[p]) target[p] = mask[p]
   }
 
-  for (const box of boxes) {
+  for (const box of modelBoxes) {
     addMask((await runPrompt([[box.x1, box.y1], [box.x2, box.y2]], [2, 3])).mask, true)
   }
-  for (const point of points) {
+  for (const point of modelPoints) {
     addMask((await runPrompt([[point.x, point.y]], [point.label])).mask, point.label === 1)
   }
 

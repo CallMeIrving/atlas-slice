@@ -53,11 +53,47 @@
 环境要求：Node.js 18+。
 
 ```bash
-npm install      # 安装依赖
-npm run dev      # 启动开发服务器（默认 http://localhost:5173）
-npm run build    # 类型检查 + 生产构建，产物在 dist/
-npm run preview  # 本地预览生产构建
+pnpm install      # 安装依赖
+pnpm run dev      # 启动开发服务器（默认 http://localhost:5173）
+pnpm run build    # 类型检查 + 生产构建，产物在 dist/
+pnpm run preview  # 本地预览生产构建
 ```
+
+## 抠图模型下载
+
+抠图模块支持颜色抠图、ISNet、BiRefNet、RMBG-1.4 和 SAM。颜色抠图不需要下载模型；AI 模型首次预加载或首次使用时会下载并缓存到浏览器。模型加载完成后，界面会显示「已加载」，失败时会显示具体错误。
+
+### 模型地址
+
+| 模型 | 项目中的模型 ID / 选项 | 官方下载地址 | 国内镜像 |
+|---|---|---|---|
+| ISNet（imgly） | `isnet_fp16`、`isnet`、`isnet_quint8` | [IMG.LY 模型资源](https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/) | 无 HuggingFace 镜像 |
+| BiRefNet | `onnx-community/BiRefNet_lite-ONNX` | [HuggingFace 模型仓库](https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/tree/main) | [hf-mirror 镜像](https://hf-mirror.com/onnx-community/BiRefNet_lite-ONNX) |
+| RMBG-1.4 | `briaai/RMBG-1.4` | [HuggingFace 模型仓库](https://huggingface.co/briaai/RMBG-1.4/tree/main) | [hf-mirror 镜像](https://hf-mirror.com/briaai/RMBG-1.4) |
+| SAM | `Xenova/sam-vit-base` | [HuggingFace 模型仓库](https://huggingface.co/Xenova/sam-vit-base/tree/main) | [hf-mirror 镜像](https://hf-mirror.com/Xenova/sam-vit-base) |
+
+### 网络和代理说明
+
+- BiRefNet、RMBG-1.4、SAM 托管在 HuggingFace。中国大陆网络访问 HuggingFace 可能不稳定，遇到下载失败时可在界面把「模型源」切换为 `hf-mirror.com`，或使用代理网络。
+- `hf-mirror.com` 是第三方镜像，不是 HuggingFace 官方站点。用于生产部署时，建议下载后校验文件并固定版本。
+- ISNet 默认从 IMG.LY 的 `staticimgly.com` CDN 获取模型和 WASM 文件，是否需要代理取决于当前网络。也可以通过「资源地址（publicPath）」改成自己的静态文件地址。
+- 模型体积较大，SAM 仓库约 1.34GB，BiRefNet 仓库约 339MB，RMBG-1.4 仓库约 842MB；实际下载量会根据模型精度和 Transformers.js 所需文件变化。
+
+### 离线部署
+
+可以把模型提前放到应用的 `public/models/` 目录。目录名要和模型 ID 保持一致，例如：
+
+```text
+public/models/
+├── onnx-community/BiRefNet_lite-ONNX/
+├── briaai/RMBG-1.4/
+├── Xenova/sam-vit-base/
+└── imgly/1.7.0/dist/
+```
+
+启动应用后，在「抠图」页面选择对应模型，点击「预加载当前模型」。应用会优先复用浏览器缓存或本地模型目录；模型 ID、目录结构或文件不完整时会显示「加载失败」。
+
+RMBG-1.4 还需要遵守 [BRIA 模型许可证](https://huggingface.co/briaai/RMBG-1.4/tree/main) 的使用限制；BiRefNet 仓库标注 MIT，SAM 仓库标注 Apache-2.0。
 
 ## 使用流程
 
