@@ -255,18 +255,10 @@ async function apply(): Promise<void> {
 </template>
 
 <style scoped>
-.modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: var(--sp-6); background: rgba(8, 10, 14, 0.7); }
-.modal { width: min(620px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow-y: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-m); box-shadow: var(--shadow-pop); }
-.modal-head, .modal-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); }
-.modal-head { border-bottom: 1px solid var(--border); }
-.modal-head h2 { margin: 0; font-size: var(--fs-head); }
-.modal-head p { margin: 2px 0 0; font-size: var(--fs-caption); }
-.modal-close { color: var(--text-muted); font-size: 20px; }
-.modal-body { padding: var(--sp-5); }
+/* 雪碧图弹窗需要在共用外壳基础上加宽，选择器提高一级特异性以稳定覆盖 base.css */
+section.modal { width: min(620px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow-y: auto; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3) var(--sp-4); }
 .field { min-width: 0; }
-.field-row { display: flex; align-items: center; gap: var(--sp-2); }
-.field-row .input { flex: 1; width: auto; }
 .preview-panel { margin-top: var(--sp-4); }
 .preview-label { display: flex; justify-content: space-between; margin-bottom: var(--sp-2); font-size: var(--fs-caption); color: var(--text-muted); }
 .preview-canvas-wrap { position: relative; height: 220px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
@@ -276,5 +268,4 @@ async function apply(): Promise<void> {
 .filename-field { margin-bottom: var(--sp-3); }
 .check-group { display: flex; gap: var(--sp-4); }
 .error-hint { color: var(--danger); }
-.modal-foot { justify-content: flex-end; border-top: 1px solid var(--border); }
 </style>

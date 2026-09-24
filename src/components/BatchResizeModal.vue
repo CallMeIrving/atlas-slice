@@ -59,69 +59,9 @@ function apply(): void {
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: var(--sp-6);
-  background: rgba(8, 10, 14, 0.7);
-}
-
-.modal {
-  width: min(460px, calc(100vw - 48px));
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-m);
-  box-shadow: var(--shadow-pop);
-}
-
-.modal-head,
-.modal-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-5);
-}
-
-.modal-head {
-  border-bottom: 1px solid var(--border);
-}
-
-.modal-head h2 {
-  margin: 0;
-  font-size: var(--fs-head);
-}
-
-.modal-head p {
-  margin: 2px 0 0;
-  font-size: var(--fs-caption);
-}
-
-.modal-close {
-  color: var(--text-muted);
-  font-size: 20px;
-}
-
-.modal-body {
-  padding: var(--sp-5);
-}
-
-.modal-help {
-  margin: 0 0 var(--sp-4);
-  color: var(--text-muted);
-}
-
 .size-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--sp-4);
-}
-
-.modal-foot {
-  justify-content: flex-end;
-  border-top: 1px solid var(--border);
 }
 </style>
