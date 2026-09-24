@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { persistMediaSettings, workspace, type MatteMode } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
 import { applyColorKey, solidColorKey } from '@/core/color-key'
-import { removeWithImgly, removeWithTransformers, segmentWithSam, preloadMattingModel, AI_ENGINES, type MatteProgress } from '@/core/ai-matting'
+import { removeWithImgly, removeWithTransformers, segmentWithSam, preloadMattingModel, AI_ENGINES, describeMattingError, type MatteProgress } from '@/core/ai-matting'
 
 const input = ref<HTMLInputElement>()
 const image = ref<HTMLImageElement>()
@@ -382,10 +382,8 @@ async function runMatte(): Promise<void> {
   } catch (error) {
     console.error('抠图处理失败', error)
     workspace.matte.status = 'error'
-    const message = error instanceof Error ? error.message : '处理失败'
-    workspace.matte.aiStatus = /bad_alloc|allocation failed/i.test(message)
-      ? '浏览器可用内存不足，建议改用 ISNet 或关闭其他占用较大的页面后重试'
-      : message
+    const message = describeMattingError(error, workspace.matte.mode)
+    workspace.matte.aiStatus = message
   } finally {
     workspace.matte.aiProgress = -1
   }

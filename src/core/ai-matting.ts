@@ -274,6 +274,18 @@ function transformerCacheKey(options: Pick<TransformersOptions, 'modelId' | 'dty
   return `${options.modelId}|${options.dtype}|${options.device}|${options.modelHost}`
 }
 
+/**
+ * 同一模型只保留一个已初始化的 pipeline。
+ * 切换精度/设备会生成新的缓存 key，若不驱逐旧实例，ONNX Runtime 会话会一直堆在内存里，
+ * 多次切换后极易触发 wasm 堆分配失败（std::bad_alloc）。
+ */
+function evictStalePipelines(activeKey: string, modelId: string): void {
+  const prefix = `${modelId}|`
+  for (const key of [...transformerPipelineCache.keys()]) {
+    if (key !== activeKey && key.startsWith(prefix)) transformerPipelineCache.delete(key)
+  }
+}
+
 function localModelPathFor(modelId: string): string | undefined {
   const normalizedId = modelId.toLowerCase()
   if (normalizedId === 'onnx-community/birefnet_lite-onnx') return '/models/onnx-community/BiRefNet_lite-ONNX/'
@@ -315,6 +327,7 @@ async function getTransformerPipeline(options: TransformersOptions): Promise<Tra
       }
       const pipeline = (await transformers.pipeline('background-removal', pretrainedModel, pipelineOptions)) as unknown as TransformerPipeline
       transformerPipelineCache.set(key, pipeline)
+      evictStalePipelines(key, options.modelId)
       return pipeline
     } finally {
       transformers.env.allowRemoteModels = allowRemoteModels
@@ -399,6 +412,27 @@ export async function preloadMattingModel(options: PreloadOptions): Promise<void
 }
 
 /**
+ * 把 AI 引擎抛出的原始错误翻译成可执行的中文提示。
+ * 典型场景：onnxruntime-web 的 wasm 堆分配失败会抛出
+ * `failed to call OrtRun(). ERROR_CODE: 6, ERROR_MESSAGE: std::bad_alloc`，
+ * 这句英文对用户没有指导意义，必须换成「怎么办」。
+ * @param error 捕获到的异常
+ * @param engine 触发抠图的引擎标识，用于给出针对性的替代方案
+ */
+export function describeMattingError(error: unknown, engine?: string): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  if (/bad_alloc|allocation failed|out of memory|OOM/i.test(raw)) {
+    return engine === 'imgly'
+      ? '浏览器可用内存不足：请关闭其他占用较大的页面后重试，或降低处理分辨率'
+      : '浏览器可用内存不足。BiRefNet / RMBG 推理占用很高（CPU 模式尤甚），建议改用 ISNet（imgly）、把推理设备切到 GPU（WebGPU），或关闭其他占用较大的页面后重试'
+  }
+  if (/Can't load|Could not locate|no such file|not found|404|Failed to fetch|Unauthorized|local_files_only/i.test(raw)) {
+    return '本地缺少该精度的模型权重文件，请改用 FP16，或检查 public/models 下的模型文件是否完整'
+  }
+  return raw || '抠图处理失败'
+}
+
+/**
  * imgly / @imgly/background-removal：ISNet 模型
  */
 export async function removeWithImgly(source: CanvasSource, options: ImglyOptions): Promise<AiMattingResult> {
@@ -430,7 +464,9 @@ export async function removeWithImgly(source: CanvasSource, options: ImglyOption
  */
 export async function removeWithTransformers(source: CanvasSource, options: TransformersOptions): Promise<AiMattingResult> {
   const canvas = sourceToCanvas(source, options.maxSide)
-  options.onProgress?.({ phase: 'loading', text: `检查 ${options.modelId} 模型…` })
+  // 模型实例按「模型 + 精度 + 设备 + 托管源」缓存，命中缓存时不会重新下载权重
+  const reused = transformerPipelineCache.has(transformerCacheKey(options))
+  options.onProgress?.({ phase: 'loading', text: reused ? '复用已加载的模型…' : `检查 ${options.modelId} 模型…` })
   const pipeline = await getTransformerPipeline(options)
   options.onProgress?.({ phase: 'processing', text: 'AI 推理中…' })
   const output = await pipeline(canvas)
