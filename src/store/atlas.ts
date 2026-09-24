@@ -120,6 +120,10 @@ export const selectedFrame = computed(() =>
 )
 
 const cropCache = new Map<string, HTMLCanvasElement>()
+/** 帧缩略图 dataURL 缓存：与 cropCache 同生命周期，仅在 clearCropCache() 中统一失效 */
+const cropThumbCache = new Map<string, string>()
+/** 缩略图长边像素上限：列表与预览条的展示尺寸远小于此值，进一步缩小可减少编码耗时 */
+const THUMB_MAX_EDGE = 48
 let frameSeq = 0
 
 export function getCropCanvas(frame: AtlasFrame): HTMLCanvasElement {
@@ -151,8 +155,37 @@ export function getCropCanvas(frame: AtlasFrame): HTMLCanvasElement {
   return canvas
 }
 
+/**
+ * 获取帧的缩略图 dataURL：把裁剪结果等比缩放到长边 ≤ THUMB_MAX_EDGE 后编码。
+ * 结果按帧 id 缓存，避免每次渲染都做整帧 PNG 编码；缓存随 clearCropCache() 失效。
+ */
+export function getCropThumb(frame: AtlasFrame): string {
+  const cached = cropThumbCache.get(frame.id)
+  if (cached !== undefined) return cached
+  try {
+    const src = getCropCanvas(frame)
+    if (src.width < 1 || src.height < 1) return ''
+    const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(src.width, src.height))
+    const w = Math.max(1, Math.round(src.width * scale))
+    const h = Math.max(1, Math.round(src.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')!
+    // 缩略图允许插值，缩小时视觉更平滑
+    ctx.imageSmoothingEnabled = true
+    ctx.drawImage(src, 0, 0, w, h)
+    const url = canvas.toDataURL()
+    cropThumbCache.set(frame.id, url)
+    return url
+  } catch {
+    return ''
+  }
+}
+
 function clearCropCache(): void {
   cropCache.clear()
+  cropThumbCache.clear()
 }
 
 function setNotice(msg: string | null): void {

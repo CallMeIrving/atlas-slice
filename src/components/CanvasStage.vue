@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, watchEffect, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   store,
   addManualFrame,
@@ -91,7 +91,7 @@ function applyResize(start: FrameRect, handle: HandleName, img: { x: number; y: 
   const src = store.source
   if (!src) return start
   const tol = MAGNET_PX / store.zoom
-  const { xs, ys } = magnetCandidates(src, resizing.value?.id)
+  const { xs, ys } = getMagnet(resizing.value?.id)
   let x1 = start.x
   let y1 = start.y
   let x2 = start.x + start.w
@@ -220,7 +220,36 @@ function render(): void {
   ctx.restore()
 }
 
-watchEffect(render)
+/** 已排队的重绘帧句柄：同一帧内的多次数据变更合并为一次绘制 */
+let renderRaf = 0
+
+/** 申请一次重绘：通过 requestAnimationFrame 合并高频触发（平移/缩放/调整尺寸） */
+function scheduleRender(): void {
+  if (renderRaf) return
+  renderRaf = requestAnimationFrame(() => {
+    renderRaf = 0
+    render()
+  })
+}
+
+// 绘制被推迟到 rAF 回调中执行，而 rAF 回调不在 effect 的追踪期内，
+// 因此这里显式列出 render 依赖的数据：任一变化即申请一次重绘（同帧内自动合并）
+watch(
+  () => [
+    canvasRef.value,
+    viewportRef.value,
+    store.source,
+    store.zoom,
+    store.panX,
+    store.panY,
+    store.frames,
+    store.selectedId,
+    store.draftBox,
+    resizing.value,
+  ],
+  scheduleRender,
+  { immediate: true },
+)
 
 // ---------- 视口适配 ----------
 function zoomFit(): void {
@@ -280,6 +309,18 @@ function magnetCandidates(src: HTMLCanvasElement, excludeId?: string): { xs: num
   return { xs, ys }
 }
 
+/** 拖拽期间的磁吸候选缓存：记录构建时的排除帧 id，拖拽开始时构建一次，结束时清空 */
+let magnetCache: { excludeId?: string; xs: number[]; ys: number[] } | null = null
+
+/** 读取磁吸候选：命中缓存直接返回，excludeId 不一致时重建，避免每次 mousemove 重算 */
+function getMagnet(excludeId?: string): { xs: number[]; ys: number[] } {
+  const src = store.source
+  if (!src) return { xs: [], ys: [] }
+  if (magnetCache && magnetCache.excludeId === excludeId) return magnetCache
+  magnetCache = { excludeId, ...magnetCandidates(src, excludeId) }
+  return magnetCache
+}
+
 function normRect(a: { x: number; y: number }, b: { x: number; y: number }): FrameRect {
   const x1 = Math.min(a.x, b.x)
   const y1 = Math.min(a.y, b.y)
@@ -292,7 +333,7 @@ function updateDraft(img: { x: number; y: number }): void {
   const src = store.source
   if (!src) return
   const tol = MAGNET_PX / store.zoom
-  const { xs, ys } = magnetCandidates(src)
+  const { xs, ys } = getMagnet()
   const raw = normRect(drawStart, img)
   const x = snapVal(raw.x, xs, tol)
   const y = snapVal(raw.y, ys, tol)
@@ -325,6 +366,8 @@ function onDown(e: MouseEvent): void {
   if (sel) {
     const handle = hitHandle(toImg(e), sel.rect)
     if (handle) {
+      // 预热磁吸候选：调整尺寸期间复用，避免每次 mousemove 重建
+      magnetCache = { excludeId: sel.id, ...magnetCandidates(src, sel.id) }
       resizing.value = { id: sel.id, handle, start: { ...sel.rect }, rect: { ...sel.rect } }
       return
     }
@@ -334,6 +377,8 @@ function onDown(e: MouseEvent): void {
     drawing.value = true
     drawStart.x = img.x
     drawStart.y = img.y
+    // 预热磁吸候选：框选期间复用
+    magnetCache = { excludeId: undefined, ...magnetCandidates(src) }
     store.draftBox = { x: img.x, y: img.y, w: 0, h: 0 }
   } else {
     startPan(e)
@@ -371,9 +416,13 @@ function onLeave(): void {
   hoverHandle.value = null
   pointerOnStage.value = false
   store.hover = null
+  // 拖拽中移出画布：释放磁吸候选缓存（重新进入时会按需重建）
+  magnetCache = null
 }
 
 function onUp(e: MouseEvent): void {
+  // 拖拽结束：释放磁吸候选缓存
+  magnetCache = null
   if (resizing.value) {
     const { id, rect } = resizing.value
     resizing.value = null
@@ -509,6 +558,8 @@ onMounted(() => {
   window.addEventListener('blur', onWindowBlur)
   window.addEventListener('resize', zoomFit)
   requestAnimationFrame(zoomFit)
+  // 挂载后补一次重绘：watch 的首次执行发生在挂载前，此时 canvas 尚未就绪
+  scheduleRender()
 })
 
 onBeforeUnmount(() => {
@@ -516,6 +567,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', onWindowBlur)
   window.removeEventListener('resize', zoomFit)
+  if (renderRaf) cancelAnimationFrame(renderRaf)
 })
 </script>
 

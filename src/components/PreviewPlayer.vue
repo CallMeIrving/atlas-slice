@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { store, orderedFrames, getCropCanvas, setOrder, resetOrder } from '@/store/atlas'
+import { store, orderedFrames, getCropCanvas, getCropThumb, setOrder, resetOrder } from '@/store/atlas'
+import type { AtlasFrame } from '@/types/atlas'
 
 const open = ref(false)
 const playing = ref(false)
@@ -121,14 +122,9 @@ function resetNatural(): void {
   index.value = 0
 }
 
-function thumbOf(id: string): string {
-  const frame = frames.value.find((f) => f.id === id)
-  if (!frame) return ''
-  try {
-    return getCropCanvas(frame).toDataURL()
-  } catch {
-    return ''
-  }
+/** 帧序条缩略图（走 store 缓存，避免渲染期重复 PNG 编码） */
+function thumbOf(frame: AtlasFrame): string {
+  return getCropThumb(frame)
 }
 
 onMounted(() => {
@@ -186,7 +182,7 @@ onBeforeUnmount(() => {
               @click="index = i"
               :title="f.name"
             >
-              <img :src="thumbOf(f.id)" alt="" draggable="false" />
+              <img :src="thumbOf(f)" alt="" draggable="false" />
               <span class="mono">{{ i }}</span>
             </li>
           </ul>

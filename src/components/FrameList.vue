@@ -5,24 +5,28 @@ import {
   selectedFrame,
   deleteFrame,
   selectFrame,
-  getCropCanvas,
+  getCropThumb,
   clearFrames,
   toggleFrameSelection,
   selectAllFrames,
   clearFrameSelection,
 } from '@/store/atlas'
 import { naturalCompare } from '@/core/sort'
+import type { AtlasFrame } from '@/types/atlas'
 
 const list = computed(() => [...store.frames].sort((a, b) => naturalCompare(a.name, b.name)))
 
-function thumb(frameId: string): string {
-  const frame = store.frames.find((f) => f.id === frameId)
-  if (!frame) return ''
-  try {
-    return getCropCanvas(frame).toDataURL()
-  } catch {
-    return ''
-  }
+/** 选中 id 集合：把逐行的线性包含判断降为 O(1) 查表 */
+const selectedSet = computed(() => new Set(store.selectedIds))
+
+/** 是否已全选：供全选按钮的文案与切换逻辑共用，避免模板重复表达式 */
+const allSelected = computed(
+  () => store.frames.length > 0 && store.selectedIds.length === store.frames.length,
+)
+
+/** 取帧缩略图（走 store 缓存，避免渲染期重复 PNG 编码） */
+function thumb(frame: AtlasFrame): string {
+  return getCropThumb(frame)
 }
 
 const total = computed(() =>
@@ -39,10 +43,10 @@ const total = computed(() =>
         <button
           v-if="store.frames.length"
           class="clear-btn"
-          :title="store.selectedIds.length === store.frames.length ? '取消全选' : '全选帧'"
-          @click="store.selectedIds.length === store.frames.length ? clearFrameSelection() : selectAllFrames()"
+          :title="allSelected ? '取消全选' : '全选帧'"
+          @click="allSelected ? clearFrameSelection() : selectAllFrames()"
         >
-          {{ store.selectedIds.length === store.frames.length ? '取消全选' : '全选' }}
+          {{ allSelected ? '取消全选' : '全选' }}
         </button>
         <button
           class="clear-btn"
@@ -69,12 +73,12 @@ const total = computed(() =>
         <input
           class="frame-check"
           type="checkbox"
-          :checked="store.selectedIds.includes(frame.id)"
+          :checked="selectedSet.has(frame.id)"
           :aria-label="`选择 ${frame.name}`"
           @click.stop
           @change="toggleFrameSelection(frame.id)"
         />
-        <img class="thumb" :src="thumb(frame.id)" alt="" draggable="false" />
+        <img class="thumb" :src="thumb(frame)" alt="" draggable="false" />
         <div class="item-body">
           <p class="item-name" :title="frame.name">{{ frame.name }}</p>
           <p class="mono faint">
