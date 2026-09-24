@@ -1,9 +1,34 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { existsSync } from 'node:fs'
+import { join, normalize } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 
+function modelAssetNotFoundPlugin() {
+  const publicRoot = fileURLToPath(new URL('./public/', import.meta.url))
+  return {
+    name: 'model-asset-not-found',
+    configureServer(server: { middlewares: { use: (handler: (req: { url?: string }, res: { statusCode: number; end: () => void }, next: () => void) => void) => void } }) {
+      server.middlewares.use((request, response, next) => {
+        const pathname = request.url?.split('?')[0] ?? ''
+        if (!pathname.startsWith('/models/')) {
+          next()
+          return
+        }
+        const filePath = normalize(join(publicRoot, pathname.slice('/'.length)))
+        if (!filePath.startsWith(publicRoot) || existsSync(filePath)) {
+          next()
+          return
+        }
+        response.statusCode = 404
+        response.end()
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), modelAssetNotFoundPlugin()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

@@ -108,10 +108,30 @@ type CanvasSource = HTMLImageElement | HTMLCanvasElement
 
 type TransformerPipeline = (input: unknown) => Promise<unknown>
 
+interface RawImageLike {
+  data: Uint8Array | Uint8ClampedArray
+  width: number
+  height: number
+  channels: number
+}
+
 const transformerPipelineCache = new Map<string, TransformerPipeline>()
 const transformerPipelineLoading = new Map<string, Promise<TransformerPipeline>>()
 const samRuntimeCache = new Map<string, { processor: SamProcessorLike; model: SamModelLike }>()
 const samRuntimeLoading = new Map<string, Promise<{ processor: SamProcessorLike; model: SamModelLike }>>()
+// Xenova/sam-vit-base is split into a vision encoder and a prompt/mask decoder.
+// Keep SAM on Q8 so from_pretrained selects only the two *_quantized.onnx files.
+const SAM_DTYPE = 'q8' as const
+const LOCAL_MODEL_PATH = '/models/'
+const LOCAL_SAM_MODEL_PATH = `${LOCAL_MODEL_PATH}Xenova/sam-vit-base/`
+const SAM_LOCAL_FILES = [
+  'config.json',
+  'processor_config.json',
+  'preprocessor_config.json',
+  'quantize_config.json',
+  'onnx/vision_encoder_quantized.onnx',
+  'onnx/prompt_encoder_mask_decoder_quantized.onnx',
+] as const
 
 /** transformers.js Tensor 的轻量视图 */
 interface AnyTensor {
@@ -158,6 +178,23 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('画布转 PNG 失败'))), 'image/png')
   })
+}
+
+function rawImageToCanvas(image: RawImageLike): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = image.width
+  canvas.height = image.height
+  const rgba = new Uint8ClampedArray(image.width * image.height * 4)
+  for (let index = 0; index < image.width * image.height; index += 1) {
+    const sourceOffset = index * image.channels
+    const targetOffset = index * 4
+    rgba[targetOffset] = image.data[sourceOffset] ?? 0
+    rgba[targetOffset + 1] = image.data[sourceOffset + 1] ?? rgba[targetOffset]
+    rgba[targetOffset + 2] = image.data[sourceOffset + 2] ?? rgba[targetOffset]
+    rgba[targetOffset + 3] = image.channels >= 4 ? (image.data[sourceOffset + 3] ?? 255) : 255
+  }
+  canvas.getContext('2d')!.putImageData(new ImageData(rgba, image.width, image.height), 0, 0)
+  return canvas
 }
 
 /** 用单通道蒙版（0-255）作为 alpha 合成到原图上，返回结果画布（与输入同尺寸） */
@@ -214,8 +251,34 @@ function transformersProgress(onProgress?: (progress: MatteProgress) => void) {
   }
 }
 
+async function inspectSamLocalFiles(onProgress?: (progress: MatteProgress) => void): Promise<void> {
+  const baseUrl = `${LOCAL_MODEL_PATH}Xenova/sam-vit-base/`
+  console.groupCollapsed('[SAM] 本地模型文件检查')
+  try {
+    for (const file of SAM_LOCAL_FILES) {
+      const url = `${baseUrl}${file}`
+      onProgress?.({ phase: 'loading', text: `检查本地文件 ${file}…` })
+      const response = await fetch(url, { method: 'HEAD', cache: 'no-store' })
+      const contentType = response.headers.get('content-type') ?? ''
+      const contentLength = response.headers.get('content-length') ?? '未知'
+      console.info('[SAM] 文件检查', { file, url, status: response.status, contentType, contentLength })
+      if (!response.ok) throw new Error(`本地文件 ${file} 请求失败：HTTP ${response.status}（${url}）`)
+      if (contentType.toLowerCase().includes('text/html')) throw new Error(`本地文件 ${file} 返回了 HTML，不是模型文件（${url}）`)
+    }
+  } finally {
+    console.groupEnd()
+  }
+}
+
 function transformerCacheKey(options: Pick<TransformersOptions, 'modelId' | 'dtype' | 'device' | 'modelHost'>): string {
   return `${options.modelId}|${options.dtype}|${options.device}|${options.modelHost}`
+}
+
+function localModelPathFor(modelId: string): string | undefined {
+  const normalizedId = modelId.toLowerCase()
+  if (normalizedId === 'onnx-community/birefnet_lite-onnx') return '/models/onnx-community/BiRefNet_lite-ONNX/'
+  if (normalizedId === 'briaai/rmbg-1.4') return '/models/briaai/RMBG-1.4/'
+  return undefined
 }
 
 async function getTransformerPipeline(options: TransformersOptions): Promise<TransformerPipeline> {
@@ -227,21 +290,36 @@ async function getTransformerPipeline(options: TransformersOptions): Promise<Tra
   const task = (async () => {
     const transformers = await import('@huggingface/transformers')
     transformers.env.allowLocalModels = true
+    transformers.env.localModelPath = LOCAL_MODEL_PATH
     transformers.env.remoteHost = modelHostUrl(options.modelHost)
+    const localModelPath = localModelPathFor(options.modelId)
+    const pretrainedModel = localModelPath ?? options.modelId
+    const allowRemoteModels = transformers.env.allowRemoteModels
+    const useBrowserCache = transformers.env.useBrowserCache
+    if (localModelPath) {
+      transformers.env.allowRemoteModels = false
+      transformers.env.useBrowserCache = false
+    }
     const progress = transformersProgress(options.onProgress)
-    const pipelineOptions: Parameters<typeof transformers.pipeline>[2] = {
-      dtype: options.dtype,
-      device: mapDevice(options.device),
-      progress_callback: progress,
+    try {
+      const pipelineOptions: Parameters<typeof transformers.pipeline>[2] = {
+        dtype: options.dtype,
+        device: mapDevice(options.device),
+        local_files_only: Boolean(localModelPath),
+        progress_callback: progress,
+      }
+      if (options.modelId.toLowerCase() === 'briaai/rmbg-1.4') {
+        const config = await transformers.AutoConfig.from_pretrained(pretrainedModel, { progress_callback: progress })
+        if (config.model_type === 'SegformerForSemanticSegmentation') config.model_type = 'segformer'
+        pipelineOptions.config = config
+      }
+      const pipeline = (await transformers.pipeline('background-removal', pretrainedModel, pipelineOptions)) as unknown as TransformerPipeline
+      transformerPipelineCache.set(key, pipeline)
+      return pipeline
+    } finally {
+      transformers.env.allowRemoteModels = allowRemoteModels
+      transformers.env.useBrowserCache = useBrowserCache
     }
-    if (options.modelId.toLowerCase() === 'briaai/rmbg-1.4') {
-      const config = await transformers.AutoConfig.from_pretrained(options.modelId, { progress_callback: progress })
-      if (config.model_type === 'SegformerForSemanticSegmentation') config.model_type = 'segformer'
-      pipelineOptions.config = config
-    }
-    const pipeline = (await transformers.pipeline('image-segmentation', options.modelId, pipelineOptions)) as unknown as TransformerPipeline
-    transformerPipelineCache.set(key, pipeline)
-    return pipeline
   })()
   transformerPipelineLoading.set(key, task)
   try { return await task } finally { transformerPipelineLoading.delete(key) }
@@ -251,6 +329,38 @@ function samCacheKey(options: Pick<SamOptions, 'modelId' | 'device' | 'modelHost
   return `${options.modelId}|${options.device}|${options.modelHost}`
 }
 
+async function loadSamRuntime(options: SamOptions, modelHost: SamOptions['modelHost']): Promise<{ processor: SamProcessorLike; model: SamModelLike }> {
+  const transformers = await import('@huggingface/transformers')
+  transformers.env.allowLocalModels = true
+  transformers.env.localModelPath = LOCAL_MODEL_PATH
+  transformers.env.remoteHost = modelHostUrl(modelHost)
+  const progress = transformersProgress(options.onProgress)
+  await inspectSamLocalFiles(options.onProgress)
+  const allowRemoteModels = transformers.env.allowRemoteModels
+  const useBrowserCache = transformers.env.useBrowserCache
+  // SAM 文件已随项目放入 public/models，严格使用本地文件，避免缺文件时
+  // 把远程 HTML 错误页当成 JSON 解析。
+  transformers.env.allowRemoteModels = false
+  transformers.env.useBrowserCache = false
+  try {
+    console.info('[SAM] 开始初始化 Transformers.js', {
+      modelId: options.modelId,
+      dtype: SAM_DTYPE,
+      device: mapDevice(options.device),
+      localModelPath: transformers.env.localModelPath,
+      allowRemoteModels: transformers.env.allowRemoteModels,
+    })
+    const processor = (await transformers.AutoProcessor.from_pretrained(LOCAL_SAM_MODEL_PATH, { local_files_only: true, progress_callback: progress })) as unknown as SamProcessorLike
+    console.info('[SAM] AutoProcessor 初始化完成')
+    const model = (await transformers.SamModel.from_pretrained(LOCAL_SAM_MODEL_PATH, { local_files_only: true, device: mapDevice(options.device), dtype: SAM_DTYPE, progress_callback: progress })) as unknown as SamModelLike
+    console.info('[SAM] SamModel 初始化完成')
+    return { processor, model }
+  } finally {
+    transformers.env.allowRemoteModels = allowRemoteModels
+    transformers.env.useBrowserCache = useBrowserCache
+  }
+}
+
 async function getSamRuntime(options: SamOptions): Promise<{ processor: SamProcessorLike; model: SamModelLike }> {
   const key = samCacheKey(options)
   const cached = samRuntimeCache.get(key)
@@ -258,13 +368,7 @@ async function getSamRuntime(options: SamOptions): Promise<{ processor: SamProce
   const loading = samRuntimeLoading.get(key)
   if (loading) return loading
   const task = (async () => {
-    const transformers = await import('@huggingface/transformers')
-    transformers.env.allowLocalModels = true
-    transformers.env.remoteHost = modelHostUrl(options.modelHost)
-    const progress = transformersProgress(options.onProgress)
-    const processor = (await transformers.AutoProcessor.from_pretrained(options.modelId, { progress_callback: progress })) as unknown as SamProcessorLike
-    const model = (await transformers.SamModel.from_pretrained(options.modelId, { device: mapDevice(options.device), dtype: 'q8', progress_callback: progress })) as unknown as SamModelLike
-    const runtime = { processor, model }
+    const runtime = await loadSamRuntime(options, options.modelHost)
     samRuntimeCache.set(key, runtime)
     return runtime
   })()
@@ -329,11 +433,16 @@ export async function removeWithTransformers(source: CanvasSource, options: Tran
   options.onProgress?.({ phase: 'loading', text: `检查 ${options.modelId} 模型…` })
   const pipeline = await getTransformerPipeline(options)
   options.onProgress?.({ phase: 'processing', text: 'AI 推理中…' })
-  const outputs = (await pipeline(canvas)) as Array<{ mask: { data: Uint8Array | Uint8ClampedArray; width: number; height: number; channels: number } }>
-  const output = outputs[0]
-  if (!output?.mask?.data?.length) throw new Error(`${options.modelId} 没有返回有效的分割蒙版`)
+  const output = await pipeline(canvas)
+  if (output && typeof output === 'object' && 'data' in output && 'width' in output && 'height' in output && 'channels' in output) {
+    const resultBlob = await canvasToBlob(rawImageToCanvas(output as RawImageLike))
+    return { blob: resultBlob }
+  }
+  const outputs = output as Array<{ mask: { data: Uint8Array | Uint8ClampedArray; width: number; height: number; channels: number } }>
+  const segmentationOutput = outputs[0]
+  if (!segmentationOutput?.mask?.data?.length) throw new Error(`${options.modelId} 没有返回有效的分割蒙版`)
 
-  const { data, width, height, channels } = output.mask
+  const { data, width, height, channels } = segmentationOutput.mask
   const mask = new Uint8ClampedArray(canvas.width * canvas.height)
   // The image-segmentation pipeline returns the mask resized to the input image.
   // Handle a possible dimension mismatch with canvas interpolation for robustness.

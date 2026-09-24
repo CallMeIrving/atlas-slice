@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { workspace, type MatteMode } from '@/store/workspace'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { persistMediaSettings, workspace, type MatteMode } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
 import { applyColorKey, solidColorKey } from '@/core/color-key'
 import { removeWithImgly, removeWithTransformers, segmentWithSam, preloadMattingModel, AI_ENGINES, type MatteProgress } from '@/core/ai-matting'
@@ -110,6 +110,23 @@ function setModelState(key: string, state: ModelState, message?: string): void {
   modelStates[key] = { state, message }
 }
 
+watch(
+  () => ({
+    mode: workspace.matte.mode,
+    aiMaxSide: workspace.matte.aiMaxSide,
+    imglyModel: workspace.matte.imglyModel,
+    imglyPublicPath: workspace.matte.imglyPublicPath,
+    aiDevice: workspace.matte.aiDevice,
+    aiDtype: workspace.matte.aiDtype,
+    aiModelHost: workspace.matte.aiModelHost,
+    birefnetModelId: workspace.matte.birefnetModelId,
+    rmbgModelId: workspace.matte.rmbgModelId,
+    samModelId: workspace.matte.samModelId,
+  }),
+  () => persistMediaSettings(),
+  { deep: true },
+)
+
 async function preloadSelectedModel(): Promise<void> {
   const mode = workspace.matte.mode
   if (!['imgly', 'birefnet', 'rmbg', 'sam'].includes(mode)) return
@@ -129,9 +146,15 @@ async function preloadSelectedModel(): Promise<void> {
     setModelState(key, 'ready')
     workspace.matte.aiStatus = '模型已加载，可直接开始处理'
   } catch (error) {
+    console.error('[模型预加载失败]', {
+      mode,
+      modelKey: key,
+      modelId: mode === 'sam' ? workspace.matte.samModelId : undefined,
+      error,
+    })
     const message = error instanceof Error ? error.message : '模型加载失败'
     setModelState(key, 'error', message)
-    workspace.matte.aiStatus = message
+    workspace.matte.aiStatus = `${message}（详细信息已输出到浏览器控制台）`
   } finally {
     workspace.matte.aiProgress = -1
   }
@@ -595,6 +618,8 @@ onMounted(() => {
     canvasResizeObserver = new ResizeObserver(() => fitImageToCanvas())
     canvasResizeObserver.observe(canvasRef.value)
   }
+  // 刷新后重新初始化运行时；模型文件会优先复用浏览器缓存或 public/models/。
+  if (isAiMode.value) void preloadSelectedModel()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
@@ -715,7 +740,7 @@ onBeforeUnmount(() => {
       <div class="section">
         <h2 class="section-title">模型状态</h2>
         <div v-for="engine in AI_ENGINES" :key="engine.key" class="model-row">
-          <span :title="engine.description">{{ engine.label }} <span class="muted">{{ engine.size }}</span></span>
+          <span :title="`${engine.label} ${engine.size} · ${engine.description}`">{{ engine.label }} <span class="muted">{{ engine.size }}</span></span>
           <span class="badge" :class="{ 'badge-accent': workspace.matte.mode === engine.key }">{{ workspace.matte.mode === engine.key ? modelStateLabel(modelStateForEngine(engine.key)) : engine.license }}</span>
         </div>
         <button v-if="isAiMode" class="btn full preload-button" :disabled="selectedModelState === 'loading' || selectedModelState === 'ready'" @click="preloadSelectedModel">{{ selectedModelState === 'ready' ? '模型已加载' : '预加载当前模型' }}</button>
@@ -818,7 +843,7 @@ onBeforeUnmount(() => {
 .fit-button { padding: 0 10px; font-size: 12px; }.fit-button:hover, .zoom-button:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
 .matte-canvas { flex: 1; min-height: 0; margin: 24px; display: grid; place-items: center; border: 1px solid var(--border); overflow: hidden; position: relative; }.matte-canvas.dragging { border-color: var(--accent); }.matte-canvas img { width: auto; height: auto; max-width: calc(100% - 2px); max-height: calc(100% - 2px); object-fit: contain; image-rendering: auto; transform-origin: center center; }.matte-canvas.can-pan { cursor: grab; }.matte-canvas.is-panning { cursor: grabbing; user-select: none; }.matte-canvas img.sampling { cursor: crosshair; }
 .drop-hint { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text-faint); cursor: pointer; }.drop-hint .big { font-size: 36px; color: var(--accent); }.drop-hint strong { color: var(--text); }
-.full { width: 100%; justify-content: center; }.model-row { display: flex; align-items: center; gap: 8px; min-height: 32px; color: var(--text-muted); justify-content: space-between; }.range { width: 100%; accent-color: var(--accent); }.actions { display: flex; flex-direction: column; gap: 8px; }
+.full { width: 100%; justify-content: center; }.model-row { display: flex; align-items: center; gap: 8px; min-height: 32px; color: var(--text-muted); justify-content: space-between; }.model-row > span:first-child { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }.model-row .badge { flex: none; white-space: nowrap; }.range { width: 100%; accent-color: var(--accent); }.actions { display: flex; flex-direction: column; gap: 8px; }
 .preload-button { margin-top: 8px; }
 .model-state-hint { margin: 8px 0 0; line-height: 1.5; }
 .sampling { cursor: crosshair; }.sampled-color { display:flex; align-items:center; gap:8px; color:var(--text-muted); font:12px var(--font-mono); }.color-chip { width:18px; height:18px; border:1px solid var(--border-strong); border-radius:3px; }.btn-icon { margin-left:auto; color:var(--text-faint); }

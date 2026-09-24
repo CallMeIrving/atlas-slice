@@ -61,7 +61,7 @@ pnpm run preview  # 本地预览生产构建
 
 ## 抠图模型下载
 
-抠图模块支持颜色抠图、ISNet、BiRefNet、RMBG-1.4 和 SAM。颜色抠图不需要下载模型；AI 模型首次预加载或首次使用时会下载并缓存到浏览器。模型加载完成后，界面会显示「已加载」，失败时会显示具体错误。
+抠图模块支持颜色抠图、ISNet、BiRefNet、RMBG-1.4 和 SAM。颜色抠图不需要下载模型；ISNet 默认从 IMG.LY CDN 加载并由浏览器缓存，BiRefNet、RMBG-1.4、SAM 默认从项目的 `public/models/` 本地目录加载。模型加载完成后，界面会显示「已加载」，失败时会显示具体错误。
 
 ### 模型地址
 
@@ -72,12 +72,99 @@ pnpm run preview  # 本地预览生产构建
 | RMBG-1.4 | `briaai/RMBG-1.4` | [HuggingFace 模型仓库](https://huggingface.co/briaai/RMBG-1.4/tree/main) | [hf-mirror 镜像](https://hf-mirror.com/briaai/RMBG-1.4) |
 | SAM | `Xenova/sam-vit-base` | [HuggingFace 模型仓库](https://huggingface.co/Xenova/sam-vit-base/tree/main) | [hf-mirror 镜像](https://hf-mirror.com/Xenova/sam-vit-base) |
 
+### 必需文件与排除文件
+
+项目中的 Transformers.js 模型默认使用本地目录和 `local_files_only`，不会因为仓库中存在多个精度版本而全部下载。ISNet 由 `@imgly/background-removal` 管理 CDN 资源；离线部署时只需要复制当前精度对应的文件。
+
+#### ISNet（imgly）
+
+ISNet 由 `@imgly/background-removal` 管理资源，项目只会加载界面当前选择的一个模型：
+
+| 选项 | 必需资源 | 不需要同时下载 |
+|---|---|---|
+| `isnet_fp16` | ISNet FP16 资源 | `isnet`、`isnet_quint8` |
+| `isnet` | ISNet 原始精度资源 | `isnet_fp16`、`isnet_quint8` |
+| `isnet_quint8` | ISNet 量化资源 | `isnet`、`isnet_fp16` |
+
+资源由库内部按 `model` 参数选择，代码不应把三套 ISNet 资源复制到同一个离线目录中。
+
+#### BiRefNet
+
+项目已提供默认 FP16 本地模型。模型目录 `public/models/onnx-community/BiRefNet_lite-ONNX/` 必需：
+
+```text
+config.json
+processor_config.json
+preprocessor_config.json
+onnx/model_fp16.onnx       # 当前默认精度，推荐
+```
+
+如果界面切换精度，则只保留对应文件：
+
+```text
+onnx/model.onnx             # FP32
+onnx/model_fp16.onnx        # FP16
+```
+
+该仓库目前没有 `model_quantized.onnx`，因此不要选择或下载 Q8 文件；`q8` 选项只适用于实际提供量化权重的模型。项目使用 `background-removal` Pipeline，避免为纯图像模型探测 tokenizer 文件。
+
+不需要下载仓库中的其他说明文件或其他精度权重；同一目录下只需保留 `model.onnx` 或 `model_fp16.onnx` 其中一个。
+
+#### RMBG-1.4
+
+项目已提供默认 FP16 本地模型。模型目录 `public/models/briaai/RMBG-1.4/` 必需：
+
+```text
+config.json
+preprocessor_config.json
+onnx/model_fp16.onnx        # 当前默认精度，推荐
+```
+
+按界面选择的精度替换为对应文件：
+
+```text
+onnx/model.onnx             # FP32
+onnx/model_fp16.onnx        # FP16
+onnx/model_quantized.onnx   # Q8
+```
+
+不需要下载 `model.pth`、`model.safetensors`、`pytorch_model.bin`、Python 推理脚本、示例图片或未选择的 ONNX 精度文件。浏览器端只使用 `onnx/` 下与当前 `dtype` 匹配的一个文件。项目使用 `background-removal` Pipeline，并对 RMBG 的 Segformer 配置做了兼容处理。
+
+#### SAM（当前项目固定使用 Q8）
+
+当前代码将 SAM 的 `dtype` 固定为 `q8`，因此 `Xenova/sam-vit-base/` 离线目录只需要：
+
+```text
+config.json
+processor_config.json
+preprocessor_config.json
+quantize_config.json
+onnx/vision_encoder_quantized.onnx
+onnx/prompt_encoder_mask_decoder_quantized.onnx
+```
+
+SAM 的 ONNX 权重被拆成视觉编码器和提示/掩码解码器两个文件，不能用 `model_quantized.onnx` 替代上面两个文件。
+
+不需要下载：
+
+```text
+onnx/vision_encoder.onnx
+onnx/vision_encoder_fp16.onnx
+onnx/prompt_encoder_mask_decoder.onnx
+onnx/prompt_encoder_mask_decoder_fp16.onnx
+onnx/model.onnx
+onnx/model_fp16.onnx
+onnx/model_quantized.onnx
+```
+
+当前 SAM 使用 Q8，因此还需要根目录的 `quantize_config.json`。如果未来代码把 SAM 精度改成 FP16 或 FP32，才分别替换为对应的 `vision_encoder_*` 和 `prompt_encoder_mask_decoder_*` 文件；当前不要把多种精度混放并期待项目自动只使用其中一套。
+
 ### 网络和代理说明
 
-- BiRefNet、RMBG-1.4、SAM 托管在 HuggingFace。中国大陆网络访问 HuggingFace 可能不稳定，遇到下载失败时可在界面把「模型源」切换为 `hf-mirror.com`，或使用代理网络。
+- BiRefNet、RMBG-1.4、SAM 的默认权重已放入项目本地目录，不依赖运行时访问 HuggingFace。重新下载或切换模型 ID 时，中国大陆网络访问 HuggingFace 可能不稳定，可在界面把「模型源」切换为 `hf-mirror.com`，或使用代理网络。
 - `hf-mirror.com` 是第三方镜像，不是 HuggingFace 官方站点。用于生产部署时，建议下载后校验文件并固定版本。
 - ISNet 默认从 IMG.LY 的 `staticimgly.com` CDN 获取模型和 WASM 文件，是否需要代理取决于当前网络。也可以通过「资源地址（publicPath）」改成自己的静态文件地址。
-- 模型体积较大，SAM 仓库约 1.34GB，BiRefNet 仓库约 339MB，RMBG-1.4 仓库约 842MB；实际下载量会根据模型精度和 Transformers.js 所需文件变化。
+- 模型仓库展示的总大小包含多个精度和非浏览器文件；当前项目本地目录约占 101MB（SAM Q8）、109MB（BiRefNet FP16）和 84MB（RMBG FP16）。实际运行还会加载 Transformers.js 的运行时 WASM 文件。模型状态是页面运行时状态，刷新后会重新初始化本地模型，不会重复下载权重。
 
 ### 离线部署
 
@@ -85,13 +172,14 @@ pnpm run preview  # 本地预览生产构建
 
 ```text
 public/models/
-├── onnx-community/BiRefNet_lite-ONNX/
-├── briaai/RMBG-1.4/
-├── Xenova/sam-vit-base/
-└── imgly/1.7.0/dist/
+├── onnx-community/BiRefNet_lite-ONNX/  # config + processor + preprocessor + FP16 权重
+├── briaai/RMBG-1.4/                    # config + preprocessor + FP16 权重
+└── Xenova/sam-vit-base/                # config + processor + preprocessor + Q8 两个权重
 ```
 
-启动应用后，在「抠图」页面选择对应模型，点击「预加载当前模型」。应用会优先复用浏览器缓存或本地模型目录；模型 ID、目录结构或文件不完整时会显示「加载失败」。
+启动应用后，在「抠图」页面选择对应模型，点击「预加载当前模型」。项目会优先使用 `public/models/` 中的本地模型；刷新页面后会重新初始化模型运行时。Vite 对 `/models/` 下不存在的文件返回 404，避免把应用首页 HTML 当作 JSON 解析。
+
+注意：`.gitignore` 默认忽略 `public/models/*`，本地模型不会被 Git 提交；部署或交付时需要单独复制这些模型文件，或者删除相应忽略规则后再提交。
 
 RMBG-1.4 还需要遵守 [BRIA 模型许可证](https://huggingface.co/briaai/RMBG-1.4/tree/main) 的使用限制；BiRefNet 仓库标注 MIT，SAM 仓库标注 Apache-2.0。
 
