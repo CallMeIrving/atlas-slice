@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "models:download": "node scripts/download-models.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",

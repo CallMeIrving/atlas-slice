@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { workspace, type FrameMatteMode } from '@/store/workspace'
 import { hexToRgb, rgbToHex } from '@/core/frame-matte'
+import {
+  deviceOptions,
+  dtypeOptions,
+  imglyDtypeForModel,
+  imglyModelForDtype,
+  resolveDevice,
+  resolveDtype,
+  type AiEngine,
+  type MatteDevice,
+  type MatteDtype,
+} from '@/core/ai-matting'
 
 /**
  * 帧抠图设置字段。
  * 绑定 workspace.video.matte（抠图方式、影子、容差、基准色）与 workspace.matte 的 AI 偏好，
  * 帧抠图弹窗与一键处理弹窗共用。
+ * 推理设备与模型精度按所选抠图方式对应的模型能力过滤：模型没有的精度、跑不了的设备都不出现。
  */
 const props = withDefaults(
   defineProps<{
@@ -24,6 +36,55 @@ const modeOptions: { value: FrameMatteMode; label: string }[] = [
 ]
 
 const isSolid = computed(() => workspace.video.matte.mode === 'solid')
+/** 当前抠图方式对应的 AI 引擎，纯色方式为 null */
+const engine = computed<AiEngine | null>(() => (isSolid.value ? null : (workspace.video.matte.mode as AiEngine)))
+/**
+ * 当前生效的精度：ISNet 的精度由 imglyModel 决定（其余引擎走共享的 aiDtype），
+ * 因此这里既做精度映射，也把引擎不支持的精度收敛掉。
+ */
+const currentDtype = computed<MatteDtype>(() => {
+  const target = engine.value
+  if (!target) return workspace.matte.aiDtype
+  if (target === 'imgly') return imglyDtypeForModel(workspace.matte.imglyModel)
+  return resolveDtype(target, workspace.matte.aiDtype)
+})
+/** 当前引擎可选的精度与设备选项 */
+const dtypes = computed(() => (engine.value ? dtypeOptions(engine.value) : []))
+const devices = computed(() => deviceOptions(currentDtype.value))
+
+/** 精度下拉：ISNet 写回 imglyModel，其余引擎写回 aiDtype */
+const dtypeValue = computed<MatteDtype>({
+  get: () => currentDtype.value,
+  set: (value) => {
+    if (workspace.video.matte.mode === 'imgly') workspace.matte.imglyModel = imglyModelForDtype(value)
+    else workspace.matte.aiDtype = value
+  },
+})
+
+const deviceValue = computed<MatteDevice>({
+  get: () => resolveDevice(currentDtype.value, workspace.matte.aiDevice),
+  set: (value) => { workspace.matte.aiDevice = value },
+})
+
+/**
+ * 切换抠图方式或精度后，把精度与设备真正写回支持的取值。
+ * 只靠下拉的 getter 收敛不够：字段被隐藏时旧值仍会参与推理。
+ */
+watch(
+  () => [workspace.video.matte.mode, workspace.matte.aiDtype, workspace.matte.aiDevice, workspace.matte.imglyModel] as const,
+  () => {
+    const target = engine.value
+    if (!target) return
+    if (target !== 'imgly') {
+      const dtype = resolveDtype(target, workspace.matte.aiDtype)
+      if (dtype !== workspace.matte.aiDtype) workspace.matte.aiDtype = dtype
+    }
+    const device = resolveDevice(currentDtype.value, workspace.matte.aiDevice)
+    if (device !== workspace.matte.aiDevice) workspace.matte.aiDevice = device
+  },
+  { immediate: true },
+)
+
 /** 手动基准色（已规范化为小写 #rrggbb） */
 const manualHex = computed(() => {
   const rgb = hexToRgb(workspace.video.matte.baseColor)
@@ -71,17 +132,14 @@ function resetBaseColor(): void {
     <template v-else>
       <label class="field">
         <span class="field-label">推理设备</span>
-        <select v-model="workspace.matte.aiDevice" class="select">
-          <option value="cpu">CPU（兼容性最好）</option>
-          <option value="gpu">GPU / WebGPU（需浏览器支持）</option>
+        <select v-model="deviceValue" class="select">
+          <option v-for="option in devices" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </label>
       <label class="field">
         <span class="field-label">模型精度</span>
-        <select v-model="workspace.matte.aiDtype" class="select">
-          <option value="fp16">FP16（推荐）</option>
-          <option value="q8">Q8（体积小、速度快）</option>
-          <option value="fp32">FP32（精度最高）</option>
+        <select v-model="dtypeValue" class="select">
+          <option v-for="option in dtypes" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </label>
     </template>

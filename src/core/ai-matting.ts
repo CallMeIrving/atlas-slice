@@ -26,7 +26,7 @@ export interface AiEngineBaseOptions {
 }
 
 export interface ImglyOptions extends AiEngineBaseOptions {
-  model: 'isnet' | 'isnet_fp16' | 'isnet_quint8'
+  model: ImglyModel
   device: 'cpu' | 'gpu'
   /** 模型资源基础地址，留空使用官方 CDN（staticimgly.com） */
   publicPath?: string
@@ -103,6 +103,91 @@ export const AI_ENGINES: EngineMeta[] = [
   { key: 'rmbg', label: 'RMBG-1.4（BRIA）', license: '⚠️不可商用', size: '约 44-176MB（Q8-FP32）', description: '效果顶尖，注意许可限制' },
   { key: 'sam', label: 'SAM 框选分割', license: 'Apache-2.0', size: '约 110MB（Q8）', description: '框选/点击区域精确分割' },
 ]
+
+/** 界面上的模型精度：fp32 / fp16 为非量化权重，q8 为 int8 量化权重 */
+export type MatteDtype = 'q8' | 'fp16' | 'fp32'
+
+/** 界面上的推理设备：cpu 走 wasm，gpu 走 WebGPU */
+export type MatteDevice = 'cpu' | 'gpu'
+
+/** imgly（ISNet）的精度由 model 参数决定，没有独立的 dtype 通道 */
+export type ImglyModel = 'isnet' | 'isnet_fp16' | 'isnet_quint8'
+
+export interface MatteOption<T> {
+  value: T
+  label: string
+}
+
+const DTYPE_OPTIONS: MatteOption<MatteDtype>[] = [
+  { value: 'fp16', label: 'FP16（推荐）' },
+  { value: 'q8', label: 'Q8（体积小、速度快）' },
+  { value: 'fp32', label: 'FP32（精度最高）' },
+]
+
+const DEVICE_OPTIONS: MatteOption<MatteDevice>[] = [
+  { value: 'cpu', label: 'CPU（兼容性最好）' },
+  { value: 'gpu', label: 'GPU / WebGPU（需浏览器支持）' },
+]
+
+/**
+ * 各引擎实际提供的权重精度与 WebGPU 能力，与 README「抠图模型下载」一致：
+ * - imgly（ISNet）三个精度齐全，由 @imgly/background-removal 按 model 参数选择；
+ * - birefnet（onnx-community/BiRefNet_lite-ONNX）只有 model.onnx / model_fp16.onnx，没有量化权重；
+ * - rmbg（briaai/RMBG-1.4）提供 model_quantized.onnx，三个精度齐全；
+ * - sam 的权重被固定为 Q8 量化版，因此没有精度可选。
+ * 未列出的精度就是该模型不具备的能力，界面不应提供。
+ */
+const ENGINE_DTYPES: Record<AiEngine, MatteDtype[]> = {
+  imgly: ['fp16', 'q8', 'fp32'],
+  birefnet: ['fp16', 'fp32'],
+  rmbg: ['fp16', 'q8', 'fp32'],
+  sam: ['q8'],
+}
+
+/** 精度 → imgly 模型参数的映射，让界面精度在 ISNet 上真正生效 */
+const IMGLY_MODEL_BY_DTYPE: Record<MatteDtype, ImglyModel> = { fp16: 'isnet_fp16', q8: 'isnet_quint8', fp32: 'isnet' }
+const IMGLY_DTYPE_BY_MODEL: Record<ImglyModel, MatteDtype> = { isnet_fp16: 'fp16', isnet_quint8: 'q8', isnet: 'fp32' }
+
+/** imgly 模型参数 → 界面精度 */
+export function imglyDtypeForModel(model: ImglyModel): MatteDtype {
+  return IMGLY_DTYPE_BY_MODEL[model]
+}
+
+/** 界面精度 → imgly 模型参数 */
+export function imglyModelForDtype(dtype: MatteDtype): ImglyModel {
+  return IMGLY_MODEL_BY_DTYPE[dtype]
+}
+
+/** 浏览器是否支持 WebGPU；无此能力时 GPU 选项不显示 */
+export function hasWebGpu(): boolean {
+  return typeof navigator !== 'undefined' && 'gpu' in navigator
+}
+
+/** 某引擎可用的精度选项（模型没有的精度不会出现） */
+export function dtypeOptions(engine: AiEngine): MatteOption<MatteDtype>[] {
+  const available = ENGINE_DTYPES[engine]
+  return DTYPE_OPTIONS.filter((option) => available.includes(option.value))
+}
+
+/**
+ * 指定精度下可用的设备选项。
+ * GPU（WebGPU）要求浏览器支持，且权重不能被量化——量化权重的 int8 算子在后端跑不起来，
+ * 所以 Q8 精度下（含固定使用 Q8 权重的 SAM）只保留 CPU。
+ */
+export function deviceOptions(dtype: MatteDtype): MatteOption<MatteDevice>[] {
+  if (!hasWebGpu() || dtype === 'q8') return DEVICE_OPTIONS.filter((option) => option.value === 'cpu')
+  return DEVICE_OPTIONS
+}
+
+/** 把精度收敛到引擎支持的取值；不支持时回退到该引擎的首个可用精度 */
+export function resolveDtype(engine: AiEngine, dtype: MatteDtype): MatteDtype {
+  return ENGINE_DTYPES[engine].includes(dtype) ? dtype : ENGINE_DTYPES[engine][0]
+}
+
+/** 把设备收敛到当前精度支持的取值；GPU 不可用时回退 CPU */
+export function resolveDevice(dtype: MatteDtype, device: MatteDevice): MatteDevice {
+  return deviceOptions(dtype).some((option) => option.value === device) ? device : 'cpu'
+}
 
 type CanvasSource = HTMLImageElement | HTMLCanvasElement
 

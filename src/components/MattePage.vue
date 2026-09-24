@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { persistMediaSettings, workspace, type MatteMode } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
 import { applyColorKey, solidColorKey } from '@/core/color-key'
-import { removeWithImgly, removeWithTransformers, segmentWithSam, AI_ENGINES, describeMattingError, type MatteProgress } from '@/core/ai-matting'
+import { removeWithImgly, removeWithTransformers, segmentWithSam, AI_ENGINES, describeMattingError, deviceOptions, dtypeOptions, imglyDtypeForModel, resolveDevice, resolveDtype, type AiEngine, type MatteDtype, type MatteProgress } from '@/core/ai-matting'
 import { ensureMatteModelLoaded, matteModelKey, modelStateLabel, modelStatus, setModelState, type ModelEngine, type ModelState } from '@/store/model-status'
 
 const input = ref<HTMLInputElement>()
@@ -88,6 +88,39 @@ const undoSamDisabled = computed(() => workspace.matte.status === 'processing' |
 /** 当前处理方式对应的模型 key；非 AI 方式返回空串。key 由共享 store 生成，与视频帧一键处理弹窗一致 */
 const selectedModelKey = computed(() => (isAiMode.value ? matteModelKey(workspace.matte.mode as ModelEngine) : ''))
 const selectedModelState = computed<ModelState>(() => (selectedModelKey.value ? (modelStatus[selectedModelKey.value]?.state ?? 'unknown') : 'unknown'))
+
+/** 当前 AI 引擎；颜色类抠图没有模型，返回 null */
+const aiEngine = computed<AiEngine | null>(() => (isAiMode.value ? (workspace.matte.mode as AiEngine) : null))
+/** 引擎实际使用的精度：ISNet 由 imglyModel 决定，SAM 固定 Q8，其余走共享的 aiDtype */
+const effectiveDtype = computed<MatteDtype>(() => {
+  const mode = workspace.matte.mode
+  if (mode === 'imgly') return imglyDtypeForModel(workspace.matte.imglyModel)
+  if (mode === 'sam') return 'q8'
+  return workspace.matte.aiDtype
+})
+/** 当前引擎可选的精度与设备选项：模型没有的精度、跑不了的设备都不出现 */
+const dtypeChoices = computed(() => (aiEngine.value ? dtypeOptions(aiEngine.value) : []))
+const deviceChoices = computed(() => deviceOptions(effectiveDtype.value))
+
+/**
+ * 切换处理方式或精度后，把精度与设备写回该模型真正支持的取值。
+ * 例如 RMBG 选 Q8 再切到 BiRefNet（没有量化权重）会回到 FP16，设备也跟着回到 CPU；
+ * 字段被隐藏时旧值仍会参与推理，所以必须写回而不能只在下拉里收敛。
+ */
+watch(
+  () => [workspace.matte.mode, workspace.matte.aiDtype, workspace.matte.aiDevice, workspace.matte.imglyModel] as const,
+  () => {
+    const engine = aiEngine.value
+    if (!engine) return
+    if (engine === 'birefnet' || engine === 'rmbg') {
+      const dtype = resolveDtype(engine, workspace.matte.aiDtype)
+      if (dtype !== workspace.matte.aiDtype) workspace.matte.aiDtype = dtype
+    }
+    const device = resolveDevice(effectiveDtype.value, workspace.matte.aiDevice)
+    if (device !== workspace.matte.aiDevice) workspace.matte.aiDevice = device
+  },
+  { immediate: true },
+)
 
 /** 模型状态区展示：只有当前选中的引擎才显示真实状态，其余显示许可信息 */
 function modelStateForEngine(engine: (typeof AI_ENGINES)[number]['key']): ModelState {
@@ -641,10 +674,8 @@ onBeforeUnmount(() => {
               <input v-else v-model="workspace.matte.rmbgModelId" class="input" type="text" />
             </label>
             <label class="field"><span class="field-label">精度</span>
-              <select v-model="workspace.matte.aiDtype" class="select" title="FP16 是推荐默认值，可降低浏览器内存占用；FP32 最吃内存；Q8 仅适用于模型提供量化权重的情况">
-                <option value="fp16">FP16 半精度（推荐，内存更友好）</option>
-                <option value="fp32">FP32 高精度（兼容性广，最吃内存）</option>
-                <option value="q8">Q8 量化（较快较省内存，需模型提供量化权重）</option>
+              <select v-model="workspace.matte.aiDtype" class="select" title="FP16 是推荐默认值，可降低浏览器内存占用；FP32 最吃内存；Q8 仅适用于模型提供量化权重的情况（本模型没有的精度不会列出）">
+                <option v-for="option in dtypeChoices" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
             </label>
           </template>
@@ -656,8 +687,7 @@ onBeforeUnmount(() => {
           </label>
           <label class="field"><span class="field-label">运行设备</span>
             <select v-model="workspace.matte.aiDevice" class="select">
-              <option value="cpu">CPU（WASM，通用）</option>
-              <option value="gpu">GPU（WebGPU，需浏览器支持）</option>
+              <option v-for="option in deviceChoices" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
           <label class="field"><span class="field-label">最大边长</span>
@@ -691,8 +721,7 @@ onBeforeUnmount(() => {
           </label>
           <label class="field"><span class="field-label">运行设备</span>
             <select v-model="workspace.matte.aiDevice" class="select">
-              <option value="cpu">CPU（WASM，通用）</option>
-              <option value="gpu">GPU（WebGPU，需浏览器支持）</option>
+              <option v-for="option in deviceChoices" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
           <label class="field"><span class="field-label">最大边长</span>
