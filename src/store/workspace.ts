@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import type { ShadowMode } from '@/core/color-key'
+import type { ImageCropRect } from '@/core/crop'
 
 export type WorkspacePage = 'atlas' | 'matte' | 'video'
 
@@ -41,6 +42,10 @@ export interface VideoFrame {
   url: string
   /** 抠图结果（dataURL PNG），存在时优先展示与导出 */
   matteUrl?: string
+  /** 裁切区域（相对帧图像像素坐标），各帧使用同一区域，便于重置与重新裁切 */
+  crop?: ImageCropRect
+  /** 裁切结果（dataURL PNG），存在时在抠图结果之上优先展示与导出 */
+  cropUrl?: string
   timestamp: number
   selected: boolean
 }
@@ -55,6 +60,16 @@ export interface VideoMatteSettings {
   shadow: ShadowMode
   /** 手动指定的背景基准色（#rrggbb）；为空时自动从图像四边采样 */
   baseColor: string
+}
+
+/** 一键处理流水线的步骤开关与裁切区域 */
+export interface VideoPipelineSettings {
+  /** 是否启用裁切步骤（需框选区域，默认关闭） */
+  cropEnabled: boolean
+  /** 是否启用抠图步骤（默认开启，按需求默认使用模型抠图） */
+  matteEnabled: boolean
+  /** 裁切区域（图像像素坐标），各帧共用同一区域 */
+  crop: ImageCropRect | null
 }
 
 export interface VideoState {
@@ -77,12 +92,19 @@ export interface VideoState {
   frames: VideoFrame[]
   /** 帧抠图设置（抽帧后按帧执行，不参与抽帧过程） */
   matte: VideoMatteSettings
+  /** 一键处理流水线配置 */
+  pipeline: VideoPipelineSettings
   status: 'empty' | 'ready' | 'processing' | 'done' | 'error'
 }
 
-/** 帧的展示/导出图像：已抠图则用抠图结果 */
-export function frameImageUrl(frame: VideoFrame): string {
+/** 帧的裁切输入图像：裁切叠加在抠图结果之上，未抠图时用原始抽帧画面 */
+export function frameBaseUrl(frame: VideoFrame): string {
   return frame.matteUrl ?? frame.url
+}
+
+/** 帧的展示/导出图像：裁切结果 > 抠图结果 > 原始抽帧画面 */
+export function frameImageUrl(frame: VideoFrame): string {
+  return frame.cropUrl ?? frameBaseUrl(frame)
 }
 
 export const workspace = reactive({
@@ -97,7 +119,8 @@ export const workspace = reactive({
   video: {
     fileName: '', sourceUrl: '', duration: 0, width: 0, height: 0, fps: 30,
     start: 0, end: 0, mode: 'count', count: 12, targetFps: 12, outputWidth: 0, outputHeight: 0, flipX: false, rotation: 0, error: '', frames: [], status: 'empty',
-    matte: { mode: 'solid', tolerance: 24, shadow: 'neutral', baseColor: '' } as VideoMatteSettings,
+    matte: { mode: 'birefnet', tolerance: 24, shadow: 'neutral', baseColor: '' } as VideoMatteSettings,
+    pipeline: { cropEnabled: false, matteEnabled: true, crop: null } as VideoPipelineSettings,
   } as VideoState,
 })
 
@@ -111,7 +134,7 @@ try {
 export function persistMediaSettings(): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({
     matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, birefnetModelId: workspace.matte.birefnetModelId, rmbgModelId: workspace.matte.rmbgModelId, samModelId: workspace.matte.samModelId },
-    video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, outputWidth: workspace.video.outputWidth, outputHeight: workspace.video.outputHeight, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte } },
+    video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, outputWidth: workspace.video.outputWidth, outputHeight: workspace.video.outputHeight, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte }, pipeline: { ...workspace.video.pipeline }, },
   }))
 }
 

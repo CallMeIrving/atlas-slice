@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { persistMediaSettings, workspace, type MatteMode } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
 import { applyColorKey, solidColorKey } from '@/core/color-key'
-import { removeWithImgly, removeWithTransformers, segmentWithSam, preloadMattingModel, AI_ENGINES, describeMattingError, type MatteProgress } from '@/core/ai-matting'
+import { removeWithImgly, removeWithTransformers, segmentWithSam, AI_ENGINES, describeMattingError, type MatteProgress } from '@/core/ai-matting'
+import { ensureMatteModelLoaded, matteModelKey, modelStateLabel, modelStatus, setModelState, type ModelEngine, type ModelState } from '@/store/model-status'
 
 const input = ref<HTMLInputElement>()
 const image = ref<HTMLImageElement>()
@@ -50,8 +51,6 @@ const samHistory = ref<Array<'box' | 'point'>>([])
 const maskUrl = ref('')
 const showMask = ref(false)
 const displayRect = ref({ left: 0, top: 0, width: 0, height: 0 })
-type ModelState = 'unknown' | 'loading' | 'ready' | 'error'
-const modelStates = reactive<Record<string, { state: ModelState; message?: string }>>({})
 
 const modeOptions: { value: MatteMode; label: string }[] = [
   { value: 'auto', label: '自动抠图（边缘色）' },
@@ -86,28 +85,14 @@ const zoomPercent = computed(() => `${Math.round(zoomLevel.value * 100)}%`)
 const imageViewStyle = computed(() => ({ width: fitImageSize.value.width ? `${fitImageSize.value.width}px` : 'auto', height: fitImageSize.value.height ? `${fitImageSize.value.height}px` : 'auto', transform: `translate3d(${panOffset.value.x}px, ${panOffset.value.y}px, 0) scale(${zoomLevel.value})` }))
 const runDisabled = computed(() => !workspace.matte.sourceUrl || workspace.matte.status === 'processing' || (workspace.matte.mode === 'sam' && !workspace.matte.samBoxes.length && !workspace.matte.samPoints.length))
 const undoSamDisabled = computed(() => workspace.matte.status === 'processing' || (!samHistory.value.length && !samDragging.value))
-const selectedModelKey = computed(() => {
-  const mode = workspace.matte.mode
-  if (mode === 'imgly') return `imgly|${workspace.matte.imglyModel}|${workspace.matte.aiDevice}|${workspace.matte.imglyPublicPath}`
-  if (mode === 'birefnet') return `birefnet|${workspace.matte.birefnetModelId}|${workspace.matte.aiDtype}|${workspace.matte.aiDevice}|${workspace.matte.aiModelHost}`
-  if (mode === 'rmbg') return `rmbg|${workspace.matte.rmbgModelId}|${workspace.matte.aiDtype}|${workspace.matte.aiDevice}|${workspace.matte.aiModelHost}`
-  if (mode === 'sam') return `sam|${workspace.matte.samModelId}|${workspace.matte.aiDevice}|${workspace.matte.aiModelHost}`
-  return ''
-})
-const selectedModelState = computed(() => selectedModelKey.value ? (modelStates[selectedModelKey.value]?.state ?? 'unknown') : 'unknown')
+/** 当前处理方式对应的模型 key；非 AI 方式返回空串。key 由共享 store 生成，与视频帧一键处理弹窗一致 */
+const selectedModelKey = computed(() => (isAiMode.value ? matteModelKey(workspace.matte.mode as ModelEngine) : ''))
+const selectedModelState = computed<ModelState>(() => (selectedModelKey.value ? (modelStatus[selectedModelKey.value]?.state ?? 'unknown') : 'unknown'))
 
-function modelStateLabel(state: ModelState): string {
-  return state === 'ready' ? '已加载' : state === 'loading' ? '加载中…' : state === 'error' ? '加载失败' : '未加载'
-}
-
+/** 模型状态区展示：只有当前选中的引擎才显示真实状态，其余显示许可信息 */
 function modelStateForEngine(engine: (typeof AI_ENGINES)[number]['key']): ModelState {
-  const mode = workspace.matte.mode
-  if (mode !== engine) return 'unknown'
+  if (workspace.matte.mode !== engine) return 'unknown'
   return selectedModelState.value
-}
-
-function setModelState(key: string, state: ModelState, message?: string): void {
-  modelStates[key] = { state, message }
 }
 
 watch(
@@ -127,12 +112,9 @@ watch(
   { deep: true },
 )
 
+/** 预加载当前处理方式的模型：加载状态与进行中的 Promise 均由共享 store 管理，重复点击不会重复下载 */
 async function preloadSelectedModel(): Promise<void> {
-  const mode = workspace.matte.mode
-  if (!['imgly', 'birefnet', 'rmbg', 'sam'].includes(mode)) return
-  const key = selectedModelKey.value
-  if (!key || modelStates[key]?.state === 'loading' || modelStates[key]?.state === 'ready') return
-  setModelState(key, 'loading')
+  if (!isAiMode.value) return
   workspace.matte.aiStatus = '准备模型…'
   workspace.matte.aiProgress = -1
   const onProgress = (progress: MatteProgress): void => {
@@ -140,20 +122,10 @@ async function preloadSelectedModel(): Promise<void> {
     workspace.matte.aiProgress = progress.percent ?? -1
   }
   try {
-    if (mode === 'imgly') await preloadMattingModel({ engine: 'imgly', model: workspace.matte.imglyModel, device: workspace.matte.aiDevice, maxSide: 1, publicPath: workspace.matte.imglyPublicPath || undefined, onProgress })
-    else if (mode === 'birefnet' || mode === 'rmbg') await preloadMattingModel({ engine: mode, modelId: mode === 'birefnet' ? workspace.matte.birefnetModelId : workspace.matte.rmbgModelId, dtype: workspace.matte.aiDtype, device: workspace.matte.aiDevice, modelHost: workspace.matte.aiModelHost, maxSide: workspace.matte.aiMaxSide, onProgress })
-    else await preloadMattingModel({ engine: 'sam', modelId: workspace.matte.samModelId, device: workspace.matte.aiDevice, modelHost: workspace.matte.aiModelHost, boxes: [], points: [], maxSide: workspace.matte.aiMaxSide, onProgress })
-    setModelState(key, 'ready')
+    await ensureMatteModelLoaded(workspace.matte.mode as ModelEngine, onProgress)
     workspace.matte.aiStatus = '模型已加载，可直接开始处理'
   } catch (error) {
-    console.error('[模型预加载失败]', {
-      mode,
-      modelKey: key,
-      modelId: mode === 'sam' ? workspace.matte.samModelId : undefined,
-      error,
-    })
     const message = error instanceof Error ? error.message : '模型加载失败'
-    setModelState(key, 'error', message)
     workspace.matte.aiStatus = `${message}（详细信息已输出到浏览器控制台）`
   } finally {
     workspace.matte.aiProgress = -1

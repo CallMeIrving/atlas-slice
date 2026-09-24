@@ -1,5 +1,37 @@
 import type { AtlasFrame } from '@/types/atlas'
 
+/** 图像裁切矩形（以图像原始像素为坐标系） */
+export interface ImageCropRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * 把裁切矩形收敛到图像范围内：宽高至少 1px，位置不得越界，并统一取整
+ * 视频帧裁切作用于全部帧，各帧尺寸可能不同，统一用此函数保证结果合法
+ */
+export function clampCropRect(rect: ImageCropRect, imageWidth: number, imageHeight: number): ImageCropRect {
+  const width = Math.min(Math.max(1, Math.round(rect.width)), Math.max(1, imageWidth))
+  const height = Math.min(Math.max(1, Math.round(rect.height)), Math.max(1, imageHeight))
+  const x = Math.min(Math.max(0, Math.round(rect.x)), Math.max(0, imageWidth - width))
+  const y = Math.min(Math.max(0, Math.round(rect.y)), Math.max(0, imageHeight - height))
+  return { x, y, width, height }
+}
+
+/** 从已加载的图像按矩形裁出 PNG dataURL，供帧裁切预览与结果保存使用 */
+export function cropImageToDataUrl(image: HTMLImageElement, rect: ImageCropRect): string {
+  const area = clampCropRect(rect, image.naturalWidth, image.naturalHeight)
+  const canvas = document.createElement('canvas')
+  canvas.width = area.width
+  canvas.height = area.height
+  const ctx = canvas.getContext('2d')!
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(image, area.x, area.y, area.width, area.height, 0, 0, area.width, area.height)
+  return canvas.toDataURL('image/png')
+}
+
 export type CropMode = 'content' | 'frame'
 
 export interface CropOptions {
