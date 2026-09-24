@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import type { ShadowMode } from '@/core/color-key'
 
 export type WorkspacePage = 'atlas' | 'matte' | 'video'
 
@@ -36,9 +37,24 @@ export interface MatteState {
 
 export interface VideoFrame {
   id: string
+  /** 抽帧原始图像（dataURL PNG） */
   url: string
+  /** 抠图结果（dataURL PNG），存在时优先展示与导出 */
+  matteUrl?: string
   timestamp: number
   selected: boolean
+}
+
+/** 视频帧抠图方式：solid 走纯色背景色相判据，其余为 AI 模型 */
+export type FrameMatteMode = 'solid' | 'imgly' | 'birefnet' | 'rmbg'
+
+export interface VideoMatteSettings {
+  mode: FrameMatteMode
+  /** 颜色容差，色相判据下换算为色相窗口与饱和度窗口 */
+  tolerance: number
+  shadow: ShadowMode
+  /** 手动指定的背景基准色（#rrggbb）；为空时自动从图像四边采样 */
+  baseColor: string
 }
 
 export interface VideoState {
@@ -52,8 +68,6 @@ export interface VideoState {
   outputHeight: number
   flipX: boolean
   rotation: 0 | 90 | 180 | 270
-  batchMatte: boolean
-  matteTolerance: number
   error: string
   start: number
   end: number
@@ -61,7 +75,14 @@ export interface VideoState {
   count: number
   targetFps: number
   frames: VideoFrame[]
+  /** 帧抠图设置（抽帧后按帧执行，不参与抽帧过程） */
+  matte: VideoMatteSettings
   status: 'empty' | 'ready' | 'processing' | 'done' | 'error'
+}
+
+/** 帧的展示/导出图像：已抠图则用抠图结果 */
+export function frameImageUrl(frame: VideoFrame): string {
+  return frame.matteUrl ?? frame.url
 }
 
 export const workspace = reactive({
@@ -75,7 +96,8 @@ export const workspace = reactive({
   } as MatteState,
   video: {
     fileName: '', sourceUrl: '', duration: 0, width: 0, height: 0, fps: 30,
-    start: 0, end: 0, mode: 'count', count: 12, targetFps: 12, outputWidth: 0, outputHeight: 0, flipX: false, rotation: 0, batchMatte: false, matteTolerance: 24, error: '', frames: [], status: 'empty',
+    start: 0, end: 0, mode: 'count', count: 12, targetFps: 12, outputWidth: 0, outputHeight: 0, flipX: false, rotation: 0, error: '', frames: [], status: 'empty',
+    matte: { mode: 'solid', tolerance: 24, shadow: 'neutral', baseColor: '' } as VideoMatteSettings,
   } as VideoState,
 })
 
@@ -89,7 +111,7 @@ try {
 export function persistMediaSettings(): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({
     matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, birefnetModelId: workspace.matte.birefnetModelId, rmbgModelId: workspace.matte.rmbgModelId, samModelId: workspace.matte.samModelId },
-    video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, outputWidth: workspace.video.outputWidth, outputHeight: workspace.video.outputHeight, flipX: workspace.video.flipX, rotation: workspace.video.rotation, batchMatte: workspace.video.batchMatte, matteTolerance: workspace.video.matteTolerance },
+    video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, outputWidth: workspace.video.outputWidth, outputHeight: workspace.video.outputHeight, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte } },
   }))
 }
 
