@@ -1,14 +1,14 @@
 // 下载抠图模型到 public/models/，让本地权重可复现
 // 用法：
 //   node scripts/download-models.mjs                  # 下载界面可选的全部精度（约 750MB）
-//   node scripts/download-models.mjs --fp16-only      # 只下默认 FP16（BiRefNet/RMBG）+ SAM Q8（约 310MB）
+//   node scripts/download-models.mjs --fp16-only      # 只下默认 FP16（BiRefNet/RMBG，约 200MB）
 //   node scripts/download-models.mjs --repo=briaai/RMBG-1.4   # 只下某一个模型
 //   node scripts/download-models.mjs --host=https://huggingface.co
 //   node scripts/download-models.mjs --force          # 已存在的文件也重新下载
 // 说明：
 // - 模型清单来自 src/core/model-registry.json，与浏览器端「模型管理」弹窗共用同一份数据。
 // - public/models/* 被 .gitignore 忽略，换机器或清空工作区后需要重跑本脚本。
-// - 代码对 BiRefNet / RMBG-1.4 / SAM 强制 local_files_only，缺文件不会回落远程，必须下全。
+// - 代码对 BiRefNet / RMBG-1.4 强制 local_files_only，缺文件不会回落远程，必须下全。
 // - 下载中断会保留 .part 文件，下次运行用 Range 请求续传；下载完成后按字节数校验。
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { Readable } from 'node:stream'
@@ -75,7 +75,7 @@ async function main() {
   }
 
   console.log(`模型源：${HOST}${hostArg ? '（--host 指定）' : ''}`)
-  console.log(`下载范围：${onlyRepo ? `仅 ${selected[0].id}` : baseOnly ? '精简集（默认 FP16 + SAM Q8）' : '全量（所有精度）'}\n`)
+  console.log(`下载范围：${onlyRepo ? `仅 ${selected[0].id}` : baseOnly ? '精简集（默认 FP16）' : '全量（所有精度）'}\n`)
 
   let downloaded = 0
   let skipped = 0

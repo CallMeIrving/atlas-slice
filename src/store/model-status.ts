@@ -11,7 +11,7 @@ import { workspace } from '@/store/workspace'
  */
 
 export type ModelState = 'unknown' | 'loading' | 'ready' | 'error'
-export type ModelEngine = 'imgly' | 'birefnet' | 'rmbg' | 'sam'
+export type ModelEngine = 'imgly' | 'birefnet' | 'rmbg'
 
 export interface ModelStatusEntry {
   state: ModelState
@@ -23,8 +23,7 @@ export function matteModelKey(engine: ModelEngine): string {
   const ai = workspace.matte
   if (engine === 'imgly') return `imgly|${ai.imglyModel}|${ai.aiDevice}|${ai.imglyPublicPath}`
   if (engine === 'birefnet') return `birefnet|${ai.birefnetModelId}|${ai.aiDtype}|${ai.aiDevice}|${ai.aiModelHost}`
-  if (engine === 'rmbg') return `rmbg|${ai.rmbgModelId}|${ai.aiDtype}|${ai.aiDevice}|${ai.aiModelHost}`
-  return `sam|${ai.samModelId}|${ai.aiDevice}|${ai.aiModelHost}`
+  return `rmbg|${ai.rmbgModelId}|${ai.aiDtype}|${ai.aiDevice}|${ai.aiModelHost}`
 }
 
 export const modelStatus = reactive<Record<string, ModelStatusEntry>>({})
@@ -47,7 +46,7 @@ const pendingLoads = new Map<string, Promise<void>>()
  * 加载其中任一引擎都会释放其余引擎的 ONNX 会话（见 core/ai-matting 的会话驱逐），
  * 因此它们之间不能同时保持「已加载」。imgly 走另一个 onnxruntime 副本，独立存在，不在此列。
  */
-const SHARED_HEAP_ENGINES: ModelEngine[] = ['birefnet', 'rmbg', 'sam']
+const SHARED_HEAP_ENGINES: ModelEngine[] = ['birefnet', 'rmbg']
 
 /**
  * 让同堆引擎中除本次加载之外的模型状态失效。
@@ -81,8 +80,6 @@ export async function ensureMatteModelLoaded(engine: ModelEngine, onProgress?: (
     try {
       if (engine === 'imgly') {
         await preloadMattingModel({ engine: 'imgly', model: ai.imglyModel, device: ai.aiDevice, maxSide: 1, publicPath: ai.imglyPublicPath || undefined, onProgress })
-      } else if (engine === 'sam') {
-        await preloadMattingModel({ engine: 'sam', modelId: ai.samModelId, device: ai.aiDevice, modelHost: ai.aiModelHost, boxes: [], points: [], maxSide: ai.aiMaxSide, onProgress })
       } else {
         await preloadMattingModel({ engine, modelId: engine === 'birefnet' ? ai.birefnetModelId : ai.rmbgModelId, dtype: ai.aiDtype, device: ai.aiDevice, modelHost: ai.aiModelHost, maxSide: ai.aiMaxSide, onProgress })
       }

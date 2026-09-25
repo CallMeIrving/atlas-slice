@@ -37,7 +37,7 @@ import { workspace } from '@/store/workspace'
  * 内存中的加载状态、卸载入口与下载命令。
  *
  * 注意浏览器没有文件系统写权限：ISNet 的资源能直接在页面内下载（官方 CDN，
- * 由浏览器缓存），而 BiRefNet / RMBG-1.4 / SAM 的权重必须落在项目的 public/models 下
+ * 由浏览器缓存），而 BiRefNet / RMBG-1.4 的权重必须落在项目的 public/models 下
  * （代码对它们强制 local_files_only，缺文件不会回落远程），这里只做检测并提供终端命令。
  */
 const emit = defineEmits<{ close: [] }>()
@@ -75,10 +75,9 @@ interface EngineRow {
   state: ModelState
 }
 
-/** 引擎实际使用的精度：ISNet 由 imglyModel 决定，SAM 固定 Q8，其余走共享 aiDtype */
+/** 引擎实际使用的精度：ISNet 由 imglyModel 决定，其余走共享 aiDtype */
 function effectiveDtype(engine: ModelEngine): MatteDtype {
   if (engine === 'imgly') return imglyDtypeForModel(workspace.matte.imglyModel)
-  if (engine === 'sam') return 'q8'
   return resolveDtype(engine, workspace.matte.aiDtype)
 }
 

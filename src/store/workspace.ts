@@ -4,7 +4,7 @@ import type { ImageCropRect } from '@/core/crop'
 
 export type WorkspacePage = 'atlas' | 'matte' | 'video'
 
-export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'birefnet' | 'rmbg' | 'sam'
+export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'birefnet' | 'rmbg'
 
 export interface MatteState {
   fileName: string
@@ -25,11 +25,6 @@ export interface MatteState {
   aiModelHost: 'huggingface.co' | 'hf-mirror.com'
   birefnetModelId: string
   rmbgModelId: string
-  samModelId: string
-  /** SAM 交互状态 */
-  samBoxes: { x1: number; y1: number; x2: number; y2: number }[]
-  samPoints: { x: number; y: number; label: 0 | 1 }[]
-  samTool: 'box' | 'fg' | 'bg'
   /** AI 处理状态（进度文本/百分比） */
   aiStatus: string
   aiProgress: number
@@ -113,8 +108,8 @@ export const workspace = reactive({
     fileName: '', sourceUrl: '', resultUrl: '', mode: 'auto', background: 'checker',
     tolerance: 24, cropTransparent: true, brushSize: 24, sampledColor: '', status: 'empty',
     aiMaxSide: 0, imglyModel: 'isnet_fp16', imglyPublicPath: '', aiDevice: 'cpu', aiDtype: 'fp16', aiModelHost: 'huggingface.co',
-    birefnetModelId: 'onnx-community/BiRefNet_lite-ONNX', rmbgModelId: 'briaai/RMBG-1.4', samModelId: 'Xenova/sam-vit-base',
-    samBoxes: [], samPoints: [], samTool: 'box', aiStatus: '', aiProgress: -1,
+    birefnetModelId: 'onnx-community/BiRefNet_lite-ONNX', rmbgModelId: 'briaai/RMBG-1.4',
+    aiStatus: '', aiProgress: -1,
   } as MatteState,
   video: {
     fileName: '', sourceUrl: '', duration: 0, width: 0, height: 0, fps: 30,
@@ -125,15 +120,19 @@ export const workspace = reactive({
 })
 
 const SETTINGS_KEY = 'atlas-slice:media-settings'
+/** 界面支持的处理方式，用于丢弃本地设置里已下线的取值 */
+const MATTE_MODES: MatteMode[] = ['auto', 'color', 'solid', 'imgly', 'birefnet', 'rmbg']
 try {
   const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null') as { matte?: Partial<MatteState>; video?: Partial<VideoState> } | null
   if (saved?.matte) Object.assign(workspace.matte, saved.matte)
+  // 旧版本可能存过已经移除的处理方式，直接收敛到默认值，避免下拉框出现空选项
+  if (!MATTE_MODES.includes(workspace.matte.mode)) workspace.matte.mode = 'auto'
   if (saved?.video) Object.assign(workspace.video, saved.video)
 } catch { /* ignore invalid local settings */ }
 
 export function persistMediaSettings(): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-    matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, birefnetModelId: workspace.matte.birefnetModelId, rmbgModelId: workspace.matte.rmbgModelId, samModelId: workspace.matte.samModelId },
+    matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, birefnetModelId: workspace.matte.birefnetModelId, rmbgModelId: workspace.matte.rmbgModelId },
     video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, outputWidth: workspace.video.outputWidth, outputHeight: workspace.video.outputHeight, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte }, pipeline: { ...workspace.video.pipeline }, },
   }))
 }

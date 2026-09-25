@@ -22,19 +22,6 @@
         { "file": "onnx/model_quantized.onnx", "size": 44403226, "tier": "extra", "note": "Q8" },
         { "file": "onnx/model.onnx", "size": 176153355, "tier": "extra", "note": "FP32" }
       ]
-    },
-    {
-      "id": "Xenova/sam-vit-base",
-      "label": "SAM（项目固定 Q8）",
-      "engine": "sam",
-      "files": [
-        { "file": "config.json", "size": 440, "tier": "base" },
-        { "file": "preprocessor_config.json", "size": 466, "tier": "base" },
-        { "file": "quantize_config.json", "size": 2017, "tier": "base" },
-        { "file": "onnx/vision_encoder_quantized.onnx", "size": 101088469, "tier": "base" },
-        { "file": "onnx/prompt_encoder_mask_decoder_quantized.onnx", "size": 4903810, "tier": "base", "note": "SAM 的权重拆成编码器与解码器两个文件" },
-        { "file": "processor_config.json", "size": 40, "tier": "base", "content": "{\n  \"processor_class\": \"SamProcessor\"\n}\n", "note": "上游仓库没有该文件，由下载脚本直接生成" }
-      ]
     }
   ]
 }

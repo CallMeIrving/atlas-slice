@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { persistMediaSettings, workspace, type MatteMode } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
 import { applyColorKey, solidColorKey } from '@/core/color-key'
-import { removeWithImgly, removeWithTransformers, segmentWithSam, AI_ENGINES, AI_MAX_SIDE_OPTIONS, describeMattingError, deviceOptions, dtypeOptions, imglyDtypeForModel, modelBlockReason, resolveDevice, resolveDtype, type AiEngine, type MatteDtype, type MatteProgress } from '@/core/ai-matting'
+import { removeWithImgly, removeWithTransformers, AI_ENGINES, AI_MAX_SIDE_OPTIONS, describeMattingError, deviceOptions, dtypeOptions, imglyDtypeForModel, modelBlockReason, resolveDevice, resolveDtype, type AiEngine, type MatteDtype, type MatteProgress } from '@/core/ai-matting'
 import { ensureMatteModelLoaded, matteModelKey, modelStateLabel, modelStatus, setModelState, type ModelEngine, type ModelState } from '@/store/model-status'
 
 const input = ref<HTMLInputElement>()
@@ -14,7 +14,6 @@ const zoomLevel = ref(1)
 const panOffset = ref({ x: 0, y: 0 })
 const panPointer = ref<{ id: number; x: number; y: number; startX: number; startY: number } | null>(null)
 const suppressImageClick = ref(false)
-const spacePanActive = ref(false)
 const fitImageSize = ref({ width: 0, height: 0 })
 let canvasResizeObserver: ResizeObserver | undefined
 const sampling = ref(false)
@@ -29,7 +28,6 @@ const methodHelp = [
   { title: 'ISNet（imgly）', kind: 'AI 模型', description: '本地运行的通用前景分割模型，默认使用 FP16。', scene: '常见人像、商品和插画的快速自动抠图。', recommendation: '通用场景优先试用；速度和内存占用相对均衡。' },
   { title: 'BiRefNet', kind: 'AI 模型', description: '输出前景分割蒙版，再合成为透明 PNG；可选 FP16、FP32 或 Q8。', scene: '复杂轮廓、细节较多，需要更精细前景蒙版的图片。', recommendation: '优先试 FP16；模型较大，浏览器内存不足时改用 ISNet。' },
   { title: 'RMBG-1.4（BRIA）', kind: 'AI 模型', description: '通用显著性分割模型，输出蒙版并合成为透明 PNG。', scene: '主体明确、背景较复杂的单张图片。', recommendation: '仅限非商业用途；模型推理占用较多内存，浏览器资源不足时改用 ISNet。' },
-  { title: 'SAM 框选分割', kind: '交互分割', description: '用多个框选区域和前景/背景提示点引导模型分割，框选区域会合并。', scene: '只想保留画面中的特定对象，或一张图里有多个需要保留的区域。', recommendation: '先框住目标；漏选时追加框或前景点，误选背景时添加背景点。操作错误可用撤销；缩放后按住空格拖动画布。' },
 ]
 
 async function openHelp(): Promise<void> {
@@ -43,15 +41,6 @@ function closeHelp(): void {
   void nextTick(() => helpButton.value?.focus())
 }
 
-// SAM 交互状态
-const samDragging = ref(false)
-const samStart = ref<{ x: number; y: number } | null>(null)
-const samDrag = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
-const samHistory = ref<Array<'box' | 'point'>>([])
-const maskUrl = ref('')
-const showMask = ref(false)
-const displayRect = ref({ left: 0, top: 0, width: 0, height: 0 })
-
 const modeOptions: { value: MatteMode; label: string }[] = [
   { value: 'auto', label: '自动抠图（边缘色）' },
   { value: 'color', label: '颜色抠图' },
@@ -59,13 +48,6 @@ const modeOptions: { value: MatteMode; label: string }[] = [
   { value: 'imgly', label: 'ISNet（imgly）' },
   { value: 'birefnet', label: 'BiRefNet' },
   { value: 'rmbg', label: 'RMBG-1.4（BRIA）' },
-  { value: 'sam', label: 'SAM 框选分割' },
-]
-
-const samTools: { value: 'box' | 'fg' | 'bg'; label: string }[] = [
-  { value: 'box', label: '框选' },
-  { value: 'fg', label: '前景点' },
-  { value: 'bg', label: '背景点' },
 ]
 
 const backgroundOptions: { value: 'checker' | 'white' | 'black' | 'original'; label: string }[] = [
@@ -79,34 +61,32 @@ function setBackground(value: 'checker' | 'white' | 'black' | 'original'): void 
   workspace.matte.background = value
 }
 
-const isAiMode = computed(() => ['imgly', 'birefnet', 'rmbg', 'sam'].includes(workspace.matte.mode))
-const canPanImage = computed(() => Boolean(workspace.matte.sourceUrl) && (workspace.matte.mode !== 'sam' || spacePanActive.value))
+const isAiMode = computed(() => ['imgly', 'birefnet', 'rmbg'].includes(workspace.matte.mode))
+const canPanImage = computed(() => Boolean(workspace.matte.sourceUrl))
 const zoomPercent = computed(() => `${Math.round(zoomLevel.value * 100)}%`)
 const imageViewStyle = computed(() => ({ width: fitImageSize.value.width ? `${fitImageSize.value.width}px` : 'auto', height: fitImageSize.value.height ? `${fitImageSize.value.height}px` : 'auto', transform: `translate3d(${panOffset.value.x}px, ${panOffset.value.y}px, 0) scale(${zoomLevel.value})` }))
 /**
  * 当前所选 AI 模型在当前设备上的不可用原因（例如内置 BiRefNet 权重超出了
  * wasm 4GB 堆 / WebGPU storage buffer 上限）；可用时为空串。
  * 必须先判定引擎：BiRefNet 的模型 ID 字段在其它引擎下也一直有值，
- * 不加这层判断会给 ISNet / SAM 误报「不可用」，还会错误地禁用「开始抠图」。
+ * 不加这层判断会给 ISNet / RMBG 误报「不可用」，还会错误地禁用「开始抠图」。
  */
 const blockedReason = computed(() => {
   if (workspace.matte.mode !== 'birefnet' && workspace.matte.mode !== 'rmbg') return ''
   const modelId = workspace.matte.mode === 'rmbg' ? workspace.matte.rmbgModelId : workspace.matte.birefnetModelId
   return modelBlockReason(modelId, workspace.matte.aiDevice) ?? ''
 })
-const runDisabled = computed(() => !workspace.matte.sourceUrl || workspace.matte.status === 'processing' || Boolean(blockedReason.value) || (workspace.matte.mode === 'sam' && !workspace.matte.samBoxes.length && !workspace.matte.samPoints.length))
-const undoSamDisabled = computed(() => workspace.matte.status === 'processing' || (!samHistory.value.length && !samDragging.value))
+const runDisabled = computed(() => !workspace.matte.sourceUrl || workspace.matte.status === 'processing' || Boolean(blockedReason.value))
 /** 当前处理方式对应的模型 key；非 AI 方式返回空串。key 由共享 store 生成，与视频帧一键处理弹窗一致 */
 const selectedModelKey = computed(() => (isAiMode.value ? matteModelKey(workspace.matte.mode as ModelEngine) : ''))
 const selectedModelState = computed<ModelState>(() => (selectedModelKey.value ? (modelStatus[selectedModelKey.value]?.state ?? 'unknown') : 'unknown'))
 
 /** 当前 AI 引擎；颜色类抠图没有模型，返回 null */
 const aiEngine = computed<AiEngine | null>(() => (isAiMode.value ? (workspace.matte.mode as AiEngine) : null))
-/** 引擎实际使用的精度：ISNet 由 imglyModel 决定，SAM 固定 Q8，其余走共享的 aiDtype */
+/** 引擎实际使用的精度：ISNet 由 imglyModel 决定，其余走共享的 aiDtype */
 const effectiveDtype = computed<MatteDtype>(() => {
   const mode = workspace.matte.mode
   if (mode === 'imgly') return imglyDtypeForModel(workspace.matte.imglyModel)
-  if (mode === 'sam') return 'q8'
   return workspace.matte.aiDtype
 })
 /** 当前引擎可选的精度与设备选项：模型没有的精度、跑不了的设备都不出现 */
@@ -150,7 +130,6 @@ watch(
     aiModelHost: workspace.matte.aiModelHost,
     birefnetModelId: workspace.matte.birefnetModelId,
     rmbgModelId: workspace.matte.rmbgModelId,
-    samModelId: workspace.matte.samModelId,
   }),
   () => persistMediaSettings(),
   { deep: true },
@@ -184,10 +163,6 @@ const backgroundStyle = computed(() => {
   return { background: '#101217' }
 })
 
-function setSamTool(tool: 'box' | 'fg' | 'bg'): void {
-  workspace.matte.samTool = tool
-}
-
 function openFile(): void { input.value?.click() }
 
 function load(file?: File): void {
@@ -197,17 +172,10 @@ function load(file?: File): void {
   workspace.matte.sourceUrl = URL.createObjectURL(file)
   workspace.matte.resultUrl = ''
   workspace.matte.sampledColor = ''
-  workspace.matte.samBoxes = []
-  workspace.matte.samPoints = []
-  samHistory.value = []
   workspace.matte.aiStatus = ''
   workspace.matte.aiProgress = -1
-  if (maskUrl.value) URL.revokeObjectURL(maskUrl.value)
-  maskUrl.value = ''
-  showMask.value = false
   workspace.matte.status = 'ready'
   resetView()
-  void nextTick(updateDisplayRect)
 }
 
 function resetView(): void {
@@ -231,7 +199,6 @@ function fitImageToCanvas(resetZoom = false): void {
     zoomLevel.value = 1
     panOffset.value = { x: 0, y: 0 }
   }
-  void nextTick(updateDisplayRect)
 }
 
 function applyZoom(nextZoom: number, localX?: number, localY?: number): void {
@@ -247,7 +214,6 @@ function applyZoom(nextZoom: number, localX?: number, localY?: number): void {
     y: centerY - ((centerY - panOffset.value.y) / oldZoom) * newZoom,
   }
   zoomLevel.value = newZoom
-  void nextTick(updateDisplayRect)
 }
 
 function zoomIn(): void { applyZoom(zoomLevel.value * 1.2) }
@@ -262,10 +228,7 @@ function zoomAtPointer(event: WheelEvent): void {
 }
 
 function onPanStart(event: PointerEvent): void {
-  const isSamPan = workspace.matte.mode === 'sam' && spacePanActive.value
-  const startedOnImage = event.target === image.value || (event.target instanceof Element && Boolean(event.target.closest('.sam-overlay')))
-  if (event.button !== 0 || event.pointerType !== 'mouse' || !startedOnImage) return
-  if (workspace.matte.mode === 'sam' && !isSamPan) return
+  if (event.button !== 0 || event.pointerType !== 'mouse' || event.target !== image.value) return
   panPointer.value = { id: event.pointerId, x: event.clientX, y: event.clientY, startX: panOffset.value.x, startY: panOffset.value.y }
   suppressImageClick.value = false
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
@@ -278,7 +241,6 @@ function onPanMove(event: PointerEvent): void {
   const dy = event.clientY - active.y
   if (Math.abs(dx) + Math.abs(dy) > 3) suppressImageClick.value = true
   panOffset.value = { x: active.startX + dx, y: active.startY + dy }
-  void nextTick(updateDisplayRect)
 }
 
 function onPanEnd(event: PointerEvent): void {
@@ -358,6 +320,7 @@ async function runMatte(): Promise<void> {
   const img = image.value
   if (!workspace.matte.sourceUrl || !img) return
   const modelKey = selectedModelKey.value
+  const mode = workspace.matte.mode
   workspace.matte.status = 'processing'
   workspace.matte.aiStatus = ''
   workspace.matte.aiProgress = -1
@@ -366,7 +329,6 @@ async function runMatte(): Promise<void> {
     workspace.matte.aiProgress = progress.percent ?? -1
   }
   try {
-    const mode = workspace.matte.mode
     let blob: Blob | null = null
     let baseColor: string | undefined
     if (mode === 'color' || mode === 'auto' || mode === 'solid') {
@@ -379,27 +341,18 @@ async function runMatte(): Promise<void> {
     } else if (mode === 'birefnet' || mode === 'rmbg') {
       const result = await removeWithTransformers(img, { modelId: mode === 'birefnet' ? workspace.matte.birefnetModelId : workspace.matte.rmbgModelId, dtype: workspace.matte.aiDtype, device: workspace.matte.aiDevice, modelHost: workspace.matte.aiModelHost, maxSide: workspace.matte.aiMaxSide, onProgress })
       blob = result.blob
-    } else if (mode === 'sam') {
-      const result = await segmentWithSam(img, { modelId: workspace.matte.samModelId, device: workspace.matte.aiDevice, modelHost: workspace.matte.aiModelHost, boxes: workspace.matte.samBoxes, points: workspace.matte.samPoints, maxSide: workspace.matte.aiMaxSide, onProgress })
-      blob = result.blob
-      if (result.maskBlob) {
-        if (maskUrl.value) URL.revokeObjectURL(maskUrl.value)
-        maskUrl.value = URL.createObjectURL(result.maskBlob)
-        showMask.value = true
-      }
     }
     if (!blob) throw new Error('未生成结果')
     const resultBlob = workspace.matte.cropTransparent ? await cropBlob(blob) : blob
     if (workspace.matte.resultUrl) URL.revokeObjectURL(workspace.matte.resultUrl)
     workspace.matte.resultUrl = URL.createObjectURL(resultBlob)
-    workspace.matte.status = 'done'
     workspace.matte.aiStatus = baseColor ? `完成 · 基准色 ${baseColor}` : '完成'
+    workspace.matte.status = 'done'
     if (modelKey) setModelState(modelKey, 'ready')
   } catch (error) {
     console.error('抠图处理失败', error)
     workspace.matte.status = 'error'
-    const message = describeMattingError(error, workspace.matte.mode)
-    workspace.matte.aiStatus = message
+    workspace.matte.aiStatus = describeMattingError(error, workspace.matte.mode)
   } finally {
     workspace.matte.aiProgress = -1
   }
@@ -442,17 +395,11 @@ function download(): void {
 
 function resetMatte(): void {
   if (workspace.matte.resultUrl) URL.revokeObjectURL(workspace.matte.resultUrl)
-  if (maskUrl.value) URL.revokeObjectURL(maskUrl.value)
   workspace.matte.resultUrl = ''
-  maskUrl.value = ''
-  showMask.value = false
   workspace.matte.mode = 'auto'
   workspace.matte.tolerance = 24
   workspace.matte.cropTransparent = true
   workspace.matte.sampledColor = ''
-  workspace.matte.samBoxes = []
-  workspace.matte.samPoints = []
-  samHistory.value = []
   workspace.matte.aiStatus = ''
   workspace.matte.aiProgress = -1
   sampling.value = false
@@ -460,163 +407,28 @@ function resetMatte(): void {
 }
 
 async function exportPackage(): Promise<void> {
-  if (!workspace.matte.resultUrl) return
-  const response = await fetch(workspace.matte.resultUrl); const blob = await response.blob()
+  const base = workspace.matte.fileName.replace(/\.[^.]+$/, '') || 'cutout'
   const mode = workspace.matte.mode
   const config: Record<string, unknown> = { mode, cropTransparent: workspace.matte.cropTransparent }
+  if (!workspace.matte.resultUrl) return
+  const response = await fetch(workspace.matte.resultUrl); const blob = await response.blob()
   if (mode === 'color' || mode === 'auto' || mode === 'solid') config.tolerance = workspace.matte.tolerance
   if (mode === 'color') config.sampledColor = workspace.matte.sampledColor
   if (mode === 'imgly') { config.engine = 'imgly'; config.model = workspace.matte.imglyModel; config.publicPath = workspace.matte.imglyPublicPath || undefined }
   if (mode === 'birefnet' || mode === 'rmbg') { config.engine = mode; config.modelId = mode === 'birefnet' ? workspace.matte.birefnetModelId : workspace.matte.rmbgModelId; config.dtype = workspace.matte.aiDtype }
-  if (mode === 'sam') { config.engine = 'sam'; config.modelId = workspace.matte.samModelId; config.boxes = workspace.matte.samBoxes; config.points = workspace.matte.samPoints }
-  if (['imgly', 'birefnet', 'rmbg', 'sam'].includes(mode)) { config.device = workspace.matte.aiDevice; config.maxSide = workspace.matte.aiMaxSide; config.modelHost = workspace.matte.aiModelHost }
-  await downloadZip([{ name: `${workspace.matte.fileName.replace(/\.[^.]+$/, '')}-cutout.png`, blob }, { name: 'config.json', blob: JSON.stringify(config, null, 2) }], `${workspace.matte.fileName.replace(/\.[^.]+$/, '')}-cutout.zip`)
-}
-
-// ---- SAM 框选交互 ----
-
-function updateDisplayRect(): void {
-  const img = image.value
-  const canvasEl = canvasRef.value
-  if (!img || !canvasEl) return
-  const ib = img.getBoundingClientRect()
-  const cb = canvasEl.getBoundingClientRect()
-  displayRect.value = { left: ib.left - cb.left, top: ib.top - cb.top, width: ib.width, height: ib.height }
-}
-
-function naturalFromEvent(event: MouseEvent): { x: number; y: number } | null {
-  const img = image.value
-  if (!img) return null
-  const bounds = img.getBoundingClientRect()
-  const x = Math.round(((event.clientX - bounds.left) / bounds.width) * img.naturalWidth)
-  const y = Math.round(((event.clientY - bounds.top) / bounds.height) * img.naturalHeight)
-  if (x < 0 || y < 0 || x >= img.naturalWidth || y >= img.naturalHeight) return null
-  return { x, y }
-}
-
-function onSamDown(event: MouseEvent): void {
-  if (workspace.matte.mode !== 'sam' || workspace.matte.status === 'processing' || panPointer.value) return
-  const pos = naturalFromEvent(event)
-  if (!pos) return
-  if (workspace.matte.samTool === 'box') {
-    samStart.value = pos
-    samDragging.value = true
-  } else {
-    workspace.matte.samPoints.push({ x: pos.x, y: pos.y, label: workspace.matte.samTool === 'fg' ? 1 : 0 })
-    samHistory.value.push('point')
-    invalidateSamResult()
-  }
-}
-
-function onSamMove(event: MouseEvent): void {
-  if (!samDragging.value || !samStart.value) return
-  const pos = naturalFromEvent(event)
-  if (!pos) return
-  samDrag.value = {
-    x1: Math.min(samStart.value.x, pos.x),
-    y1: Math.min(samStart.value.y, pos.y),
-    x2: Math.max(samStart.value.x, pos.x),
-    y2: Math.max(samStart.value.y, pos.y),
-  }
-}
-
-function onSamUp(): void {
-  if (!samDragging.value) return
-  const drag = samDrag.value
-  if (drag && (drag.x2 > drag.x1 || drag.y2 > drag.y1)) {
-    workspace.matte.samBoxes.push(drag)
-    samHistory.value.push('box')
-    invalidateSamResult()
-  }
-  samDragging.value = false
-  samStart.value = null
-  samDrag.value = null
-}
-
-function invalidateSamResult(): void {
-  if (workspace.matte.resultUrl) URL.revokeObjectURL(workspace.matte.resultUrl)
-  if (maskUrl.value) URL.revokeObjectURL(maskUrl.value)
-  workspace.matte.resultUrl = ''
-  maskUrl.value = ''
-  showMask.value = false
-  workspace.matte.aiStatus = ''
-  workspace.matte.status = workspace.matte.sourceUrl ? 'ready' : 'empty'
-}
-
-function undoSam(): void {
-  if (workspace.matte.status === 'processing') return
-  if (samDragging.value) {
-    samDragging.value = false
-    samStart.value = null
-    samDrag.value = null
-    return
-  }
-  const lastAction = samHistory.value.pop()
-  if (!lastAction) return
-  if (lastAction === 'box') workspace.matte.samBoxes.pop()
-  else workspace.matte.samPoints.pop()
-  invalidateSamResult()
-}
-
-function onSamKeyDown(event: KeyboardEvent): void {
-  if (helpOpen.value && event.key === 'Escape') {
-    event.preventDefault()
-    closeHelp()
-    return
-  }
-  const isUndo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.shiftKey
-  if (!isUndo || workspace.matte.mode !== 'sam' || undoSamDisabled.value) return
-  const target = event.target
-  if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) return
-  event.preventDefault()
-  undoSam()
+  if (['imgly', 'birefnet', 'rmbg'].includes(mode)) { config.device = workspace.matte.aiDevice; config.maxSide = workspace.matte.aiMaxSide; config.modelHost = workspace.matte.aiModelHost }
+  await downloadZip([{ name: `${base}-cutout.png`, blob }, { name: 'config.json', blob: JSON.stringify(config, null, 2) }], `${base}-cutout.zip`)
 }
 
 function onWindowKeyDown(event: KeyboardEvent): void {
-  const target = event.target
-  const isEditing = target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')
-  const isInteractive = target instanceof HTMLElement && target.closest('button, a, select, input, textarea, [contenteditable="true"]')
-  if (event.code === 'Space' && workspace.matte.mode === 'sam' && !helpOpen.value && !isEditing && !isInteractive) {
-    spacePanActive.value = true
+  if (helpOpen.value && event.key === 'Escape') {
     event.preventDefault()
-    return
+    closeHelp()
   }
-  onSamKeyDown(event)
-}
-
-function onWindowKeyUp(event: KeyboardEvent): void {
-  if (event.code === 'Space') spacePanActive.value = false
 }
 
 function onWindowBlur(): void {
-  spacePanActive.value = false
   panPointer.value = null
-}
-
-function clearSam(): void {
-  workspace.matte.samBoxes = []
-  workspace.matte.samPoints = []
-  samHistory.value = []
-  if (maskUrl.value) URL.revokeObjectURL(maskUrl.value)
-  maskUrl.value = ''
-  showMask.value = false
-  if (workspace.matte.resultUrl) URL.revokeObjectURL(workspace.matte.resultUrl)
-  workspace.matte.resultUrl = ''
-  workspace.matte.status = workspace.matte.sourceUrl ? 'ready' : 'empty'
-}
-
-function boxStyle(box: { x1: number; y1: number; x2: number; y2: number }): Record<string, string> {
-  const img = image.value
-  if (!img || !displayRect.value.width) return {}
-  const sx = displayRect.value.width / img.naturalWidth
-  const sy = displayRect.value.height / img.naturalHeight
-  return { left: `${box.x1 * sx}px`, top: `${box.y1 * sy}px`, width: `${(box.x2 - box.x1) * sx}px`, height: `${(box.y2 - box.y1) * sy}px` }
-}
-
-function pointStyle(point: { x: number; y: number }): Record<string, string> {
-  const img = image.value
-  if (!img || !displayRect.value.width) return {}
-  return { left: `${(point.x / img.naturalWidth) * displayRect.value.width}px`, top: `${(point.y / img.naturalHeight) * displayRect.value.height}px` }
 }
 
 function onWindowResize(): void {
@@ -626,7 +438,6 @@ function onWindowResize(): void {
 onMounted(() => {
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('keydown', onWindowKeyDown)
-  window.addEventListener('keyup', onWindowKeyUp)
   window.addEventListener('blur', onWindowBlur)
   if (canvasRef.value) {
     canvasResizeObserver = new ResizeObserver(() => fitImageToCanvas())
@@ -638,10 +449,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('keydown', onWindowKeyDown)
-  window.removeEventListener('keyup', onWindowKeyUp)
   window.removeEventListener('blur', onWindowBlur)
   canvasResizeObserver?.disconnect()
-  if (maskUrl.value) URL.revokeObjectURL(maskUrl.value)
 })
 </script>
 
@@ -669,7 +478,7 @@ onBeforeUnmount(() => {
           <label class="field"><span class="field-label">颜色容差 {{ workspace.matte.tolerance }}</span><input v-model.number="workspace.matte.tolerance" class="range" type="range" min="1" max="100" /></label>
           <p v-if="workspace.matte.mode === 'solid'" class="muted">自动采样图像边缘主色作为背景基准，适合纯色背景</p>
         </template>
-        <template v-if="isAiMode && workspace.matte.mode !== 'sam'">
+        <template v-if="isAiMode">
           <div v-if="workspace.matte.mode === 'rmbg'" class="warn">⚠️ RMBG 仅供评估，不可商用</div>
           <div v-if="blockedReason" class="warn">⛔ {{ blockedReason }}</div>
           <label v-if="workspace.matte.mode === 'imgly'" class="field"><span class="field-label">模型</span>
@@ -709,38 +518,6 @@ onBeforeUnmount(() => {
           </label>
           <p v-if="workspace.matte.mode === 'birefnet' || workspace.matte.mode === 'rmbg'" class="muted">BiRefNet / RMBG 的模型输入被固定为 1024×1024，最大边长只影响合成输出的画布尺寸，不影响推理占用的内存</p>
         </template>
-        <template v-if="workspace.matte.mode === 'sam'">
-          <div class="seg">
-            <button v-for="tool in samTools" :key="tool.value" class="seg-item" :class="{ active: workspace.matte.samTool === tool.value }" @click="setSamTool(tool.value)">{{ tool.label }}</button>
-          </div>
-          <p class="muted">框选多个区域可一起分割；前景点=保留，背景点=排除</p>
-          <div class="model-row"><span>已框选 {{ workspace.matte.samBoxes.length }} 区域</span><span class="badge badge-accent">{{ workspace.matte.samPoints.length }} 提示点</span></div>
-          <div class="sam-actions">
-            <button class="btn" :disabled="undoSamDisabled" title="撤销最近添加的框或提示点（⌘Z / Ctrl+Z）" @click="undoSam">撤销上一步</button>
-            <button class="btn" :disabled="workspace.matte.status === 'processing'" @click="clearSam">清除标注</button>
-          </div>
-          <label class="check-row"><input v-model="showMask" type="checkbox" /> 显示分割蒙版</label>
-          <img v-if="showMask && maskUrl" class="mask-thumb" :src="maskUrl" alt="分割蒙版" />
-          <a v-if="workspace.matte.resultUrl" class="result-link" :href="workspace.matte.resultUrl" target="_blank" rel="noreferrer">在新标签页预览抠图结果 ↗</a>
-          <label class="field"><span class="field-label">模型 ID</span><input v-model="workspace.matte.samModelId" class="input" type="text" /></label>
-          <label class="field"><span class="field-label">模型源</span>
-            <select v-model="workspace.matte.aiModelHost" class="select">
-              <option value="huggingface.co">HuggingFace（默认）</option>
-              <option value="hf-mirror.com">国内镜像 hf-mirror.com</option>
-            </select>
-          </label>
-          <label class="field"><span class="field-label">运行设备</span>
-            <select v-model="workspace.matte.aiDevice" class="select">
-              <option v-for="option in deviceChoices" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
-          </label>
-          <label class="field"><span class="field-label">最大边长</span>
-            <select v-model.number="workspace.matte.aiMaxSide" class="select">
-              <option v-for="option in AI_MAX_SIDE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
-          </label>
-          <p class="muted">SAM 默认最多以 1024px 推理并输出，避免大图耗尽浏览器内存；标注坐标会自动换算。</p>
-        </template>
         <label class="check-row"><input v-model="workspace.matte.cropTransparent" type="checkbox" /> 自动裁切透明边缘</label>
       </div>
       <div class="section">
@@ -757,7 +534,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="section actions">
-        <button class="btn btn-primary full" :disabled="runDisabled" @click="runMatte">{{ workspace.matte.status === 'processing' ? '处理中…' : (workspace.matte.mode === 'sam' ? '开始分割' : '开始抠图') }}</button>
+        <button class="btn btn-primary full" :disabled="runDisabled" @click="runMatte">{{ workspace.matte.status === 'processing' ? '处理中…' : '开始抠图' }}</button>
         <button class="btn full" :disabled="!workspace.matte.resultUrl" @click="download">导出透明 PNG</button>
         <button class="btn full" :disabled="!workspace.matte.resultUrl" @click="exportPackage">导出 PNG + 配置 ZIP</button>
         <button class="btn btn-ghost full" :disabled="!workspace.matte.sourceUrl || workspace.matte.status === 'processing'" @click="resetMatte">重置抠图</button>
@@ -779,12 +556,7 @@ onBeforeUnmount(() => {
       <div ref="canvasRef" class="matte-canvas" :class="{ dragging: isDragging, 'can-pan': canPanImage, 'is-panning': !!panPointer }" :style="backgroundStyle" @dragover.prevent="isDragging = true" @dragleave="isDragging = false" @drop="handleDrop" @click="sampleColor" @wheel.prevent="zoomAtPointer" @pointerdown="onPanStart" @pointermove="onPanMove" @pointerup="onPanEnd" @pointercancel="onPanEnd">
         <div v-if="!workspace.matte.sourceUrl" class="drop-hint" @click="openFile"><span class="big">＋</span><strong>拖入图片</strong><span>PNG / JPG / WebP</span></div>
         <template v-else>
-          <img ref="image" :class="{ sampling }" :style="imageViewStyle" :src="workspace.matte.mode === 'sam' ? workspace.matte.sourceUrl : (workspace.matte.resultUrl || workspace.matte.sourceUrl)" alt="预览" draggable="false" @load="fitImageToCanvas(true)" />
-          <div v-if="workspace.matte.mode === 'sam'" class="sam-overlay" :class="'tool-' + workspace.matte.samTool" :style="{ left: displayRect.left + 'px', top: displayRect.top + 'px', width: displayRect.width + 'px', height: displayRect.height + 'px' }" @mousedown="onSamDown" @mousemove="onSamMove" @mouseup="onSamUp" @mouseleave="onSamUp">
-            <div v-for="(box, index) in workspace.matte.samBoxes" :key="'b' + index" class="sam-box" :style="boxStyle(box)"></div>
-            <div v-if="samDrag" class="sam-box sam-drag" :style="boxStyle(samDrag)"></div>
-            <span v-for="(point, index) in workspace.matte.samPoints" :key="'p' + index" class="sam-point" :class="point.label === 1 ? 'fg' : 'bg'" :style="pointStyle(point)"></span>
-          </div>
+          <img ref="image" :class="{ sampling }" :style="imageViewStyle" :src="workspace.matte.resultUrl || workspace.matte.sourceUrl" alt="预览" draggable="false" @load="fitImageToCanvas(true)" />
         </template>
       </div>
     </main>
@@ -806,7 +578,7 @@ onBeforeUnmount(() => {
           </article>
         </div>
         <footer class="help-foot">
-          <span>快速建议：纯色背景试“纯色背景”；一般图片试 ISNet；复杂细节试 BiRefNet；指定目标区域用 SAM。</span>
+          <span>快速建议：纯色背景试“纯色背景”；一般图片试 ISNet；复杂细节试 BiRefNet。</span>
           <button class="btn btn-primary" type="button" @click="closeHelp">知道了</button>
         </footer>
       </section>
@@ -857,10 +629,4 @@ onBeforeUnmount(() => {
 .select { width: 100%; }
 .ai-status { margin-top: 8px; }.ai-status p { margin: 0 0 4px; font-size: 12px; word-break: break-all; }
 .progress-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }.progress-fill { height: 100%; background: var(--accent); transition: width 0.2s ease; }
-.sam-overlay { position: absolute; z-index: 2; touch-action: none; }.sam-overlay.tool-box { cursor: crosshair; }.sam-overlay.tool-fg { cursor: pointer; }.sam-overlay.tool-bg { cursor: cell; }
-.sam-box { position: absolute; border: 1.5px solid var(--accent); background: rgba(102, 192, 255, 0.15); box-sizing: border-box; }.sam-drag { border-style: dashed; }
-.sam-point { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 2px rgba(0, 0, 0, 0.6); }.sam-point.fg { background: #4ade80; }.sam-point.bg { background: #f87171; }
-.sam-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.mask-thumb { width: 100%; border: 1px solid var(--border-strong); border-radius: 6px; margin-top: 8px; }
-.result-link { display: inline-block; margin-top: 8px; color: var(--accent); font-size: 12px; text-decoration: none; }
 </style>
