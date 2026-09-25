@@ -12,8 +12,6 @@ export interface ExtractOptions {
   targetFps: number
   start: number
   end: number
-  outputWidth: number
-  outputHeight: number
   flipX: boolean
   rotation: 0 | 90 | 180 | 270
 }
@@ -31,8 +29,6 @@ export function extractOptionsFrom(source: ExtractOptions): ExtractOptions {
     targetFps: source.targetFps,
     start: source.start,
     end: source.end,
-    outputWidth: source.outputWidth,
-    outputHeight: source.outputHeight,
     flipX: source.flipX,
     rotation: source.rotation,
   }
@@ -59,24 +55,21 @@ export function extractRangeError(options: ExtractOptions, duration: number, has
   return ''
 }
 
-/** 把视频当前画面按输出尺寸/翻转/旋转绘制为一帧 */
+/** 把视频当前画面按翻转/旋转绘制为一帧，尺寸保持视频原始分辨率 */
 export function captureFrame(element: HTMLVideoElement, timestamp: number, options: ExtractOptions): VideoFrame {
   const sourceW = element.videoWidth
   const sourceH = element.videoHeight
-  const baseW = options.outputWidth || sourceW
-  const baseH = options.outputHeight || sourceH
   const rotated = options.rotation === 90 || options.rotation === 270
   const canvas = document.createElement('canvas')
-  canvas.width = rotated ? baseH : baseW
-  canvas.height = rotated ? baseW : baseH
+  canvas.width = rotated ? sourceH : sourceW
+  canvas.height = rotated ? sourceW : sourceH
   const ctx = canvas.getContext('2d')!
   ctx.imageSmoothingEnabled = false
   ctx.save()
   ctx.translate(canvas.width / 2, canvas.height / 2)
   ctx.rotate(options.rotation * Math.PI / 180)
   ctx.scale(options.flipX ? -1 : 1, 1)
-  const scale = Math.min(baseW / sourceW, baseH / sourceH)
-  ctx.drawImage(element, -sourceW * scale / 2, -sourceH * scale / 2, sourceW * scale, sourceH * scale)
+  ctx.drawImage(element, -sourceW / 2, -sourceH / 2, sourceW, sourceH)
   ctx.restore()
   return { id: `${timestamp}-${Math.random()}`, url: canvas.toDataURL('image/png'), timestamp, selected: true }
 }

@@ -73,8 +73,6 @@ export interface VideoState {
   width: number
   height: number
   fps: number
-  outputWidth: number
-  outputHeight: number
   flipX: boolean
   rotation: 0 | 90 | 180 | 270
   error: string
@@ -112,7 +110,7 @@ export const workspace = reactive({
   } as MatteState,
   video: {
     fileName: '', sourceUrl: '', duration: 0, width: 0, height: 0, fps: 30,
-    start: 0, end: 0, mode: 'count', count: 12, targetFps: 12, outputWidth: 0, outputHeight: 0, flipX: false, rotation: 0, error: '', frames: [], status: 'empty',
+    start: 0, end: 0, mode: 'count', count: 12, targetFps: 12, flipX: false, rotation: 0, error: '', frames: [], status: 'empty',
     matte: { mode: 'imgly', tolerance: 24, shadow: 'neutral', baseColor: '' } as VideoMatteSettings,
     pipeline: { cropEnabled: false, matteEnabled: true, crop: null } as VideoPipelineSettings,
   } as VideoState,
@@ -132,7 +130,7 @@ try {
 export function persistMediaSettings(): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({
     matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, rmbgModelId: workspace.matte.rmbgModelId },
-    video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, outputWidth: workspace.video.outputWidth, outputHeight: workspace.video.outputHeight, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte }, pipeline: { ...workspace.video.pipeline }, },
+    video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte }, pipeline: { ...workspace.video.pipeline }, },
   }))
 }
 

@@ -43,14 +43,6 @@ const estimatedMb = computed(() => Math.round(expectedCount.value * Math.max(1, 
       </div>
     </div>
     <div v-if="rangeError" class="range-error">{{ rangeError }}</div>
-    <div class="field">
-      <span class="field-label">输出尺寸</span>
-      <div class="inline">
-        <input v-model.number="workspace.video.outputWidth" class="input" min="0" placeholder="原宽" type="number" />
-        <span>×</span>
-        <input v-model.number="workspace.video.outputHeight" class="input" min="0" placeholder="原高" type="number" />
-      </div>
-    </div>
     <label class="check-row"><input v-model="workspace.video.flipX" type="checkbox" /> 左右翻转</label>
     <div class="field">
       <span class="field-label">旋转</span>

@@ -26,6 +26,15 @@ type DragState =
   | { kind: 'resize'; handle: CropHandle }
 
 const handles: CropHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+/** 预设宽高比（宽 ÷ 高），0 表示不限制 */
+const RATIO_PRESETS: { label: string; value: number }[] = [
+  { label: '自由比例', value: 0 },
+  { label: '1:1', value: 1 },
+  { label: '3:4', value: 3 / 4 },
+  { label: '4:3', value: 4 / 3 },
+  { label: '9:16', value: 9 / 16 },
+  { label: '16:9', value: 16 / 9 },
+]
 
 const stage = ref<HTMLElement>()
 const sourceImage = ref<HTMLImageElement>()
@@ -39,6 +48,8 @@ const natural = ref({ width: 0, height: 0 })
 /** 裁切区域本地副本：以 v-model 与父组件双向同步，避免直接改写 props */
 const box = ref<ImageCropRect>({ ...props.modelValue })
 const tool = ref<CropTool>('move')
+/** 当前宽高比（0 表示自由），只约束框选过程，不写入 frames */
+const ratio = ref(0)
 const dragging = ref(false)
 const errorText = ref('')
 let drag: DragState | null = null
@@ -63,15 +74,73 @@ const boxStyle = computed(() => {
   }
 })
 
-/** 更新裁切区域（唯一出口，保证父子单一数据源） */
+/**
+ * 更新裁切区域（唯一出口，保证父子单一数据源）。
+ * 统一取整到 1 像素，避免拖动产生的浮点坐标写进输入框与帧数据。
+ */
 function setBox(rect: ImageCropRect): void {
-  box.value = rect
-  emit('update:modelValue', { ...rect })
+  const next: ImageCropRect = {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.max(1, Math.round(rect.width)),
+    height: Math.max(1, Math.round(rect.height)),
+  }
+  box.value = next
+  emit('update:modelValue', { ...next })
 }
 
 /** 数值收敛到 [min, max] */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
+}
+
+/** 在给定范围内取符合宽高比的最大内接尺寸（宽 ÷ 高 = target） */
+function inscribed(area: { width: number; height: number }, target: number): { width: number; height: number } {
+  return area.width / area.height > target
+    ? { width: area.height * target, height: area.height }
+    : { width: area.width, height: area.width / target }
+}
+
+/**
+ * 按当前宽高比与锚点生成裁切矩形。
+ * anchor 为不动点；signX/signY 表示矩形相对锚点的伸展方向，0 表示该轴以锚点为中心展开。
+ * 自由比例下两轴独立收敛；锁定比例时等比缩放，保证宽高比不被边界破坏。
+ */
+function ratioRect(
+  anchor: { x: number; y: number },
+  signX: -1 | 0 | 1,
+  signY: -1 | 0 | 1,
+  rawWidth: number,
+  rawHeight: number,
+): ImageCropRect {
+  const size = natural.value
+  const target = ratio.value
+  let width = Math.max(1, rawWidth)
+  let height = Math.max(1, rawHeight)
+  if (target) {
+    if (signX === 0) width = height * target
+    else if (signY === 0) height = width / target
+    else {
+      width = Math.max(rawWidth, rawHeight * target)
+      height = width / target
+    }
+  }
+  const limitX = signX > 0 ? size.width - anchor.x : signX < 0 ? anchor.x : 2 * Math.min(anchor.x, size.width - anchor.x)
+  const limitY = signY > 0 ? size.height - anchor.y : signY < 0 ? anchor.y : 2 * Math.min(anchor.y, size.height - anchor.y)
+  if (target) {
+    const scale = Math.min(1, Math.max(1, limitX) / width, Math.max(1, limitY) / height)
+    width *= scale
+    height *= scale
+  } else {
+    width = Math.min(width, Math.max(1, limitX))
+    height = Math.min(height, Math.max(1, limitY))
+  }
+  return {
+    x: signX > 0 ? anchor.x : signX < 0 ? anchor.x - width : anchor.x - width / 2,
+    y: signY > 0 ? anchor.y : signY < 0 ? anchor.y - height : anchor.y - height / 2,
+    width,
+    height,
+  }
 }
 
 /** 计算图像与舞台在视口中的位置，窗口尺寸变化与图片加载后都需要重新测量 */
@@ -133,19 +202,20 @@ function schedulePreview(): void {
   })
 }
 
-/** 按拖动模式更新裁切框，各分支都把矩形约束在图像范围内 */
+/** 按拖动模式更新裁切框，各分支都通过 ratioRect 约束在图像范围内 */
 function applyDrag(point: { x: number; y: number }): void {
   const mode = drag
   if (!mode) return
   const size = natural.value
   const current = box.value
   if (mode.kind === 'draw') {
-    setBox({
-      x: Math.min(mode.anchorX, point.x),
-      y: Math.min(mode.anchorY, point.y),
-      width: Math.max(1, Math.abs(point.x - mode.anchorX)),
-      height: Math.max(1, Math.abs(point.y - mode.anchorY)),
-    })
+    setBox(ratioRect(
+      { x: mode.anchorX, y: mode.anchorY },
+      point.x >= mode.anchorX ? 1 : -1,
+      point.y >= mode.anchorY ? 1 : -1,
+      Math.abs(point.x - mode.anchorX),
+      Math.abs(point.y - mode.anchorY),
+    ))
     return
   }
   if (mode.kind === 'move') {
@@ -156,15 +226,19 @@ function applyDrag(point: { x: number; y: number }): void {
     })
     return
   }
-  let left = current.x
-  let top = current.y
-  let right = current.x + current.width
-  let bottom = current.y + current.height
-  if (mode.handle.includes('w')) left = clamp(point.x, 0, right - 1)
-  if (mode.handle.includes('e')) right = clamp(point.x, left + 1, size.width)
-  if (mode.handle.includes('n')) top = clamp(point.y, 0, bottom - 1)
-  if (mode.handle.includes('s')) bottom = clamp(point.y, top + 1, size.height)
-  setBox({ x: left, y: top, width: right - left, height: bottom - top })
+  // 控制点：以对边/对角的锚点为不动点，未拖动的轴保持原尺寸；越过锚点时收敛为 1px
+  const handle = mode.handle
+  const signX: -1 | 0 | 1 = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0
+  const signY: -1 | 0 | 1 = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0
+  const anchorX = signX > 0 ? current.x : signX < 0 ? current.x + current.width : current.x + current.width / 2
+  const anchorY = signY > 0 ? current.y : signY < 0 ? current.y + current.height : current.y + current.height / 2
+  setBox(ratioRect(
+    { x: anchorX, y: anchorY },
+    signX,
+    signY,
+    signX === 0 ? current.width : Math.max(1, (point.x - anchorX) * signX),
+    signY === 0 ? current.height : Math.max(1, (point.y - anchorY) * signY),
+  ))
 }
 
 /** 拖动过程中的指针移动：统一在 window 上监听，指针移出舞台也不会中断 */
@@ -224,18 +298,53 @@ function onHandleDown(handle: CropHandle, event: PointerEvent): void {
   startDrag({ kind: 'resize', handle }, event)
 }
 
-/** 手动输入后把矩形收敛到图像范围内 */
+/** 切换宽高比：在当前裁切框内取符合该比例的最大内接矩形，保持中心不动 */
+function applyRatio(): void {
+  const size = natural.value
+  const target = ratio.value
+  if (!target || !size.width || !size.height) return
+  const area = inscribed({ width: box.value.width, height: box.value.height }, target)
+  setBox(clampCropRect({
+    x: box.value.x + (box.value.width - area.width) / 2,
+    y: box.value.y + (box.value.height - area.height) / 2,
+    width: area.width,
+    height: area.height,
+  }, size.width, size.height))
+}
+
+/** 手动输入后把矩形收敛到图像范围内；锁定比例时按比例反推另一条边 */
 function normalizeBox(): void {
   const size = natural.value
   if (!size.width || !size.height) return
-  setBox(clampCropRect(box.value, size.width, size.height))
+  const target = ratio.value
+  if (!target) {
+    setBox(clampCropRect(box.value, size.width, size.height))
+    return
+  }
+  const area = inscribed({ width: box.value.width, height: box.value.width / target }, target)
+  setBox(clampCropRect({
+    x: box.value.x + (box.value.width - area.width) / 2,
+    y: box.value.y + (box.value.height - area.height) / 2,
+    width: area.width,
+    height: area.height,
+  }, size.width, size.height))
 }
 
-/** 恢复为整帧范围 */
+/** 恢复为整帧范围；锁定比例时取整帧范围内符合该比例的最大区域 */
 function fullFrame(): void {
   const size = natural.value
   if (!size.width || !size.height) return
-  setBox({ x: 0, y: 0, width: size.width, height: size.height })
+  if (!ratio.value) {
+    setBox({ x: 0, y: 0, width: size.width, height: size.height })
+    return
+  }
+  const area = inscribed({ width: size.width, height: size.height }, ratio.value)
+  setBox({
+    x: (size.width - area.width) / 2,
+    y: (size.height - area.height) / 2,
+    width: area.width,
+    height: area.height,
+  })
 }
 
 // 裁切区域变化（拖拽 / 输入）后重绘预览
@@ -293,32 +402,42 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="crop-fields">
-      <label class="field">
-        <span class="field-label">X</span>
-        <input v-model.number="box.x" class="input" type="number" min="0" :max="natural.width" @change="normalizeBox" />
-      </label>
-      <label class="field">
-        <span class="field-label">Y</span>
-        <input v-model.number="box.y" class="input" type="number" min="0" :max="natural.height" @change="normalizeBox" />
-      </label>
-      <label class="field">
-        <span class="field-label">宽度</span>
-        <input v-model.number="box.width" class="input" type="number" min="1" :max="natural.width" @change="normalizeBox" />
-      </label>
-      <label class="field">
-        <span class="field-label">高度</span>
-        <input v-model.number="box.height" class="input" type="number" min="1" :max="natural.height" @change="normalizeBox" />
-      </label>
-      <div class="field">
-        <span class="field-label">拖拽工具</span>
-        <div class="seg">
-          <button class="seg-item" :class="{ active: tool === 'move' }" @click="tool = 'move'">调整框选</button>
-          <button class="seg-item" :class="{ active: tool === 'draw' }" @click="tool = 'draw'">重新框选</button>
-        </div>
+      <div class="crop-row">
+        <label class="field">
+          <span class="field-label">X</span>
+          <input v-model.number="box.x" class="input" type="number" min="0" step="1" :max="natural.width" @change="normalizeBox" />
+        </label>
+        <label class="field">
+          <span class="field-label">Y</span>
+          <input v-model.number="box.y" class="input" type="number" min="0" step="1" :max="natural.height" @change="normalizeBox" />
+        </label>
+        <label class="field">
+          <span class="field-label">宽度</span>
+          <input v-model.number="box.width" class="input" type="number" min="1" step="1" :max="natural.width" @change="normalizeBox" />
+        </label>
+        <label class="field">
+          <span class="field-label">高度</span>
+          <input v-model.number="box.height" class="input" type="number" min="1" step="1" :max="natural.height" @change="normalizeBox" />
+        </label>
       </div>
-      <div class="field">
-        <span class="field-label">快捷操作</span>
-        <button class="btn" :disabled="!natural.width" @click="fullFrame">整帧</button>
+      <div class="crop-row crop-tools">
+        <label class="field">
+          <span class="field-label">宽高比</span>
+          <select v-model.number="ratio" class="select ratio-select" @change="applyRatio">
+            <option v-for="item in RATIO_PRESETS" :key="item.label" :value="item.value">{{ item.label }}</option>
+          </select>
+        </label>
+        <div class="field">
+          <span class="field-label">拖拽工具</span>
+          <div class="seg">
+            <button class="seg-item" :class="{ active: tool === 'move' }" @click="tool = 'move'">调整框选</button>
+            <button class="seg-item" :class="{ active: tool === 'draw' }" @click="tool = 'draw'">重新框选</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="field-label">快捷操作</span>
+          <button class="btn" :disabled="!natural.width" @click="fullFrame">整帧</button>
+        </div>
       </div>
     </div>
 
@@ -421,10 +540,30 @@ onBeforeUnmount(() => {
 .h-w { left: 0; top: 50%; cursor: ew-resize; }
 
 .crop-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.crop-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--sp-3) var(--sp-4);
   align-items: end;
+}
+
+.crop-tools {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-4);
+}
+
+.crop-tools .field {
+  flex: none;
+}
+
+.ratio-select {
+  width: 130px;
 }
 
 .crop-fields .input {

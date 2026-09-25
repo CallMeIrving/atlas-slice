@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { frameBaseUrl, persistMediaSettings, workspace } from '@/store/workspace'
 import { captureFrame, createCancelToken, extractOptionsFrom, extractRangeError, seekTo, type CancelToken } from '@/core/frame-extract'
 import { describeMattingError, AI_ENGINES } from '@/core/ai-matting'
@@ -23,6 +23,10 @@ const props = defineProps<{ video: HTMLVideoElement | null }>()
 const emit = defineEmits<{ close: [] }>()
 
 const pipeline = workspace.video.pipeline
+/** 弹窗内容区，处理结束后用于滚动到底部 */
+const body = ref<HTMLElement>()
+/** 本会话内是否已跑过一次流水线，用于把主按钮文案改成「再次处理」 */
+const ranOnce = ref(false)
 /** 裁切区域：由 FrameCropEditor 双向绑定，变化后写回 pipeline 配置 */
 const cropRect = ref<ImageCropRect>({ ...(pipeline.crop ?? { x: 0, y: 0, width: 0, height: 0 }) })
 /** 裁切预览源：优先用已有帧，没有帧时从视频探测一帧（不写入帧列表） */
@@ -54,8 +58,12 @@ const validCrop = computed<ImageCropRect | null>(() => (pipeline.cropEnabled && 
 const cropMissing = computed(() => pipeline.cropEnabled && !validCrop.value)
 const zipName = computed(() => `${workspace.video.fileName.replace(/\.[^.]+$/, '') || 'video'}-frames.zip`)
 
-/** 主按钮文案：模型未加载时提示会先加载模型 */
-const startLabel = computed(() => (needsModel.value && modelState.value !== 'ready' ? '加载模型并开始处理' : '开始一键处理'))
+/** 主按钮文案：跑过一次后改为「再次处理」；模型未加载时提示会先加载模型 */
+const startLabel = computed(() => {
+  const ready = !needsModel.value || modelState.value === 'ready'
+  if (!ranOnce.value) return ready ? '开始一键处理' : '加载模型并开始处理'
+  return ready ? '再次处理' : '加载模型并再次处理'
+})
 /** 是否有任务在进行（含仅加载模型阶段）：进行中才能取消 */
 const busy = computed(() => running.value || preparing.value)
 const startDisabled = computed(() => busy.value || cancelling.value || !props.video || !workspace.video.sourceUrl || Boolean(rangeError.value) || cropMissing.value)
@@ -140,6 +148,7 @@ async function start(): Promise<void> {
     if (!loaded) { errorText.value = workspace.matte.aiStatus || '模型加载失败，无法执行抠图'; return }
   }
   running.value = true
+  ranOnce.value = true
   done.value = 0
   total.value = 0
   text.value = '准备中…'
@@ -180,6 +189,16 @@ async function start(): Promise<void> {
   workspace.video.status = 'done'
   finished.value = true
   text.value = result.cancelled ? `已取消，已保留 ${frames.length} 帧` : `处理完成，共 ${frames.length} 帧`
+  // 全部步骤（含抠图）跑完后滚到底部，让结果预览与导出直接进入视野
+  scrollToBottom()
+}
+
+/** 把弹窗内容区滚动到底部；等结果区渲染完成后再滚，避免高度还没算出来 */
+function scrollToBottom(): void {
+  void nextTick(() => {
+    const element = body.value
+    if (element) element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
+  })
 }
 
 /** 关闭弹窗：模型加载或流水线执行中关闭会先请求取消，避免关闭后仍在后台跑完 */
@@ -214,7 +233,7 @@ onMounted(() => { if (pipeline.cropEnabled) void prepareCropSource() })
         </div>
         <button class="btn-icon modal-close" aria-label="关闭" @click="close">×</button>
       </div>
-      <div class="modal-body">
+      <div ref="body" class="modal-body">
         <section class="step">
           <h3 class="step-title"><span class="step-no">1</span>抽帧 <span class="badge badge-accent">必选</span></h3>
           <ExtractSettingsFields />
@@ -244,7 +263,8 @@ onMounted(() => { if (pipeline.cropEnabled) void prepareCropSource() })
               <button class="btn" :disabled="modelState === 'loading' || modelState === 'ready'" @click="preloadModel">预加载模型</button>
             </div>
             <p v-if="needsModel" class="faint step-help">
-              执行前会先确保模型加载完成；模型与「抠图」页共用同一份缓存，任一处加载过都不会重复下载。
+              执行前会先确保模型加载完成。权重按「抠图方式 + 模型精度 + 推理设备 + 资源地址」分别缓存，
+              其中任一项变了就是另一份权重，需要单独下载一次；同一组合只需下载一次，之后由 Service Worker 缓存复用。
             </p>
           </template>
           <p v-else class="faint step-skip">已跳过抠图步骤</p>

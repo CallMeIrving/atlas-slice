@@ -10,7 +10,7 @@
  */
 
 import { releaseCanvas } from '@/core/image'
-import { LOCAL_MODEL_ROOT, localRepoPath } from '@/core/model-registry'
+import { IMGLY_MIRROR_PATH, LOCAL_MODEL_ROOT, localRepoPath } from '@/core/model-registry'
 
 export interface MatteProgress {
   phase: 'loading' | 'processing'
@@ -47,7 +47,7 @@ export interface AiEngineBaseOptions {
 export interface ImglyOptions extends AiEngineBaseOptions {
   model: ImglyModel
   device: 'cpu' | 'gpu'
-  /** 模型资源基础地址，留空使用官方 CDN（staticimgly.com） */
+  /** 模型资源基础地址；留空时优先用本地镜像（public/models 下），没有镜像才回落官方 CDN（staticimgly.com） */
   publicPath?: string
 }
 
@@ -441,13 +441,47 @@ export function describeMattingError(error: unknown, engine?: string): string {
     // wasm 堆一旦分配失败就已经被破坏，同页面内任何模型都会继续失败，只能靠刷新恢复
     return '浏览器 wasm 堆已用尽（这是 WebAssembly 的 4GB 上限，与机器物理内存无关）。堆损坏后本页面内所有模型都会失败，请先刷新页面（Cmd+R），再改用内存占用更低的 ISNet（imgly）或 RMBG-1.4。'
   }
-  if (engine === 'imgly' && /Failed to fetch|NetworkError|network error/i.test(raw)) {
-    return '无法下载 ISNet 模型资源（官方 CDN staticimgly.com）。请检查网络或代理后重试，或在该模型的「资源地址」里填写可访问的镜像地址'
+  if (engine === 'imgly' && /Failed to fetch|NetworkError|network error|Resource metadata not found/i.test(raw)) {
+    return '无法下载 ISNet 模型资源（官方 CDN staticimgly.com，且本地没有镜像）。请检查网络或代理后重试；也可以挂代理执行 node scripts/download-models.mjs --imgly 把权重镜像到本地，或在「资源地址」里填写可访问的镜像地址'
   }
   if (/Can't load|Could not locate|no such file|not found|404|Failed to fetch|Unauthorized|local_files_only/i.test(raw)) {
     return '本地缺少该精度的模型权重文件，请改用 FP16，或检查 public/models 下的模型文件是否完整'
   }
   return raw || '抠图处理失败'
+}
+
+/**
+ * 本地 ISNet 镜像的探测结果。
+ * 只在首次用到时做一次 HEAD（dev 与生产对缺失的 /models 请求都返回 404），
+ * 结果（包括探测失败）用同一个 Promise 记住，避免每次推理都发一次请求。
+ * 探测失败一律当作「没有镜像」并回落到官方 CDN——探测只是为了省流量，不能成为加载失败的原因。
+ * 注意：结果在页面生命周期内不会刷新，镜像是在页面打开之后才下载的话需要刷新页面。
+ */
+let imglyMirrorProbe: Promise<string | null> | null = null
+
+function detectImglyMirror(): Promise<string | null> {
+  if (!imglyMirrorProbe) {
+    imglyMirrorProbe = (async (): Promise<string | null> => {
+      try {
+        const response = await fetch(`${IMGLY_MIRROR_PATH}resources.json`, { method: 'HEAD', cache: 'no-store' })
+        return response.ok ? IMGLY_MIRROR_PATH : null
+      } catch {
+        return null
+      }
+    })()
+  }
+  return imglyMirrorProbe
+}
+
+/**
+ * ISNet 资源地址解析：用户填写的 publicPath > 本地镜像 > 官方 CDN。
+ * 必须能被解析成绝对地址（本地镜像以 / 开头），imgly 内部用 new URL(name, publicPath) 拼接分片地址。
+ * 返回 undefined 时交给 imgly 用它自己的官方 CDN 默认值。
+ */
+async function resolveImglyPublicPath(configured?: string): Promise<string | undefined> {
+  const custom = configured?.trim()
+  if (custom) return custom
+  return (await detectImglyMirror()) ?? undefined
 }
 
 /**
@@ -457,6 +491,8 @@ export async function removeWithImgly(source: CanvasSource, options: ImglyOption
   const canvas = sourceToCanvas(source, resolveInferenceMaxSide(options.maxSide))
   options.onProgress?.({ phase: 'loading', text: '加载 ISNet 模型…' })
   const { removeBackground } = await import('@imgly/background-removal')
+  // 解析放在这里：预热与真实推理都走 removeWithImgly，两条路径的资源地址必然一致
+  const publicPath = await resolveImglyPublicPath(options.publicPath)
   // IMG.LY 1.7 decodes Blob/URL inputs into its internal HWC tensor; a canvas
   // is returned unchanged by its decoder and later fails when reading shape.
   const inputBlob = await canvasToBlob(canvas)
@@ -466,7 +502,7 @@ export async function removeWithImgly(source: CanvasSource, options: ImglyOption
     model: options.model,
     device: options.device,
     output: { format: 'image/png' },
-    ...(options.publicPath ? { publicPath: options.publicPath } : {}),
+    ...(publicPath ? { publicPath } : {}),
     progress: (key: string, current: number, total: number) => {
       if (key.startsWith('fetch:')) {
         options.onProgress?.({ phase: 'loading', text: `下载模型资源…`, percent: total > 0 ? Math.round((current / total) * 100) : undefined })

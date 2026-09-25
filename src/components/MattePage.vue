@@ -473,7 +473,7 @@ onBeforeUnmount(() => {
               <option value="isnet_quint8">ISNet 量化（最快）</option>
             </select>
           </label>
-          <label v-if="workspace.matte.mode === 'imgly'" class="field"><span class="field-label">资源地址（publicPath）</span><input v-model="workspace.matte.imglyPublicPath" class="input" type="text" placeholder="留空使用官方 CDN" /></label>
+          <label v-if="workspace.matte.mode === 'imgly'" class="field"><span class="field-label">资源地址（publicPath）</span><input v-model="workspace.matte.imglyPublicPath" class="input" type="text" placeholder="留空时优先用 public/models 下的本地镜像，无镜像才用官方 CDN" /></label>
           <template v-if="workspace.matte.mode === 'rmbg'">
             <label class="field"><span class="field-label">模型 ID</span>
               <input v-model="workspace.matte.rmbgModelId" class="input" type="text" />

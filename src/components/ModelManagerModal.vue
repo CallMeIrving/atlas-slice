@@ -10,6 +10,8 @@ import {
   type MatteProgress,
 } from '@/core/ai-matting'
 import {
+  IMGLY_MIRROR_COMMAND,
+  IMGLY_MIRROR_PATH,
   MODEL_REPOS,
   downloadCommand,
   formatBytes,
@@ -35,9 +37,9 @@ import { workspace } from '@/store/workspace'
  * 后续各种模型的下载与内存加载都集中在这里：本地权重是否就位、当前精度与推理设备、
  * 内存中的加载状态、卸载入口与下载命令。
  *
- * 注意浏览器没有文件系统写权限：ISNet 的资源能直接在页面内下载（官方 CDN，
- * 由浏览器缓存），而 RMBG-1.4 的权重必须落在项目的 public/models 下
- * （代码对它们强制 local_files_only，缺文件不会回落远程），这里只做检测并提供终端命令。
+ * 注意浏览器没有文件系统写权限：ISNet 的资源运行时就会下载（本地镜像优先，无镜像才回落官方 CDN，
+ * 由浏览器缓存），也可以先用下载脚本镜像到 public/models 下；而 RMBG-1.4 的权重必须落在
+ * public/models 下（代码对它们强制 local_files_only，缺文件不会回落远程），这里只做检测并提供终端命令。
  */
 const emit = defineEmits<{ close: [] }>()
 
@@ -236,7 +238,25 @@ onMounted(() => {
           </div>
 
           <template v-if="row.engine === 'imgly'">
-            <p class="card-meta faint">权重来自官方 CDN（staticimgly.com），首次加载时联网下载并由浏览器缓存；imgly 运行时不提供卸载接口，刷新页面即可释放。</p>
+            <div class="file-head">
+              <span class="mono">{{ IMGLY_MIRROR_PATH }}</span>
+              <button class="btn btn-ghost" @click="copy(IMGLY_MIRROR_COMMAND, 'imgly-mirror')">复制镜像命令</button>
+              <span v-if="copied?.key === 'imgly-mirror'" class="copy-hint" :class="{ fail: !copied.ok }">{{ copied.ok ? '已复制' : '复制失败' }}</span>
+            </div>
+            <p class="card-meta faint">
+              权重来自 IMG.LY 官方 CDN（staticimgly.com）。运行时按「资源地址里填写的地址 → 上面的本地镜像目录 → 官方 CDN」的顺序取资源，
+              镜像就位时不会访问 CDN。
+              <span class="net-tip">该网址在国内通常需要代理才能访问</span>，没有代理就无法完成首次下载（会提示「无法下载 ISNet 模型资源」）。
+            </p>
+            <p class="card-meta faint">
+              镜像方法：在终端执行 <span class="mono">{{ IMGLY_MIRROR_COMMAND }}</span>（挂在代理下执行一次即可，脚本会跳过已下载且字节数正确的分片，可重复运行）；
+              换镜像源可加 <span class="mono">--source=&lt;可访问的地址&gt;</span>，临时验证可加 <span class="mono">--out=&lt;目录&gt;</span>。
+            </p>
+            <p class="card-meta faint">
+              官方 CDN 按「精度 + 推理设备」分别下载权重（切换其中任一项都是另一份文件，需要单独下载一次）；
+              镜像命令会把 resources.json 里的全部分片一次性落到本地，之后由 Service Worker 持久缓存，刷新或重启浏览器都不会重新下载。
+              但 ONNX 会话本身在页面内存里，刷新后仍需重新加载到内存。imgly 运行时不提供卸载接口。
+            </p>
           </template>
 
           <div v-else-if="row.repo" class="file-list">
@@ -256,8 +276,12 @@ onMounted(() => {
                 <span class="file-state" :class="file.state">{{ fileStateText(file) }}</span>
               </li>
             </ul>
-            <p v-if="row.local && !row.local.ready" class="card-meta faint">
-              浏览器没有文件系统写权限，这些权重必须在终端执行上面的命令下载到 public/models 下（命令会跳过已存在的文件，可重复运行续传）。
+            <p class="card-meta faint">
+              <template v-if="row.local?.ready">权重已落在项目 public/models 下，刷新页面不会重新下载，只需重新加载到内存。</template>
+              <template v-else>浏览器没有文件系统写权限，这些权重必须在终端执行上面的命令下载到 public/models 下（命令会跳过已存在的文件，可重复运行续传）。</template>
+              <span v-if="workspace.matte.aiModelHost === 'huggingface.co'" class="net-tip">
+                当前托管源 huggingface.co 国内需代理，建议改选 hf-mirror.com（国内可直连）；下载命令已默认使用 hf-mirror.com。
+              </span>
             </p>
           </div>
         </article>
@@ -318,6 +342,10 @@ onMounted(() => {
   color: var(--text-muted);
   word-break: break-all;
   user-select: all;
+}
+
+.net-tip {
+  color: var(--accent-strong);
 }
 
 .model-card {

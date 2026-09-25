@@ -37,10 +37,31 @@ export interface ModelRepoSpec {
   files: ModelFileSpec[]
 }
 
-/** 清单里的仓库列表。JSON 的结构由本文件的类型约束，因此这里做一次窄化 */
-const manifest = registry as unknown as { repos: ModelRepoSpec[] }
+/**
+ * ISNet（imgly）的镜像信息。imgly 运行时的资源地址由它自己的 resources.json 决定，
+ * 无法像 RMBG 那样在清单里静态列出文件，因此这里只记录镜像在 public/models 下的目录；
+ * 目录名要与下载脚本写入的位置一致（脚本同样从这份清单读取）。
+ */
+interface ImglyManifest {
+  /** 已安装的运行时包名，用于推导官方 CDN 数据包的名称与版本 */
+  package: string
+  /** 相对 public/models/ 的镜像目录 */
+  mirrorPath: string
+}
+
+/** 清单里的镜像信息与仓库列表。JSON 的结构由本文件的类型约束，因此这里做一次窄化 */
+const manifest = registry as unknown as { imgly: ImglyManifest; repos: ModelRepoSpec[] }
 
 export const MODEL_REPOS: ModelRepoSpec[] = manifest.repos
+
+/**
+ * 本地 ISNet 镜像目录（以 / 开头，imgly 内部用 new URL(name, publicPath) 拼接，必须是绝对路径）。
+ * 运行时优先使用它，镜像不存在时才回落官方 CDN。
+ */
+export const IMGLY_MIRROR_PATH = `${LOCAL_MODEL_ROOT}${manifest.imgly.mirrorPath}/`
+
+/** 把 ISNet 权重镜像到 {@link IMGLY_MIRROR_PATH} 的命令，供界面展示 */
+export const IMGLY_MIRROR_COMMAND = 'node scripts/download-models.mjs --imgly'
 
 /**
  * 项目内置权重的仓库目录。

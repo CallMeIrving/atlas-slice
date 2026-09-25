@@ -1,4 +1,8 @@
 {
+  "imgly": {
+    "package": "@imgly/background-removal",
+    "mirrorPath": "@imgly/background-removal-data/dist"
+  },
   "repos": [
     {
       "id": "briaai/RMBG-1.4",

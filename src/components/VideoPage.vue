@@ -33,7 +33,7 @@ function load(file?: File): void {
   previewId.value = null
 }
 
-/** 读取视频元信息，作为抽帧时间区间与输出尺寸的默认值 */
+/** 读取视频元信息，作为抽帧时间区间的默认值 */
 function onMetadata(): void {
   if (!video.value) return
   workspace.video.duration = video.value.duration

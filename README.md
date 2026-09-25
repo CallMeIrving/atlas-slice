@@ -62,7 +62,7 @@ pnpm run models:download      # 下载抠图模型到 public/models/（可选，
 
 ## 抠图模型下载
 
-抠图模块支持颜色抠图、ISNet、RMBG-1.4。颜色抠图不需要下载模型；ISNet 默认从 IMG.LY CDN 加载并由浏览器缓存，RMBG-1.4 默认从项目的 `public/models/` 本地目录加载。模型加载完成后，界面会显示「已加载」，失败时会显示具体错误。
+抠图模块支持颜色抠图、ISNet、RMBG-1.4。颜色抠图不需要下载模型；ISNet 优先使用 `public/models/` 下的本地镜像（由下载脚本落地），没有镜像时才回落到 IMG.LY CDN 并由浏览器缓存；RMBG-1.4 默认从项目的 `public/models/` 本地目录加载。模型加载完成后，界面会显示「已加载」，失败时会显示具体错误。
 
 ### 一键下载
 
@@ -73,6 +73,9 @@ pnpm run models:download                 # 全量：界面可选的全部精度�
 pnpm run models:download -- --fp16-only  # 精简集：RMBG 默认 FP16，约 84MB
 pnpm run models:download -- --force      # 已存在的文件也重新下载
 pnpm run models:download -- --host=https://huggingface.co   # 换模型源，默认 hf-mirror.com
+pnpm run models:download -- --imgly      # 把 ISNet（imgly）权重镜像到本地（官方 CDN，国内通常需要代理）
+pnpm run models:download -- --imgly --source=https://example.com/@imgly/background-removal-data/1.7.0/dist/  # 换 ISNet 镜像源
+pnpm run models:download -- --imgly --out=/tmp/imgly-mirror-test   # 换 ISNet 镜像输出目录（仅用于验证）
 ```
 
 脚本行为：
@@ -81,29 +84,39 @@ pnpm run models:download -- --host=https://huggingface.co   # 换模型源，默
 - 先写入 `.part` 再改名，中断后下次运行按 `Range` 续传；服务端不支持 Range 时自动从头下载。
 - 下载完成后按字节数校验完整性，不符会给出警告；已存在且字节数一致的文件直接跳过。
 - 失败项会在末尾汇总列出，并以退出码 1 结束，方便挂到 `postinstall` 或 CI。
+- `--imgly`（或任意 `--source=` / `--out=`）表示只镜像 ISNet，不再下载清单里的 RMBG 权重：读取 `<source>/resources.json`，把它和其中引用的全部分片**扁平**写到 `public/models/@imgly/background-removal-data/dist/`（分片与 `resources.json` 同级）。每个分片按 `offsets[1] - offsets[0]` 校验字节数，已存在且字节数正确的分片直接跳过，可重复运行续传。
+- ISNet 镜像的默认来源是官方 CDN `staticimgly.com`，版本号取自 `node_modules/@imgly/background-removal` 的 `package.json`（升级依赖后无需改脚本）。该 CDN 在中国大陆通常需要代理，**没有代理就无法完成首次下载**，可以挂代理跑一次，或用 `--source=` 换成可访问的镜像源。
 
 ### 模型地址
 
 | 模型 | 项目中的模型 ID / 选项 | 官方下载地址 | 国内镜像 |
 |---|---|---|---|
-| ISNet（imgly） | `isnet_fp16`、`isnet`、`isnet_quint8` | [IMG.LY 模型资源](https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/) | 无 HuggingFace 镜像 |
+| ISNet（imgly） | `isnet_fp16`、`isnet`、`isnet_quint8` | [IMG.LY 模型资源](https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/) | 无 HuggingFace 镜像；可用 `--imgly` 把官方 CDN 权重镜像到本地（首次下载需代理） |
 | RMBG-1.4 | `briaai/RMBG-1.4` | [HuggingFace 模型仓库](https://huggingface.co/briaai/RMBG-1.4/tree/main) | [hf-mirror 镜像](https://hf-mirror.com/briaai/RMBG-1.4) |
 
 ### 必需文件与排除文件
 
-项目中的 Transformers.js 模型默认使用本地目录和 `local_files_only`，不会因为仓库中存在多个精度版本而全部下载。ISNet 由 `@imgly/background-removal` 管理 CDN 资源；离线部署时只需要复制当前精度对应的文件。
+项目中的 Transformers.js 模型默认使用本地目录和 `local_files_only`，不会因为仓库中存在多个精度版本而全部下载。ISNet 的资源清单由 `@imgly/background-removal` 的 `resources.json` 描述，可用 `pnpm run models:download -- --imgly` 把全部分片镜像到本地。
 
 #### ISNet（imgly）
 
-ISNet 由 `@imgly/background-removal` 管理资源，项目只会加载界面当前选择的一个模型：
+ISNet 的资源由 `@imgly/background-removal` 按 `model` 参数从 `resources.json` 里选择，运行时只会加载界面当前选择的一个模型：
 
-| 选项 | 必需资源 | 不需要同时下载 |
-|---|---|---|
-| `isnet_fp16` | ISNet FP16 资源 | `isnet`、`isnet_quint8` |
-| `isnet` | ISNet 原始精度资源 | `isnet_fp16`、`isnet_quint8` |
-| `isnet_quint8` | ISNet 量化资源 | `isnet`、`isnet_fp16` |
+| 选项 | 会用到的资源 |
+|---|---|
+| `isnet_fp16` | ISNet FP16 资源 |
+| `isnet` | ISNet 原始精度资源 |
+| `isnet_quint8` | ISNet 量化资源 |
 
-资源由库内部按 `model` 参数选择，代码不应把三套 ISNet 资源复制到同一个离线目录中。
+镜像目录是**扁平**的，分片是 content-addressed 的（文件名即 hash、无扩展名，因此体积相同的分片会被多份权重共用）：
+
+```text
+public/models/@imgly/background-removal-data/dist/
+├── resources.json          # 资源清单：每个 key 对应 chunk 列表与 offsets
+└── <hash>                  # 分片，与 resources.json 同级；约 4MB 一个
+```
+
+`resources.json` 同时列出了 onnxruntime-web 的 wasm 与三套 ISNet 权重，因此镜像命令会一次性下载全部分片（约 200MB），无需手工挑选精度；服务器上缺少某个分片时，imgly 会因字节数校验失败而报错，而不是静默降级。
 
 #### RMBG-1.4
 
@@ -129,16 +142,17 @@ onnx/model_quantized.onnx   # Q8
 
 - RMBG-1.4 的权重放在项目本地目录（由 `pnpm run models:download` 落地），不依赖运行时访问 HuggingFace。重新下载或切换模型 ID 时，中国大陆网络访问 HuggingFace 可能不稳定，可在界面把「模型源」切换为 `hf-mirror.com`，或使用代理网络。
 - `hf-mirror.com` 是第三方镜像，不是 HuggingFace 官方站点。用于生产部署时，建议下载后校验文件并固定版本。
-- ISNet 默认从 IMG.LY 的 `staticimgly.com` CDN 获取模型和 WASM 文件，是否需要代理取决于当前网络。也可以通过「资源地址（publicPath）」改成自己的静态文件地址。
+- ISNet 优先从项目的本地镜像目录 `public/models/@imgly/background-removal-data/dist/` 读取模型和 WASM 文件，镜像就位时不再访问 CDN。没有镜像时才回落到 IMG.LY 的 `staticimgly.com` CDN，是否需要代理取决于当前网络；该 CDN 在中国大陆通常需要代理，**没有代理就无法完成首次下载**。也可以用「资源地址（publicPath）」指定自己的静态文件地址，它的优先级高于本地镜像。
 - 模型仓库展示的总大小包含多个精度和非浏览器文件；全量下载约 295MB，`--fp16-only` 精简集约 84MB（RMBG FP16）。实际运行还会加载 Transformers.js 的运行时 WASM 文件。模型状态是页面运行时状态，刷新后会重新初始化本地模型，不会重复下载权重。
 
 ### 离线部署
 
-可以把模型提前放到应用的 `public/models/` 目录。因为 `briaai/RMBG-1.4` 这组目录名和层级容易写错，最省事的方式是直接运行 `pnpm run models:download`，脚本会按模型 ID 建好目录。手工放置时目录名要和模型 ID 保持一致，例如：
+可以把模型提前放到应用的 `public/models/` 目录。因为 `briaai/RMBG-1.4` 和 `@imgly/background-removal-data/dist` 这两组目录名容易写错，最省事的方式是直接运行 `pnpm run models:download`（RMBG）与 `pnpm run models:download -- --imgly`（ISNet），脚本会按约定建好目录。手工放置时目录名要和清单一致，例如：
 
 ```text
 public/models/
-└── briaai/RMBG-1.4/                    # config + preprocessor + FP16/Q8/FP32 权重
+├── briaai/RMBG-1.4/                    # config + preprocessor + FP16/Q8/FP32 权重
+└── @imgly/background-removal-data/dist/ # resources.json + 全部分片（与它同级）
 ```
 
 启动应用后，在「抠图」页面选择对应模型，点击「预加载当前模型」。项目会优先使用 `public/models/` 中的本地模型；刷新页面后会重新初始化模型运行时。Vite 对 `/models/` 下不存在的文件返回 404，避免把应用首页 HTML 当作 JSON 解析。
