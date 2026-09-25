@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { persistMediaSettings, workspace, type MatteMode } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
 import { applyColorKey, solidColorKey } from '@/core/color-key'
-import { removeWithImgly, removeWithTransformers, segmentWithSam, AI_ENGINES, describeMattingError, deviceOptions, dtypeOptions, imglyDtypeForModel, resolveDevice, resolveDtype, type AiEngine, type MatteDtype, type MatteProgress } from '@/core/ai-matting'
+import { removeWithImgly, removeWithTransformers, segmentWithSam, AI_ENGINES, AI_MAX_SIDE_OPTIONS, describeMattingError, deviceOptions, dtypeOptions, imglyDtypeForModel, modelBlockReason, resolveDevice, resolveDtype, type AiEngine, type MatteDtype, type MatteProgress } from '@/core/ai-matting'
 import { ensureMatteModelLoaded, matteModelKey, modelStateLabel, modelStatus, setModelState, type ModelEngine, type ModelState } from '@/store/model-status'
 
 const input = ref<HTMLInputElement>()
@@ -83,7 +83,18 @@ const isAiMode = computed(() => ['imgly', 'birefnet', 'rmbg', 'sam'].includes(wo
 const canPanImage = computed(() => Boolean(workspace.matte.sourceUrl) && (workspace.matte.mode !== 'sam' || spacePanActive.value))
 const zoomPercent = computed(() => `${Math.round(zoomLevel.value * 100)}%`)
 const imageViewStyle = computed(() => ({ width: fitImageSize.value.width ? `${fitImageSize.value.width}px` : 'auto', height: fitImageSize.value.height ? `${fitImageSize.value.height}px` : 'auto', transform: `translate3d(${panOffset.value.x}px, ${panOffset.value.y}px, 0) scale(${zoomLevel.value})` }))
-const runDisabled = computed(() => !workspace.matte.sourceUrl || workspace.matte.status === 'processing' || (workspace.matte.mode === 'sam' && !workspace.matte.samBoxes.length && !workspace.matte.samPoints.length))
+/**
+ * 当前所选 AI 模型在当前设备上的不可用原因（例如内置 BiRefNet 权重超出了
+ * wasm 4GB 堆 / WebGPU storage buffer 上限）；可用时为空串。
+ * 必须先判定引擎：BiRefNet 的模型 ID 字段在其它引擎下也一直有值，
+ * 不加这层判断会给 ISNet / SAM 误报「不可用」，还会错误地禁用「开始抠图」。
+ */
+const blockedReason = computed(() => {
+  if (workspace.matte.mode !== 'birefnet' && workspace.matte.mode !== 'rmbg') return ''
+  const modelId = workspace.matte.mode === 'rmbg' ? workspace.matte.rmbgModelId : workspace.matte.birefnetModelId
+  return modelBlockReason(modelId, workspace.matte.aiDevice) ?? ''
+})
+const runDisabled = computed(() => !workspace.matte.sourceUrl || workspace.matte.status === 'processing' || Boolean(blockedReason.value) || (workspace.matte.mode === 'sam' && !workspace.matte.samBoxes.length && !workspace.matte.samPoints.length))
 const undoSamDisabled = computed(() => workspace.matte.status === 'processing' || (!samHistory.value.length && !samDragging.value))
 /** 当前处理方式对应的模型 key；非 AI 方式返回空串。key 由共享 store 生成，与视频帧一键处理弹窗一致 */
 const selectedModelKey = computed(() => (isAiMode.value ? matteModelKey(workspace.matte.mode as ModelEngine) : ''))
@@ -660,6 +671,7 @@ onBeforeUnmount(() => {
         </template>
         <template v-if="isAiMode && workspace.matte.mode !== 'sam'">
           <div v-if="workspace.matte.mode === 'rmbg'" class="warn">⚠️ RMBG 仅供评估，不可商用</div>
+          <div v-if="blockedReason" class="warn">⛔ {{ blockedReason }}</div>
           <label v-if="workspace.matte.mode === 'imgly'" class="field"><span class="field-label">模型</span>
             <select v-model="workspace.matte.imglyModel" class="select">
               <option value="isnet_fp16">ISNet FP16（推荐）</option>
@@ -692,12 +704,10 @@ onBeforeUnmount(() => {
           </label>
           <label class="field"><span class="field-label">最大边长</span>
             <select v-model.number="workspace.matte.aiMaxSide" class="select">
-              <option :value="0">原图尺寸</option>
-              <option :value="1024">1024px</option>
-              <option :value="768">768px</option>
-              <option :value="512">512px（最快）</option>
+              <option v-for="option in AI_MAX_SIDE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
+          <p v-if="workspace.matte.mode === 'birefnet' || workspace.matte.mode === 'rmbg'" class="muted">BiRefNet / RMBG 的模型输入被固定为 1024×1024，最大边长只影响合成输出的画布尺寸，不影响推理占用的内存</p>
         </template>
         <template v-if="workspace.matte.mode === 'sam'">
           <div class="seg">
@@ -726,10 +736,7 @@ onBeforeUnmount(() => {
           </label>
           <label class="field"><span class="field-label">最大边长</span>
             <select v-model.number="workspace.matte.aiMaxSide" class="select">
-              <option :value="0">自动限制 1024px</option>
-              <option :value="1024">1024px</option>
-              <option :value="768">768px</option>
-              <option :value="512">512px（最快）</option>
+              <option v-for="option in AI_MAX_SIDE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
           <p class="muted">SAM 默认最多以 1024px 推理并输出，避免大图耗尽浏览器内存；标注坐标会自动换算。</p>
@@ -846,7 +853,7 @@ onBeforeUnmount(() => {
 .preload-button { margin-top: 8px; }
 .model-state-hint { margin: 8px 0 0; line-height: 1.5; }
 .sampling { cursor: crosshair; }.sampled-color { display:flex; align-items:center; gap:8px; color:var(--text-muted); font:12px var(--font-mono); }.color-chip { width:18px; height:18px; border:1px solid var(--border-strong); border-radius:3px; }.btn-icon { margin-left:auto; color:var(--text-faint); }
-.warn { padding: 8px 10px; border: 1px solid #b45309; color: #fbbf24; background: rgba(251, 191, 36, 0.08); border-radius: 6px; font-size: 12px; margin-bottom: 8px; }
+
 .select { width: 100%; }
 .ai-status { margin-top: 8px; }.ai-status p { margin: 0 0 4px; font-size: 12px; word-break: break-all; }
 .progress-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }.progress-fill { height: 100%; background: var(--accent); transition: width 0.2s ease; }

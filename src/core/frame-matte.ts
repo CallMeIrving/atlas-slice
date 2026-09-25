@@ -1,6 +1,6 @@
 import { nextTick } from 'vue'
 import { applyColorKey, colorKeyBase, sampleEdgeColor, type ColorKeyBase } from '@/core/color-key'
-import { removeWithImgly, removeWithTransformers, type MatteProgress } from '@/core/ai-matting'
+import { removeWithImgly, removeWithTransformers, resolveInferenceMaxSide, type MatteProgress } from '@/core/ai-matting'
 import { fitResultToSize, imageDataToUrl, imageToImageData, loadImage } from '@/core/image'
 import { recropFrame } from '@/core/frame-crop'
 import type { VideoFrame, VideoMatteSettings } from '@/store/workspace'
@@ -10,9 +10,6 @@ import type { CancelToken } from '@/core/frame-extract'
  * 视频帧抠图核心逻辑。
  * 单帧抠图弹窗与一键处理流水线共用；始终从原始抽帧画面出发，保证反复执行不叠加误差。
  */
-
-/** AI 推理分辨率上限：帧抠图要连续处理多帧，限制在 1024 内可显著降低 wasm 堆压力 */
-export const AI_MAX_SIDE_LIMIT = 1024
 
 /** 帧抠图用到的 AI 偏好（与 workspace.matte 的 AI 字段结构一致） */
 export interface AiMattePrefs {
@@ -83,8 +80,8 @@ export async function matteFrameImage(
 ): Promise<string> {
   const settings = context.settings
   if (settings.mode === 'solid') return matteSolidData(image, settings, source).url
-  const configured = context.ai.aiMaxSide
-  const maxSide = configured > 0 ? Math.min(configured, AI_MAX_SIDE_LIMIT) : AI_MAX_SIDE_LIMIT
+  // 分辨率上限统一由 ai-matting 收敛（0 = 自动），这里不再各写一份
+  const maxSide = resolveInferenceMaxSide(context.ai.aiMaxSide)
   const width = image.naturalWidth
   const height = image.naturalHeight
   if (settings.mode === 'imgly') {

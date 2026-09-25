@@ -12,6 +12,9 @@
  * 引擎内部均为动态 import，避免主包体积膨胀。
  */
 
+import { releaseCanvas } from '@/core/image'
+import { LOCAL_MODEL_ROOT, downloadCommand, inspectLocalRepo, localRepoPath, repoForEngine } from '@/core/model-registry'
+
 export interface MatteProgress {
   phase: 'loading' | 'processing'
   text: string
@@ -19,8 +22,27 @@ export interface MatteProgress {
   percent?: number
 }
 
+/**
+ * AI 推理的最长边上限。
+ * onnxruntime-web 的 wasm 堆有固定上限，超出后分配激活值会直接抛
+ * `failed to call OrtRun(). ERROR_CODE: 6, std::bad_alloc`（与机器物理内存无关）。
+ * 大图按原尺寸推理必然触发，因此所有引擎统一在该上限内推理，结果再放大回原尺寸。
+ */
+export const AI_MAX_SIDE_LIMIT = 1024
+
+/**
+ * 把界面上的「最大边长」收敛成实际推理用的最长边。
+ * 0 或未配置都表示「自动」，即使用 AI_MAX_SIDE_LIMIT——而不是原图尺寸，
+ * 否则一张 3000×2000 的图就会把 wasm 堆撑爆。
+ * @param configured 界面配置值（0 表示自动）
+ * @returns 实际用于推理的像素上限，必定大于 0
+ */
+export function resolveInferenceMaxSide(configured?: number): number {
+  return configured && configured > 0 ? Math.min(configured, AI_MAX_SIDE_LIMIT) : AI_MAX_SIDE_LIMIT
+}
+
 export interface AiEngineBaseOptions {
-  /** 处理前最大边长像素，0 = 保持原图尺寸 */
+  /** 处理前最大边长像素；0 或未配置 = 自动（收敛到 {@link AI_MAX_SIDE_LIMIT}） */
   maxSide?: number
   onProgress?: (progress: MatteProgress) => void
 }
@@ -99,7 +121,7 @@ export interface EngineMeta {
 /** 引擎元信息，供界面"模型状态"区展示 */
 export const AI_ENGINES: EngineMeta[] = [
   { key: 'imgly', label: 'ISNet（imgly）', license: '免费可用', size: '约 30-170MB', description: '速度快，通用背景分离' },
-  { key: 'birefnet', label: 'BiRefNet', license: 'MIT 可商用', size: '约 115MB（FP16）', description: '高质量分割，细节保留好' },
+  { key: 'birefnet', label: 'BiRefNet', license: 'MIT 可商用', size: '约 115MB（FP16）', description: '分割质量高，但浏览器内跑不起来（见下方说明）' },
   { key: 'rmbg', label: 'RMBG-1.4（BRIA）', license: '⚠️不可商用', size: '约 44-176MB（Q8-FP32）', description: '效果顶尖，注意许可限制' },
   { key: 'sam', label: 'SAM 框选分割', license: 'Apache-2.0', size: '约 110MB（Q8）', description: '框选/点击区域精确分割' },
 ]
@@ -127,6 +149,18 @@ const DTYPE_OPTIONS: MatteOption<MatteDtype>[] = [
 const DEVICE_OPTIONS: MatteOption<MatteDevice>[] = [
   { value: 'cpu', label: 'CPU（兼容性最好）' },
   { value: 'gpu', label: 'GPU / WebGPU（需浏览器支持）' },
+]
+
+/**
+ * 推理分辨率（最大边长）选项，抠图页各引擎共用。
+ * 刻意不提供「原图尺寸」：原尺寸推理会撑爆 wasm 堆并抛 std::bad_alloc，
+ * 0 统一表示「自动」，展示文案也必须与实际行为一致。
+ */
+export const AI_MAX_SIDE_OPTIONS: MatteOption<number>[] = [
+  { value: 0, label: `自动（最长边 ${AI_MAX_SIDE_LIMIT}px）` },
+  { value: 1024, label: '1024px' },
+  { value: 768, label: '768px' },
+  { value: 512, label: '512px（最快）' },
 ]
 
 /**
@@ -189,9 +223,45 @@ export function resolveDevice(dtype: MatteDtype, device: MatteDevice): MatteDevi
   return deviceOptions(dtype).some((option) => option.value === device) ? device : 'cpu'
 }
 
+/**
+ * 已知在浏览器里跑不起来的「引擎 + 设备」组合及其确切原因。
+ *
+ * BiRefNet_lite（onnx-community）实测结论：
+ * - 它的 ONNX 图把输入写死成 1024×1024（图上是静态维度），改小输入会直接报
+ *   `Got: 512 Expected: 1024`，所以界面上的「最大边长」对它完全无效；
+ * - 在该分辨率下 wasm(CPU) 推理需要 3.6GB 以上的 wasm 堆，而 wasm32 上限是 4GB，
+ *   实测跑到 3629MB 后抛 `std::bad_alloc`——单张图也一样，与机器物理内存无关；
+ * - 换 WebGPU 也不行：模型需要 11 个 storage buffer，超过浏览器给的上限 10。
+ * 提前拦下可以避免白跑 25 秒、并避免 wasm 堆被破坏（堆一旦分配失败就再也用不了，
+ * 之后连 RMBG / ISNet 都会跟着失败，必须刷新页面才能恢复）。
+ * @param engine AI 引擎标识
+ * @param device 目标推理设备
+ * @returns 原因文案；可用时返回 null
+ */
+function unsupportedEngineReason(engine: AiEngine, device: MatteDevice): string | null {
+  if (engine !== 'birefnet') return null
+  return device === 'gpu'
+    ? 'BiRefNet 在浏览器里跑不起来：它需要 11 个 storage buffer，超过 WebGPU 上限 10。请改用 ISNet（imgly）或 RMBG-1.4。'
+    : 'BiRefNet 在浏览器里跑不起来：它的输入被固定为 1024×1024，需要 3.6GB 以上的 wasm 堆（wasm32 上限 4GB），单张图也会内存不足，且「最大边长」对它无效。请改用 ISNet（imgly）或 RMBG-1.4。'
+}
+
+/**
+ * 按模型 ID 做能力预检：项目内置的 BiRefNet 权重在当前浏览器跑不起来。
+ * 内置权重用「模型 ID → 本地路径」的映射还原引擎，非内置模型（用户自己填的仓库）不做拦截。
+ * @param modelId 模型 ID 或本地路径
+ * @param device 目标推理设备
+ * @returns 不可用原因；可用时返回 null
+ */
+export function modelBlockReason(modelId: string, device: MatteDevice): string | null {
+  const localPath = localRepoPath(modelId)
+  if (!localPath) return null
+  return unsupportedEngineReason(localPath.includes('BiRefNet') ? 'birefnet' : 'rmbg', device)
+}
+
 type CanvasSource = HTMLImageElement | HTMLCanvasElement
 
-type TransformerPipeline = (input: unknown) => Promise<unknown>
+/** transformers.js 的 pipeline：可调用，且能通过 dispose 释放底层 ONNX 会话 */
+type TransformerPipeline = ((input: unknown) => Promise<unknown>) & { dispose?: () => Promise<void> }
 
 interface RawImageLike {
   data: Uint8Array | Uint8ClampedArray
@@ -200,23 +270,22 @@ interface RawImageLike {
   channels: number
 }
 
-const transformerPipelineCache = new Map<string, TransformerPipeline>()
-const transformerPipelineLoading = new Map<string, Promise<TransformerPipeline>>()
+interface TransformerPipelineEntry {
+  pipeline: TransformerPipeline
+  /** 记录会话所属引擎，「卸载」时才能精确释放指定模型而不影响其它已加载模型 */
+  engine: AiEngine
+}
+
+const transformerPipelineCache = new Map<string, TransformerPipelineEntry>()
+const transformerPipelineLoading = new Map<string, Promise<TransformerPipelineEntry>>()
 const samRuntimeCache = new Map<string, { processor: SamProcessorLike; model: SamModelLike }>()
 const samRuntimeLoading = new Map<string, Promise<{ processor: SamProcessorLike; model: SamModelLike }>>()
 // Xenova/sam-vit-base is split into a vision encoder and a prompt/mask decoder.
 // Keep SAM on Q8 so from_pretrained selects only the two *_quantized.onnx files.
 const SAM_DTYPE = 'q8' as const
-const LOCAL_MODEL_PATH = '/models/'
-const LOCAL_SAM_MODEL_PATH = `${LOCAL_MODEL_PATH}Xenova/sam-vit-base/`
-const SAM_LOCAL_FILES = [
-  'config.json',
-  'processor_config.json',
-  'preprocessor_config.json',
-  'quantize_config.json',
-  'onnx/vision_encoder_quantized.onnx',
-  'onnx/prompt_encoder_mask_decoder_quantized.onnx',
-] as const
+/** SAM 的本地目录同样取自模型清单，避免与下载脚本两处维护 */
+const SAM_REPO = repoForEngine('sam')
+const SAM_MODEL_DIR = SAM_REPO ? `${LOCAL_MODEL_ROOT}${SAM_REPO.id}/` : ''
 
 /** transformers.js Tensor 的轻量视图 */
 interface AnyTensor {
@@ -228,6 +297,7 @@ interface AnyTensor {
 interface SamModelLike {
   get_image_embeddings(inputs: { pixel_values: unknown }): Promise<{ image_embeddings: unknown; image_positional_embeddings: unknown }>
   (inputs: Record<string, unknown>): Promise<{ pred_masks: AnyTensor; iou_scores: AnyTensor }>
+  dispose?(): Promise<unknown>
 }
 
 interface SamProcessorLike {
@@ -265,12 +335,25 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   })
 }
 
+/**
+ * transformers.js 的 RawImage → 画布。
+ * RGBA 输出直接在同一段内存上建视图（零拷贝），避免每次推理再复制一份
+ * 宽×高×4 的缓冲；只有通道数不足 4 时才逐像素补齐。
+ */
 function rawImageToCanvas(image: RawImageLike): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = image.width
   canvas.height = image.height
-  const rgba = new Uint8ClampedArray(image.width * image.height * 4)
-  for (let index = 0; index < image.width * image.height; index += 1) {
+  const pixelCount = image.width * image.height
+  if (image.channels === 4 && image.data.length === pixelCount * 4) {
+    const rgba = image.data instanceof Uint8ClampedArray
+      ? image.data
+      : new Uint8ClampedArray(image.data.buffer, image.data.byteOffset, image.data.length)
+    canvas.getContext('2d')!.putImageData(new ImageData(rgba, image.width, image.height), 0, 0)
+    return canvas
+  }
+  const rgba = new Uint8ClampedArray(pixelCount * 4)
+  for (let index = 0; index < pixelCount; index += 1) {
     const sourceOffset = index * image.channels
     const targetOffset = index * 4
     rgba[targetOffset] = image.data[sourceOffset] ?? 0
@@ -282,20 +365,42 @@ function rawImageToCanvas(image: RawImageLike): HTMLCanvasElement {
   return canvas
 }
 
-/** 用单通道蒙版（0-255）作为 alpha 合成到原图上，返回结果画布（与输入同尺寸） */
-function composeAlphaCanvas(sourceCanvas: HTMLCanvasElement, mask: Uint8ClampedArray): HTMLCanvasElement {
-  const out = document.createElement('canvas')
-  out.width = sourceCanvas.width
-  out.height = sourceCanvas.height
-  const ctx = out.getContext('2d')!
-  ctx.drawImage(sourceCanvas, 0, 0)
-  const imageData = ctx.getImageData(0, 0, out.width, out.height)
+/**
+ * 把单通道蒙版作为 alpha 合成进源画布，并就地返回源画布。
+ * 直接复用源画布自身的 ImageData，不再额外创建「蒙版画布 + 缩放画布 + 结果画布」，
+ * 单次推理的峰值缓冲从 4 份降到 1 份。
+ * @param sourceCanvas 待合成的画布（会被就地修改，调用方需确认它只是临时画布）
+ * @param mask 单通道蒙版数据
+ * @param maskWidth 蒙版宽
+ * @param maskHeight 蒙版高
+ * @param channels 蒙版每像素通道数（通常为 1）
+ */
+function applyMaskToCanvas(
+  sourceCanvas: HTMLCanvasElement,
+  mask: Uint8Array | Uint8ClampedArray,
+  maskWidth: number,
+  maskHeight: number,
+  channels: number,
+): HTMLCanvasElement {
+  const width = sourceCanvas.width
+  const height = sourceCanvas.height
+  const ctx = sourceCanvas.getContext('2d')!
+  const imageData = ctx.getImageData(0, 0, width, height)
   const pixels = imageData.data
-  for (let i = 0; i < out.width * out.height; i += 1) {
-    pixels[i * 4 + 3] = mask[i]
+  if (maskWidth === width && maskHeight === height) {
+    for (let i = 0; i < width * height; i += 1) pixels[i * 4 + 3] = mask[i * channels]
+  } else {
+    // 蒙版尺寸与输入不一致时按最近邻换算，避免再分配一张同尺寸画布
+    for (let y = 0; y < height; y += 1) {
+      const maskY = Math.min(maskHeight - 1, Math.floor((y * maskHeight) / height))
+      for (let x = 0; x < width; x += 1) {
+        const maskX = Math.min(maskWidth - 1, Math.floor((x * maskWidth) / width))
+        pixels[(y * width + x) * 4 + 3] = mask[(maskY * maskWidth + maskX) * channels]
+      }
+    }
   }
   ctx.putImageData(imageData, 0, 0)
-  return out
+  return sourceCanvas
 }
 
 /** 把单通道蒙版渲染为白前景/黑背景的 PNG 画布 */
@@ -336,60 +441,111 @@ function transformersProgress(onProgress?: (progress: MatteProgress) => void) {
   }
 }
 
+/**
+ * 加载 SAM 前先确认本地权重齐全，缺文件时直接中止并给出补齐命令。
+ * 探测复用清单的 inspectLocalRepo（「模型管理」弹窗读的是同一份清单与同一套探测），
+ * 避免这里再写一遍 HEAD 循环；代码对 SAM 强制 local_files_only，缺文件不会回落远程。
+ * @param onProgress 进度回调，用于在界面上显示「正在检查本地文件」
+ */
 async function inspectSamLocalFiles(onProgress?: (progress: MatteProgress) => void): Promise<void> {
-  const baseUrl = `${LOCAL_MODEL_PATH}Xenova/sam-vit-base/`
-  console.groupCollapsed('[SAM] 本地模型文件检查')
-  try {
-    for (const file of SAM_LOCAL_FILES) {
-      const url = `${baseUrl}${file}`
-      onProgress?.({ phase: 'loading', text: `检查本地文件 ${file}…` })
-      const response = await fetch(url, { method: 'HEAD', cache: 'no-store' })
-      const contentType = response.headers.get('content-type') ?? ''
-      const contentLength = response.headers.get('content-length') ?? '未知'
-      console.info('[SAM] 文件检查', { file, url, status: response.status, contentType, contentLength })
-      if (!response.ok) throw new Error(`本地文件 ${file} 请求失败：HTTP ${response.status}（${url}）`)
-      if (contentType.toLowerCase().includes('text/html')) throw new Error(`本地文件 ${file} 返回了 HTML，不是模型文件（${url}）`)
-    }
-  } finally {
-    console.groupEnd()
-  }
+  if (!SAM_REPO) throw new Error('模型清单里没有 SAM 仓库，无法校验本地权重')
+  onProgress?.({ phase: 'loading', text: '检查本地模型文件…' })
+  const status = await inspectLocalRepo(SAM_REPO)
+  console.info('[SAM] 本地文件检查', status.files.map((file) => ({ file: file.file, state: file.state, actualSize: file.actualSize })))
+  const broken = status.files.filter((file) => file.state !== 'ok')
+  if (broken.length === 0) return
+  const detail = broken.map((file) => `${file.file}${file.state === 'mismatch' ? '（大小不符）' : ''}`).join('、')
+  throw new Error(`缺少本地模型文件：${detail}。请在项目根目录执行 ${downloadCommand(SAM_REPO.id)} 补齐后再试。`)
 }
 
 function transformerCacheKey(options: Pick<TransformersOptions, 'modelId' | 'dtype' | 'device' | 'modelHost'>): string {
   return `${options.modelId}|${options.dtype}|${options.device}|${options.modelHost}`
 }
 
-/**
- * 同一模型只保留一个已初始化的 pipeline。
- * 切换精度/设备会生成新的缓存 key，若不驱逐旧实例，ONNX Runtime 会话会一直堆在内存里，
- * 多次切换后极易触发 wasm 堆分配失败（std::bad_alloc）。
- */
-function evictStalePipelines(activeKey: string, modelId: string): void {
-  const prefix = `${modelId}|`
-  for (const key of [...transformerPipelineCache.keys()]) {
-    if (key !== activeKey && key.startsWith(prefix)) transformerPipelineCache.delete(key)
+/** 释放 pipeline 的底层 ONNX 会话。只把实例从缓存 Map 里删掉并不会归还 wasm 堆内存 */
+async function disposePipeline(pipeline: TransformerPipeline | undefined): Promise<void> {
+  try {
+    await pipeline?.dispose?.()
+  } catch (error) {
+    console.warn('[抠图] 释放模型会话失败', error)
   }
 }
 
-function localModelPathFor(modelId: string): string | undefined {
-  const normalizedId = modelId.toLowerCase()
-  if (normalizedId === 'onnx-community/birefnet_lite-onnx') return '/models/onnx-community/BiRefNet_lite-ONNX/'
-  if (normalizedId === 'briaai/rmbg-1.4') return '/models/briaai/RMBG-1.4/'
-  return undefined
+/** 释放 SAM 的 ONNX 会话 */
+async function disposeSamRuntime(runtime: { model: SamModelLike } | undefined): Promise<void> {
+  try {
+    await runtime?.model.dispose?.()
+  } catch (error) {
+    console.warn('[抠图] 释放 SAM 会话失败', error)
+  }
+}
+
+/**
+ * 从模型 ID 推断 transformers.js 引擎归属：内置 BiRefNet 权重归 birefnet，其余归 rmbg。
+ * 与 {@link modelBlockReason} 使用同一套判定，保证「拦截」和「释放」指向同一个引擎。
+ */
+function engineForModelId(modelId: string): AiEngine {
+  return localRepoPath(modelId)?.includes('BiRefNet') ? 'birefnet' : 'rmbg'
+}
+
+/**
+ * 释放除 keepKey 之外的所有已初始化 ONNX 会话（transformers pipeline 与 SAM）。
+ * 两者共用同一份 onnxruntime 的 wasm 堆，任何时刻只允许一个会话存活：
+ * 旧会话不显式 dispose 就不会归还堆内存，反复切换模型/精度/设备会持续堆积，
+ * 最终演变成 std::bad_alloc（表现就是「内存不足」，且与机器物理内存无关）。
+ * @param keepKey 本次要保留的缓存 key
+ */
+async function releaseOtherSessions(keepKey: string): Promise<void> {
+  for (const [key, entry] of [...transformerPipelineCache]) {
+    if (key === keepKey) continue
+    transformerPipelineCache.delete(key)
+    await disposePipeline(entry.pipeline)
+  }
+  for (const [key, runtime] of [...samRuntimeCache]) {
+    if (key === keepKey) continue
+    samRuntimeCache.delete(key)
+    await disposeSamRuntime(runtime)
+  }
+}
+
+/**
+ * 释放指定引擎已初始化的 ONNX 会话，把 wasm 堆内存归还给浏览器。
+ * 只从缓存 Map 里删引用不会归还内存，必须走 dispose（见 {@link releaseOtherSessions}）。
+ * ISNet（imgly）的会话与资源缓存都由 imgly 运行时内部持有，没有可释放的句柄，此处不做处理。
+ * @param engine 目标引擎
+ */
+export async function releaseMattingModel(engine: AiEngine): Promise<void> {
+  if (engine === 'imgly') return
+  if (engine === 'sam') {
+    for (const [key, runtime] of [...samRuntimeCache]) {
+      samRuntimeCache.delete(key)
+      await disposeSamRuntime(runtime)
+    }
+    return
+  }
+  for (const [key, entry] of [...transformerPipelineCache]) {
+    if (entry.engine !== engine) continue
+    transformerPipelineCache.delete(key)
+    await disposePipeline(entry.pipeline)
+  }
 }
 
 async function getTransformerPipeline(options: TransformersOptions): Promise<TransformerPipeline> {
   const key = transformerCacheKey(options)
   const cached = transformerPipelineCache.get(key)
-  if (cached) return cached
+  if (cached) return cached.pipeline
   const loading = transformerPipelineLoading.get(key)
-  if (loading) return loading
-  const task = (async () => {
+  if (loading) return (await loading).pipeline
+  const task = (async (): Promise<TransformerPipelineEntry> => {
+    // 能力预检放在最前面：既避免白白下载上百 MB 权重，也避免跑 25 秒后
+    // 抛 bad_alloc 把 wasm 堆搞坏（堆坏掉之后所有引擎都会跟着失败）
+    const blocked = modelBlockReason(options.modelId, options.device)
+    if (blocked) throw new Error(blocked)
     const transformers = await import('@huggingface/transformers')
     transformers.env.allowLocalModels = true
-    transformers.env.localModelPath = LOCAL_MODEL_PATH
+    transformers.env.localModelPath = LOCAL_MODEL_ROOT
     transformers.env.remoteHost = modelHostUrl(options.modelHost)
-    const localModelPath = localModelPathFor(options.modelId)
+    const localModelPath = localRepoPath(options.modelId)
     const pretrainedModel = localModelPath ?? options.modelId
     const allowRemoteModels = transformers.env.allowRemoteModels
     const useBrowserCache = transformers.env.useBrowserCache
@@ -411,16 +567,17 @@ async function getTransformerPipeline(options: TransformersOptions): Promise<Tra
         pipelineOptions.config = config
       }
       const pipeline = (await transformers.pipeline('background-removal', pretrainedModel, pipelineOptions)) as unknown as TransformerPipeline
-      transformerPipelineCache.set(key, pipeline)
-      evictStalePipelines(key, options.modelId)
-      return pipeline
+      const entry: TransformerPipelineEntry = { pipeline, engine: engineForModelId(options.modelId) }
+      transformerPipelineCache.set(key, entry)
+      await releaseOtherSessions(key)
+      return entry
     } finally {
       transformers.env.allowRemoteModels = allowRemoteModels
       transformers.env.useBrowserCache = useBrowserCache
     }
   })()
   transformerPipelineLoading.set(key, task)
-  try { return await task } finally { transformerPipelineLoading.delete(key) }
+  try { return (await task).pipeline } finally { transformerPipelineLoading.delete(key) }
 }
 
 function samCacheKey(options: Pick<SamOptions, 'modelId' | 'device' | 'modelHost'>): string {
@@ -430,7 +587,7 @@ function samCacheKey(options: Pick<SamOptions, 'modelId' | 'device' | 'modelHost
 async function loadSamRuntime(options: SamOptions, modelHost: SamOptions['modelHost']): Promise<{ processor: SamProcessorLike; model: SamModelLike }> {
   const transformers = await import('@huggingface/transformers')
   transformers.env.allowLocalModels = true
-  transformers.env.localModelPath = LOCAL_MODEL_PATH
+  transformers.env.localModelPath = LOCAL_MODEL_ROOT
   transformers.env.remoteHost = modelHostUrl(modelHost)
   const progress = transformersProgress(options.onProgress)
   await inspectSamLocalFiles(options.onProgress)
@@ -448,9 +605,9 @@ async function loadSamRuntime(options: SamOptions, modelHost: SamOptions['modelH
       localModelPath: transformers.env.localModelPath,
       allowRemoteModels: transformers.env.allowRemoteModels,
     })
-    const processor = (await transformers.AutoProcessor.from_pretrained(LOCAL_SAM_MODEL_PATH, { local_files_only: true, progress_callback: progress })) as unknown as SamProcessorLike
+    const processor = (await transformers.AutoProcessor.from_pretrained(SAM_MODEL_DIR, { local_files_only: true, progress_callback: progress })) as unknown as SamProcessorLike
     console.info('[SAM] AutoProcessor 初始化完成')
-    const model = (await transformers.SamModel.from_pretrained(LOCAL_SAM_MODEL_PATH, { local_files_only: true, device: mapDevice(options.device), dtype: SAM_DTYPE, progress_callback: progress })) as unknown as SamModelLike
+    const model = (await transformers.SamModel.from_pretrained(SAM_MODEL_DIR, { local_files_only: true, device: mapDevice(options.device), dtype: SAM_DTYPE, progress_callback: progress })) as unknown as SamModelLike
     console.info('[SAM] SamModel 初始化完成')
     return { processor, model }
   } finally {
@@ -468,6 +625,8 @@ async function getSamRuntime(options: SamOptions): Promise<{ processor: SamProce
   const task = (async () => {
     const runtime = await loadSamRuntime(options, options.modelHost)
     samRuntimeCache.set(key, runtime)
+    // SAM 与 transformers 引擎共用同一份 wasm 堆，加载后同样驱逐其它会话
+    await releaseOtherSessions(key)
     return runtime
   })()
   samRuntimeLoading.set(key, task)
@@ -507,9 +666,11 @@ export async function preloadMattingModel(options: PreloadOptions): Promise<void
 export function describeMattingError(error: unknown, engine?: string): string {
   const raw = error instanceof Error ? error.message : String(error ?? '')
   if (/bad_alloc|allocation failed|out of memory|OOM/i.test(raw)) {
-    return engine === 'imgly'
-      ? '浏览器可用内存不足：请关闭其他占用较大的页面后重试，或降低处理分辨率'
-      : '浏览器可用内存不足。BiRefNet / RMBG 推理占用很高（CPU 模式尤甚），建议改用 ISNet（imgly）、把推理设备切到 GPU（WebGPU），或关闭其他占用较大的页面后重试'
+    // wasm 堆一旦分配失败就已经被破坏，同页面内任何模型都会继续失败，只能靠刷新恢复
+    return '浏览器 wasm 堆已用尽（这是 WebAssembly 的 4GB 上限，与机器物理内存无关）。堆损坏后本页面内所有模型都会失败，请先刷新页面（Cmd+R），再改用内存占用更低的 ISNet（imgly）或 RMBG-1.4。'
+  }
+  if (engine === 'imgly' && /Failed to fetch|NetworkError|network error/i.test(raw)) {
+    return '无法下载 ISNet 模型资源（官方 CDN staticimgly.com）。请检查网络或代理后重试，或在该模型的「资源地址」里填写可访问的镜像地址'
   }
   if (/Can't load|Could not locate|no such file|not found|404|Failed to fetch|Unauthorized|local_files_only/i.test(raw)) {
     return '本地缺少该精度的模型权重文件，请改用 FP16，或检查 public/models 下的模型文件是否完整'
@@ -521,12 +682,14 @@ export function describeMattingError(error: unknown, engine?: string): string {
  * imgly / @imgly/background-removal：ISNet 模型
  */
 export async function removeWithImgly(source: CanvasSource, options: ImglyOptions): Promise<AiMattingResult> {
-  const canvas = sourceToCanvas(source, options.maxSide)
+  const canvas = sourceToCanvas(source, resolveInferenceMaxSide(options.maxSide))
   options.onProgress?.({ phase: 'loading', text: '加载 ISNet 模型…' })
   const { removeBackground } = await import('@imgly/background-removal')
   // IMG.LY 1.7 decodes Blob/URL inputs into its internal HWC tensor; a canvas
   // is returned unchanged by its decoder and later fails when reading shape.
   const inputBlob = await canvasToBlob(canvas)
+  // 已转成 Blob，画布不再需要，立刻归还给浏览器
+  releaseCanvas(canvas)
   const blob = await removeBackground(inputBlob, {
     model: options.model,
     device: options.device,
@@ -548,7 +711,7 @@ export async function removeWithImgly(source: CanvasSource, options: ImglyOption
  * 这两个模型输出分割蒙版，需通过 image-segmentation 管线取 mask，再与原图合成 alpha。
  */
 export async function removeWithTransformers(source: CanvasSource, options: TransformersOptions): Promise<AiMattingResult> {
-  const canvas = sourceToCanvas(source, options.maxSide)
+  const canvas = sourceToCanvas(source, resolveInferenceMaxSide(options.maxSide))
   // 模型实例按「模型 + 精度 + 设备 + 托管源」缓存，命中缓存时不会重新下载权重
   const reused = transformerPipelineCache.has(transformerCacheKey(options))
   options.onProgress?.({ phase: 'loading', text: reused ? '复用已加载的模型…' : `检查 ${options.modelId} 模型…` })
@@ -556,40 +719,21 @@ export async function removeWithTransformers(source: CanvasSource, options: Tran
   options.onProgress?.({ phase: 'processing', text: 'AI 推理中…' })
   const output = await pipeline(canvas)
   if (output && typeof output === 'object' && 'data' in output && 'width' in output && 'height' in output && 'channels' in output) {
-    const resultBlob = await canvasToBlob(rawImageToCanvas(output as RawImageLike))
+    const resultCanvas = rawImageToCanvas(output as RawImageLike)
+    const resultBlob = await canvasToBlob(resultCanvas)
+    releaseCanvas(resultCanvas)
+    releaseCanvas(canvas)
     return { blob: resultBlob }
   }
   const outputs = output as Array<{ mask: { data: Uint8Array | Uint8ClampedArray; width: number; height: number; channels: number } }>
   const segmentationOutput = outputs[0]
   if (!segmentationOutput?.mask?.data?.length) throw new Error(`${options.modelId} 没有返回有效的分割蒙版`)
 
+  // 管线返回的蒙版通常已还原到输入尺寸，直接就地合成到画布上，
+  // 不再额外分配「蒙版画布 + 缩放画布 + 结果画布」三份大缓冲
   const { data, width, height, channels } = segmentationOutput.mask
-  const mask = new Uint8ClampedArray(canvas.width * canvas.height)
-  // The image-segmentation pipeline returns the mask resized to the input image.
-  // Handle a possible dimension mismatch with canvas interpolation for robustness.
-  const maskCanvas = document.createElement('canvas')
-  maskCanvas.width = width
-  maskCanvas.height = height
-  const maskCtx = maskCanvas.getContext('2d')!
-  const rgba = new Uint8ClampedArray(width * height * 4)
-  for (let i = 0; i < width * height; i += 1) {
-    const value = data[i * channels]
-    const offset = i * 4
-    rgba[offset] = value
-    rgba[offset + 1] = value
-    rgba[offset + 2] = value
-    rgba[offset + 3] = 255
-  }
-  maskCtx.putImageData(new ImageData(rgba, width, height), 0, 0)
-  const scaledMask = document.createElement('canvas')
-  scaledMask.width = canvas.width
-  scaledMask.height = canvas.height
-  const scaledCtx = scaledMask.getContext('2d')!
-  scaledCtx.drawImage(maskCanvas, 0, 0, canvas.width, canvas.height)
-  const scaledData = scaledCtx.getImageData(0, 0, canvas.width, canvas.height).data
-  for (let i = 0; i < mask.length; i += 1) mask[i] = scaledData[i * 4]
-
-  const blob = await canvasToBlob(composeAlphaCanvas(canvas, mask))
+  const blob = await canvasToBlob(applyMaskToCanvas(canvas, data, width, height, channels))
+  releaseCanvas(canvas)
   return { blob }
 }
 
@@ -601,11 +745,8 @@ export async function removeWithTransformers(source: CanvasSource, options: Tran
 export async function segmentWithSam(source: CanvasSource, options: SamOptions): Promise<AiMattingResult> {
   const sourceWidth = source instanceof HTMLImageElement ? source.naturalWidth : source.width
   const sourceHeight = source instanceof HTMLImageElement ? source.naturalHeight : source.height
-  // SAM restores candidate masks to its input size. Cap that intermediate size so
-  // high-resolution inputs and multiple prompts cannot allocate several full-size masks.
-  const configuredMaxSide = options.maxSide ?? 0
-  const requestedMaxSide = configuredMaxSide > 0 ? configuredMaxSide : 1024
-  const canvas = sourceToCanvas(source, Math.min(requestedMaxSide, 1024))
+  // SAM 会把候选蒙版还原到输入尺寸；限制输入尺寸，避免大图与多提示点同时分配多张全尺寸蒙版
+  const canvas = sourceToCanvas(source, resolveInferenceMaxSide(options.maxSide))
   const { boxes, points, onProgress } = options
   if (boxes.length === 0 && points.length === 0) {
     throw new Error('请先框选区域或添加提示点')
@@ -655,12 +796,16 @@ export async function segmentWithSam(source: CanvasSource, options: SamOptions):
   }
 
   let stride = 0
+  let maskWidth = 0
+  let maskHeight = 0
   let union = new Float32Array(0)
   let unionNeg = new Float32Array(0)
-  /** 把单个 prompt 的蒙版并入正/负并集 */
-  function addMask(mask: Float32Array, positive: boolean): void {
+  /** 把单个 prompt 的蒙版并入正/负并集（首个蒙版同时记录其宽高，供后续合成 alpha 使用） */
+  function addMask(mask: Float32Array, width: number, height: number, positive: boolean): void {
     if (stride === 0) {
       stride = mask.length
+      maskWidth = width
+      maskHeight = height
       union = new Float32Array(stride)
       unionNeg = new Float32Array(stride)
     }
@@ -669,10 +814,12 @@ export async function segmentWithSam(source: CanvasSource, options: SamOptions):
   }
 
   for (const box of modelBoxes) {
-    addMask((await runPrompt([[box.x1, box.y1], [box.x2, box.y2]], [2, 3])).mask, true)
+    const result = await runPrompt([[box.x1, box.y1], [box.x2, box.y2]], [2, 3])
+    addMask(result.mask, result.width, result.height, true)
   }
   for (const point of modelPoints) {
-    addMask((await runPrompt([[point.x, point.y]], [point.label])).mask, point.label === 1)
+    const result = await runPrompt([[point.x, point.y]], [point.label])
+    addMask(result.mask, result.width, result.height, point.label === 1)
   }
 
   // 最终蒙版 = 正区域并集 × (1 - 背景点区域)
@@ -681,9 +828,11 @@ export async function segmentWithSam(source: CanvasSource, options: SamOptions):
     final[p] = Math.round(union[p] * (1 - unionNeg[p]) * 255)
   }
 
-  const outCanvas = composeAlphaCanvas(canvas, final)
-  const blob = await canvasToBlob(outCanvas)
-  const maskCanvas = maskToCanvas(final, canvas.width, canvas.height)
+  // 蒙版画布必须在合成 alpha 之前生成：合成会就地覆盖 canvas 的 alpha 通道
+  const maskCanvas = maskToCanvas(final, maskWidth, maskHeight)
   const maskBlob = await canvasToBlob(maskCanvas)
+  releaseCanvas(maskCanvas)
+  const blob = await canvasToBlob(applyMaskToCanvas(canvas, final, maskWidth, maskHeight, 1))
+  releaseCanvas(canvas)
   return { blob, maskBlob }
 }

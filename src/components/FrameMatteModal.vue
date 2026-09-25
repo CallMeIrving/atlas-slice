@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { colorKeyBase, type ColorKeyBase } from '@/core/color-key'
-import { describeMattingError } from '@/core/ai-matting'
+import { describeMattingError, AI_MAX_SIDE_LIMIT } from '@/core/ai-matting'
 import {
-  AI_MAX_SIDE_LIMIT,
   applyMatteToFrames,
   hexToRgb,
   matteFrameImage,

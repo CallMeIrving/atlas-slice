@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { preloadMattingModel, type MatteProgress } from '@/core/ai-matting'
+import { preloadMattingModel, releaseMattingModel, type MatteProgress } from '@/core/ai-matting'
 import { workspace } from '@/store/workspace'
 
 /**
@@ -43,6 +43,28 @@ export function setModelState(key: string, state: ModelState, message?: string):
 const pendingLoads = new Map<string, Promise<void>>()
 
 /**
+ * 共用同一份 onnxruntime wasm 堆的引擎。
+ * 加载其中任一引擎都会释放其余引擎的 ONNX 会话（见 core/ai-matting 的会话驱逐），
+ * 因此它们之间不能同时保持「已加载」。imgly 走另一个 onnxruntime 副本，独立存在，不在此列。
+ */
+const SHARED_HEAP_ENGINES: ModelEngine[] = ['birefnet', 'rmbg', 'sam']
+
+/**
+ * 让同堆引擎中除本次加载之外的模型状态失效。
+ * 不清掉的话界面会继续显示「已加载」，与实际的会话状态不符。
+ * @param engine 本次成功加载的引擎
+ */
+function invalidateSharedHeapEngines(engine: ModelEngine): void {
+  if (!SHARED_HEAP_ENGINES.includes(engine)) return
+  for (const other of SHARED_HEAP_ENGINES) {
+    if (other === engine) continue
+    for (const key of Object.keys(modelStatus)) {
+      if (key.startsWith(`${other}|`)) delete modelStatus[key]
+    }
+  }
+}
+
+/**
  * 确保指定引擎的模型已加载。
  * ready 立即返回；loading 复用同一个 pending Promise；error 允许重试；
  * 未加载时才真正下载并初始化模型（内部复用 ai-matting 的实例缓存）。
@@ -65,6 +87,7 @@ export async function ensureMatteModelLoaded(engine: ModelEngine, onProgress?: (
         await preloadMattingModel({ engine, modelId: engine === 'birefnet' ? ai.birefnetModelId : ai.rmbgModelId, dtype: ai.aiDtype, device: ai.aiDevice, modelHost: ai.aiModelHost, maxSide: ai.aiMaxSide, onProgress })
       }
       setModelState(key, 'ready')
+      invalidateSharedHeapEngines(engine)
     } catch (error) {
       const message = error instanceof Error ? error.message : '模型加载失败'
       console.error('[模型加载失败]', { engine, modelKey: key, error })
@@ -79,3 +102,17 @@ export async function ensureMatteModelLoaded(engine: ModelEngine, onProgress?: (
     pendingLoads.delete(key)
   }
 }
+
+/**
+ * 卸载指定引擎：释放底层 ONNX 会话（归还 wasm 堆内存）并清掉界面状态。
+ * 加载中的任务不做处理——会话已经建到一半，中途清状态只会让界面与实际不符；
+ * 卸载按钮在「加载中」时本就不可点。
+ * @param engine 目标引擎
+ */
+export async function releaseMatteModel(engine: ModelEngine): Promise<void> {
+  await releaseMattingModel(engine)
+  delete modelStatus[matteModelKey(engine)]
+}
+
+/** 全局「模型管理」弹窗的开关：顶部栏入口与弹窗自身读写同一份状态 */
+export const modelManager = reactive({ open: false })

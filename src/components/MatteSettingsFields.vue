@@ -7,6 +7,7 @@ import {
   dtypeOptions,
   imglyDtypeForModel,
   imglyModelForDtype,
+  modelBlockReason,
   resolveDevice,
   resolveDtype,
   type AiEngine,
@@ -51,6 +52,18 @@ const currentDtype = computed<MatteDtype>(() => {
 /** 当前引擎可选的精度与设备选项 */
 const dtypes = computed(() => (engine.value ? dtypeOptions(engine.value) : []))
 const devices = computed(() => deviceOptions(currentDtype.value))
+/**
+ * 所选内置模型在当前设备上的不可用原因；可用时为空串。
+ * 例如内置 BiRefNet 权重超出了 wasm 4GB 堆与 WebGPU storage buffer 上限，必须提前告知，
+ * 否则用户只会在跑完 20 多秒后拿到一句「内存不足」。
+ * 先判定引擎：BiRefNet 的模型 ID 在其它引擎下也一直有值，不判断会给 ISNet 误报。
+ */
+const blockedReason = computed(() => {
+  const target = engine.value
+  if (!target) return ''
+  const modelId = target === 'rmbg' ? workspace.matte.rmbgModelId : workspace.matte.birefnetModelId
+  return modelBlockReason(modelId, workspace.matte.aiDevice) ?? ''
+})
 
 /** 精度下拉：ISNet 写回 imglyModel，其余引擎写回 aiDtype */
 const dtypeValue = computed<MatteDtype>({
@@ -130,6 +143,7 @@ function resetBaseColor(): void {
       </div>
     </template>
     <template v-else>
+      <div v-if="blockedReason" class="warn">⛔ {{ blockedReason }}</div>
       <label class="field">
         <span class="field-label">推理设备</span>
         <select v-model="deviceValue" class="select">
@@ -151,6 +165,11 @@ function resetBaseColor(): void {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-3) var(--sp-4);
+}
+
+/* 提示条横跨两列，避免被网格挤进单个字段格里 */
+.matte-fields > .warn {
+  grid-column: 1 / -1;
 }
 
 .base-row {

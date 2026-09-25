@@ -2,13 +2,15 @@
 // 用法：
 //   node scripts/download-models.mjs                  # 下载界面可选的全部精度（约 750MB）
 //   node scripts/download-models.mjs --fp16-only      # 只下默认 FP16（BiRefNet/RMBG）+ SAM Q8（约 310MB）
+//   node scripts/download-models.mjs --repo=briaai/RMBG-1.4   # 只下某一个模型
 //   node scripts/download-models.mjs --host=https://huggingface.co
 //   node scripts/download-models.mjs --force          # 已存在的文件也重新下载
 // 说明：
+// - 模型清单来自 src/core/model-registry.json，与浏览器端「模型管理」弹窗共用同一份数据。
 // - public/models/* 被 .gitignore 忽略，换机器或清空工作区后需要重跑本脚本。
 // - 代码对 BiRefNet / RMBG-1.4 / SAM 强制 local_files_only，缺文件不会回落远程，必须下全。
 // - 下载中断会保留 .part 文件，下次运行用 Range 请求续传；下载完成后按字节数校验。
-import { createWriteStream, existsSync, mkdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { dirname, join } from 'node:path'
@@ -16,52 +18,21 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MODELS_DIR = join(ROOT, 'public', 'models')
+const MANIFEST_PATH = join(ROOT, 'src', 'core', 'model-registry.json')
 
 /**
- * 各仓库需要落地的文件。size 是字节数，用于校验下载完整性；
+ * 各仓库需要落地的文件，统一从共享清单读取。
+ * size 是字节数，用于校验下载完整性；
  * tier='base' 表示精简集（配置 + 界面默认精度）也要下载，tier='extra' 只在全量模式下下载。
  */
-const REPOS = [
-  {
-    id: 'onnx-community/BiRefNet_lite-ONNX',
-    label: 'BiRefNet',
-    files: [
-      { file: 'config.json', size: 81, tier: 'base' },
-      { file: 'preprocessor_config.json', size: 391, tier: 'base' },
-      { file: 'onnx/model_fp16.onnx', size: 114538221, tier: 'base', note: 'FP16，界面默认精度' },
-      { file: 'onnx/model.onnx', size: 224005088, tier: 'extra', note: 'FP32；该仓库没有量化权重，界面不提供 Q8' },
-    ],
-  },
-  {
-    id: 'briaai/RMBG-1.4',
-    label: 'RMBG-1.4',
-    files: [
-      { file: 'config.json', size: 548, tier: 'base' },
-      { file: 'preprocessor_config.json', size: 345, tier: 'base' },
-      { file: 'onnx/model_fp16.onnx', size: 88217533, tier: 'base', note: 'FP16，界面默认精度' },
-      { file: 'onnx/model_quantized.onnx', size: 44403226, tier: 'extra', note: 'Q8' },
-      { file: 'onnx/model.onnx', size: 176153355, tier: 'extra', note: 'FP32' },
-    ],
-  },
-  {
-    id: 'Xenova/sam-vit-base',
-    label: 'SAM（项目固定 Q8）',
-    files: [
-      { file: 'config.json', size: 440, tier: 'base' },
-      { file: 'preprocessor_config.json', size: 466, tier: 'base' },
-      { file: 'quantize_config.json', size: 2017, tier: 'base' },
-      { file: 'onnx/vision_encoder_quantized.onnx', size: 101088469, tier: 'base' },
-      { file: 'onnx/prompt_encoder_mask_decoder_quantized.onnx', size: 4903810, tier: 'base', note: 'SAM 的权重拆成编码器与解码器两个文件' },
-      // 上游仓库没有 processor_config.json，但 SAM_LOCAL_FILES 会 HEAD 检查它，缺了直接抛错，这里直接生成
-      { file: 'processor_config.json', size: 40, tier: 'base', content: '{\n  "processor_class": "SamProcessor"\n}\n' },
-    ],
-  },
-]
+const REPOS = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')).repos
 
 const args = process.argv.slice(2)
 const force = args.includes('--force')
 const baseOnly = args.includes('--fp16-only')
 const hostArg = args.find((arg) => arg.startsWith('--host='))
+const repoArg = args.find((arg) => arg.startsWith('--repo='))
+const onlyRepo = repoArg ? repoArg.slice('--repo='.length).trim().toLowerCase() : ''
 const HOST = (hostArg ? hostArg.slice('--host='.length) : process.env.MODEL_HOST || 'https://hf-mirror.com').replace(/\/+$/, '')
 
 function mb(bytes) {
@@ -96,14 +67,21 @@ async function downloadFile(repoId, entry) {
 }
 
 async function main() {
+  const selected = onlyRepo ? REPOS.filter((repo) => repo.id.toLowerCase() === onlyRepo) : REPOS
+  if (selected.length === 0) {
+    console.error(`清单里没有 id 为 ${repoArg} 的模型，可用：${REPOS.map((repo) => repo.id).join('、')}`)
+    process.exitCode = 1
+    return
+  }
+
   console.log(`模型源：${HOST}${hostArg ? '（--host 指定）' : ''}`)
-  console.log(`下载范围：${baseOnly ? '精简集（默认 FP16 + SAM Q8）' : '全量（所有精度）'}\n`)
+  console.log(`下载范围：${onlyRepo ? `仅 ${selected[0].id}` : baseOnly ? '精简集（默认 FP16 + SAM Q8）' : '全量（所有精度）'}\n`)
 
   let downloaded = 0
   let skipped = 0
   const failures = []
 
-  for (const repo of REPOS) {
+  for (const repo of selected) {
     const files = repo.files.filter((entry) => !baseOnly || entry.tier === 'base')
     console.log(`[${repo.label}] ${repo.id} —— ${files.length} 个文件`)
     mkdirSync(join(MODELS_DIR, repo.id), { recursive: true })

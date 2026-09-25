@@ -5,6 +5,16 @@
  * 这些逻辑此前在多个组件里各写一份，统一收敛到这里，保证只维护一份实现。
  */
 
+/**
+ * 立即归还画布占用的内存。
+ * 画布的背板存储（宽×高×4 字节）不会随着 JS 引用的失效而立刻回收，
+ * 抠图/裁切这类会连续创建大画布的流程必须用完即释放，否则峰值内存会持续叠加。
+ */
+export function releaseCanvas(canvas: HTMLCanvasElement): void {
+  canvas.width = 0
+  canvas.height = 0
+}
+
 /** 加载图片元素（dataURL / blob URL / 普通 URL 通用） */
 export function loadImage(url: string, errorMessage = '图像加载失败'): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -32,7 +42,10 @@ export function imageToImageData(image: HTMLImageElement): ImageData {
   canvas.height = image.naturalHeight
   const ctx = canvas.getContext('2d')!
   ctx.drawImage(image, 0, 0)
-  return ctx.getImageData(0, 0, canvas.width, canvas.height)
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  // getImageData 已经把像素复制出来了，画布本身可以立刻释放
+  releaseCanvas(canvas)
+  return data
 }
 
 /** ImageData → dataURL PNG */
@@ -41,7 +54,9 @@ export function imageDataToUrl(data: ImageData): string {
   canvas.width = data.width
   canvas.height = data.height
   canvas.getContext('2d')!.putImageData(data, 0, 0)
-  return canvas.toDataURL('image/png')
+  const url = canvas.toDataURL('image/png')
+  releaseCanvas(canvas)
+  return url
 }
 
 /**
@@ -60,5 +75,7 @@ export async function fitResultToSize(blob: Blob, width: number, height: number)
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(image, 0, 0, width, height)
-  return canvas.toDataURL('image/png')
+  const result = canvas.toDataURL('image/png')
+  releaseCanvas(canvas)
+  return result
 }

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { store, loadImage, loadMetaFile, autoDetectFrames } from '@/store/atlas'
 import { workspace, setPage } from '@/store/workspace'
+import { modelManager } from '@/store/model-status'
 
 const imgInput = ref<HTMLInputElement>()
 const metaInput = ref<HTMLInputElement>()
@@ -38,6 +39,7 @@ defineExpose({})
     <div class="topbar-actions">
       <input ref="imgInput" type="file" accept="image/*" hidden @change="onImage" />
       <input ref="metaInput" type="file" accept=".json,.plist,.xml,.txt" hidden @change="onMeta" />
+      <button class="btn" @click="modelManager.open = true">模型管理</button>
       <template v-if="workspace.page === 'atlas'">
         <button class="btn" :disabled="store.busy" @click="imgInput?.click()">导入图片</button>
         <button class="btn" :disabled="store.busy" @click="metaInput?.click()">导入元数据</button>

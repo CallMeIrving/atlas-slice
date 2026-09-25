@@ -119,7 +119,7 @@ export const workspace = reactive({
   video: {
     fileName: '', sourceUrl: '', duration: 0, width: 0, height: 0, fps: 30,
     start: 0, end: 0, mode: 'count', count: 12, targetFps: 12, outputWidth: 0, outputHeight: 0, flipX: false, rotation: 0, error: '', frames: [], status: 'empty',
-    matte: { mode: 'birefnet', tolerance: 24, shadow: 'neutral', baseColor: '' } as VideoMatteSettings,
+    matte: { mode: 'imgly', tolerance: 24, shadow: 'neutral', baseColor: '' } as VideoMatteSettings,
     pipeline: { cropEnabled: false, matteEnabled: true, crop: null } as VideoPipelineSettings,
   } as VideoState,
 })
