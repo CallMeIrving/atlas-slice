@@ -262,7 +262,7 @@ previewUrl.value = frame.value?.matteUrl ?? ''
           <template v-else>
             AI 模型按显著性分割主体，适合背景复杂或非纯色场景。帧抠图会在不超过 {{ AI_MAX_SIDE_LIMIT }}px
             上推理再放大回原帧尺寸，因此各帧尺寸始终一致；模型权重来自本地 public/models，已加载过的模型会直接复用，不会重新下载。
-            CPU 模式下 BiRefNet / RMBG 内存占用较高，若提示内存不足请改用 ISNet 或切换到 GPU（WebGPU）。
+            CPU 模式下 RMBG 内存占用较高，若提示内存不足请改用 ISNet 或切换到 GPU（WebGPU）。
           </template>
         </p>
 

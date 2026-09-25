@@ -4,7 +4,7 @@ import type { ImageCropRect } from '@/core/crop'
 
 export type WorkspacePage = 'atlas' | 'matte' | 'video'
 
-export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'birefnet' | 'rmbg'
+export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'rmbg'
 
 export interface MatteState {
   fileName: string
@@ -23,7 +23,6 @@ export interface MatteState {
   aiDevice: 'cpu' | 'gpu'
   aiDtype: 'q8' | 'fp16' | 'fp32'
   aiModelHost: 'huggingface.co' | 'hf-mirror.com'
-  birefnetModelId: string
   rmbgModelId: string
   /** AI 处理状态（进度文本/百分比） */
   aiStatus: string
@@ -46,7 +45,7 @@ export interface VideoFrame {
 }
 
 /** 视频帧抠图方式：solid 走纯色背景色相判据，其余为 AI 模型 */
-export type FrameMatteMode = 'solid' | 'imgly' | 'birefnet' | 'rmbg'
+export type FrameMatteMode = 'solid' | 'imgly' | 'rmbg'
 
 export interface VideoMatteSettings {
   mode: FrameMatteMode
@@ -108,7 +107,7 @@ export const workspace = reactive({
     fileName: '', sourceUrl: '', resultUrl: '', mode: 'auto', background: 'checker',
     tolerance: 24, cropTransparent: true, brushSize: 24, sampledColor: '', status: 'empty',
     aiMaxSide: 0, imglyModel: 'isnet_fp16', imglyPublicPath: '', aiDevice: 'cpu', aiDtype: 'fp16', aiModelHost: 'huggingface.co',
-    birefnetModelId: 'onnx-community/BiRefNet_lite-ONNX', rmbgModelId: 'briaai/RMBG-1.4',
+    rmbgModelId: 'briaai/RMBG-1.4',
     aiStatus: '', aiProgress: -1,
   } as MatteState,
   video: {
@@ -121,7 +120,7 @@ export const workspace = reactive({
 
 const SETTINGS_KEY = 'atlas-slice:media-settings'
 /** 界面支持的处理方式，用于丢弃本地设置里已下线的取值 */
-const MATTE_MODES: MatteMode[] = ['auto', 'color', 'solid', 'imgly', 'birefnet', 'rmbg']
+const MATTE_MODES: MatteMode[] = ['auto', 'color', 'solid', 'imgly', 'rmbg']
 try {
   const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null') as { matte?: Partial<MatteState>; video?: Partial<VideoState> } | null
   if (saved?.matte) Object.assign(workspace.matte, saved.matte)
@@ -132,7 +131,7 @@ try {
 
 export function persistMediaSettings(): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-    matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, birefnetModelId: workspace.matte.birefnetModelId, rmbgModelId: workspace.matte.rmbgModelId },
+    matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, rmbgModelId: workspace.matte.rmbgModelId },
     video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, outputWidth: workspace.video.outputWidth, outputHeight: workspace.video.outputHeight, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte }, pipeline: { ...workspace.video.pipeline }, },
   }))
 }

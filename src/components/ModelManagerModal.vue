@@ -4,7 +4,6 @@ import {
   AI_ENGINES,
   describeMattingError,
   imglyDtypeForModel,
-  modelBlockReason,
   resolveDevice,
   resolveDtype,
   type MatteDtype,
@@ -37,7 +36,7 @@ import { workspace } from '@/store/workspace'
  * 内存中的加载状态、卸载入口与下载命令。
  *
  * 注意浏览器没有文件系统写权限：ISNet 的资源能直接在页面内下载（官方 CDN，
- * 由浏览器缓存），而 BiRefNet / RMBG-1.4 的权重必须落在项目的 public/models 下
+ * 由浏览器缓存），而 RMBG-1.4 的权重必须落在项目的 public/models 下
  * （代码对它们强制 local_files_only，缺文件不会回落远程），这里只做检测并提供终端命令。
  */
 const emit = defineEmits<{ close: [] }>()
@@ -68,8 +67,6 @@ interface EngineRow {
   local?: LocalRepoStatus
   dtype: MatteDtype
   device: 'cpu' | 'gpu'
-  /** 该模型在当前设备上跑不起来的原因；可用时为空串 */
-  blocked: string
   /** 共享模型状态的 key 与状态 */
   statusKey: string
   state: ModelState
@@ -85,7 +82,6 @@ const rows = computed<EngineRow[]>(() =>
   AI_ENGINES.map((engine) => {
     const dtype = effectiveDtype(engine.key)
     const device = resolveDevice(dtype, workspace.matte.aiDevice)
-    const modelId = engine.key === 'birefnet' ? workspace.matte.birefnetModelId : engine.key === 'rmbg' ? workspace.matte.rmbgModelId : ''
     const repo = MODEL_REPOS.find((item) => item.engine === engine.key)
     const statusKey = matteModelKey(engine.key)
     return {
@@ -98,7 +94,6 @@ const rows = computed<EngineRow[]>(() =>
       local: repo ? localStatus[repo.id] : undefined,
       dtype,
       device,
-      blocked: modelId ? (modelBlockReason(modelId, device) ?? '') : '',
       statusKey,
       state: modelStatus[statusKey]?.state ?? 'unknown',
     }
@@ -114,10 +109,9 @@ function errorText(row: EngineRow): string {
   return message ? describeMattingError(message, row.engine) : ''
 }
 
-/** 是否可加载：已在内存中、跑不起来、或本地基础文件不全时不可加载（未检测时先放行，失败会给出明确原因） */
+/** 是否可加载：已在内存中、或本地基础文件不全时不可加载（未检测时先放行，失败会给出明确原因） */
 function canLoad(row: EngineRow): boolean {
   if (row.state === 'loading' || row.state === 'ready') return false
-  if (row.blocked) return false
   return !(checked.value && row.repo && !row.local?.ready)
 }
 
@@ -233,8 +227,6 @@ onMounted(() => {
           </header>
 
           <p class="card-meta muted">{{ row.description }} · 加载方式 {{ DTYPE_TEXT[row.dtype] }} · {{ row.device === 'gpu' ? 'GPU / WebGPU' : 'CPU' }}（在「抠图」页或一键处理弹窗中切换）</p>
-
-          <div v-if="row.blocked" class="warn">⛔ {{ row.blocked }}</div>
 
           <p v-if="row.state === 'error'" class="card-error">{{ errorText(row) }}</p>
 

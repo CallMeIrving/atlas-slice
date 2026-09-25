@@ -3,7 +3,6 @@
  *
  * 支持的引擎：
  * - imgly     : @imgly/background-removal（ISNet，MIT 可商用）
- * - birefnet  : transformers.js + BiRefNet_lite-ONNX（MIT 可商用，质量高）
  * - rmbg      : transformers.js + BRIA RMBG-1.4（效果顶尖，⚠️不可商用）
  *
  * 所有引擎输入图像源（HTMLImageElement / HTMLCanvasElement），输出透明 PNG Blob。
@@ -70,7 +69,7 @@ export interface AiMattingResult {
   blob: Blob
 }
 
-export type AiEngine = 'imgly' | 'birefnet' | 'rmbg'
+export type AiEngine = 'imgly' | 'rmbg'
 
 /** 模型托管源 → transformers.js 的 remoteHost。
  *  dev 环境 hf-mirror 走 vite 代理同源转发（/hf-mirror2），规避浏览器直连外网限制；
@@ -93,7 +92,6 @@ export interface EngineMeta {
 /** 引擎元信息，供界面"模型状态"区展示 */
 export const AI_ENGINES: EngineMeta[] = [
   { key: 'imgly', label: 'ISNet（imgly）', license: '免费可用', size: '约 30-170MB', description: '速度快，通用背景分离' },
-  { key: 'birefnet', label: 'BiRefNet', license: 'MIT 可商用', size: '约 115MB（FP16）', description: '分割质量高，但浏览器内跑不起来（见下方说明）' },
   { key: 'rmbg', label: 'RMBG-1.4（BRIA）', license: '⚠️不可商用', size: '约 44-176MB（Q8-FP32）', description: '效果顶尖，注意许可限制' },
 ]
 
@@ -137,13 +135,11 @@ export const AI_MAX_SIDE_OPTIONS: MatteOption<number>[] = [
 /**
  * 各引擎实际提供的权重精度与 WebGPU 能力，与 README「抠图模型下载」一致：
  * - imgly（ISNet）三个精度齐全，由 @imgly/background-removal 按 model 参数选择；
- * - birefnet（onnx-community/BiRefNet_lite-ONNX）只有 model.onnx / model_fp16.onnx，没有量化权重；
  * - rmbg（briaai/RMBG-1.4）提供 model_quantized.onnx，三个精度齐全。
  * 未列出的精度就是该模型不具备的能力，界面不应提供。
  */
 const ENGINE_DTYPES: Record<AiEngine, MatteDtype[]> = {
   imgly: ['fp16', 'q8', 'fp32'],
-  birefnet: ['fp16', 'fp32'],
   rmbg: ['fp16', 'q8', 'fp32'],
 }
 
@@ -190,41 +186,6 @@ export function resolveDtype(engine: AiEngine, dtype: MatteDtype): MatteDtype {
 /** 把设备收敛到当前精度支持的取值；GPU 不可用时回退 CPU */
 export function resolveDevice(dtype: MatteDtype, device: MatteDevice): MatteDevice {
   return deviceOptions(dtype).some((option) => option.value === device) ? device : 'cpu'
-}
-
-/**
- * 已知在浏览器里跑不起来的「引擎 + 设备」组合及其确切原因。
- *
- * BiRefNet_lite（onnx-community）实测结论：
- * - 它的 ONNX 图把输入写死成 1024×1024（图上是静态维度），改小输入会直接报
- *   `Got: 512 Expected: 1024`，所以界面上的「最大边长」对它完全无效；
- * - 在该分辨率下 wasm(CPU) 推理需要 3.6GB 以上的 wasm 堆，而 wasm32 上限是 4GB，
- *   实测跑到 3629MB 后抛 `std::bad_alloc`——单张图也一样，与机器物理内存无关；
- * - 换 WebGPU 也不行：模型需要 11 个 storage buffer，超过浏览器给的上限 10。
- * 提前拦下可以避免白跑 25 秒、并避免 wasm 堆被破坏（堆一旦分配失败就再也用不了，
- * 之后连 RMBG / ISNet 都会跟着失败，必须刷新页面才能恢复）。
- * @param engine AI 引擎标识
- * @param device 目标推理设备
- * @returns 原因文案；可用时返回 null
- */
-function unsupportedEngineReason(engine: AiEngine, device: MatteDevice): string | null {
-  if (engine !== 'birefnet') return null
-  return device === 'gpu'
-    ? 'BiRefNet 在浏览器里跑不起来：它需要 11 个 storage buffer，超过 WebGPU 上限 10。请改用 ISNet（imgly）或 RMBG-1.4。'
-    : 'BiRefNet 在浏览器里跑不起来：它的输入被固定为 1024×1024，需要 3.6GB 以上的 wasm 堆（wasm32 上限 4GB），单张图也会内存不足，且「最大边长」对它无效。请改用 ISNet（imgly）或 RMBG-1.4。'
-}
-
-/**
- * 按模型 ID 做能力预检：项目内置的 BiRefNet 权重在当前浏览器跑不起来。
- * 内置权重用「模型 ID → 本地路径」的映射还原引擎，非内置模型（用户自己填的仓库）不做拦截。
- * @param modelId 模型 ID 或本地路径
- * @param device 目标推理设备
- * @returns 不可用原因；可用时返回 null
- */
-export function modelBlockReason(modelId: string, device: MatteDevice): string | null {
-  const localPath = localRepoPath(modelId)
-  if (!localPath) return null
-  return unsupportedEngineReason(localPath.includes('BiRefNet') ? 'birefnet' : 'rmbg', device)
 }
 
 type CanvasSource = HTMLImageElement | HTMLCanvasElement
@@ -374,14 +335,6 @@ async function disposePipeline(pipeline: TransformerPipeline | undefined): Promi
 }
 
 /**
- * 从模型 ID 推断 transformers.js 引擎归属：内置 BiRefNet 权重归 birefnet，其余归 rmbg。
- * 与 {@link modelBlockReason} 使用同一套判定，保证「拦截」和「释放」指向同一个引擎。
- */
-function engineForModelId(modelId: string): AiEngine {
-  return localRepoPath(modelId)?.includes('BiRefNet') ? 'birefnet' : 'rmbg'
-}
-
-/**
  * 释放除 keepKey 之外的所有已初始化 ONNX 会话。
  * 所有 transformers pipeline 共用同一份 onnxruntime 的 wasm 堆，任何时刻只允许一个会话存活：
  * 旧会话不显式 dispose 就不会归还堆内存，反复切换模型/精度/设备会持续堆积，
@@ -418,10 +371,6 @@ async function getTransformerPipeline(options: TransformersOptions): Promise<Tra
   const loading = transformerPipelineLoading.get(key)
   if (loading) return (await loading).pipeline
   const task = (async (): Promise<TransformerPipelineEntry> => {
-    // 能力预检放在最前面：既避免白白下载上百 MB 权重，也避免跑 25 秒后
-    // 抛 bad_alloc 把 wasm 堆搞坏（堆坏掉之后所有引擎都会跟着失败）
-    const blocked = modelBlockReason(options.modelId, options.device)
-    if (blocked) throw new Error(blocked)
     const transformers = await import('@huggingface/transformers')
     transformers.env.allowLocalModels = true
     transformers.env.localModelPath = LOCAL_MODEL_ROOT
@@ -448,7 +397,7 @@ async function getTransformerPipeline(options: TransformersOptions): Promise<Tra
         pipelineOptions.config = config
       }
       const pipeline = (await transformers.pipeline('background-removal', pretrainedModel, pipelineOptions)) as unknown as TransformerPipeline
-      const entry: TransformerPipelineEntry = { pipeline, engine: engineForModelId(options.modelId) }
+      const entry: TransformerPipelineEntry = { pipeline, engine: 'rmbg' }
       transformerPipelineCache.set(key, entry)
       await releaseOtherSessions(key)
       return entry
@@ -463,7 +412,7 @@ async function getTransformerPipeline(options: TransformersOptions): Promise<Tra
 
 export type PreloadOptions =
   | ({ engine: 'imgly' } & ImglyOptions)
-  | ({ engine: 'birefnet' | 'rmbg' } & TransformersOptions)
+  | ({ engine: 'rmbg' } & TransformersOptions)
 
 /** 下载并初始化指定模型。重复调用会复用已初始化的实例。 */
 export async function preloadMattingModel(options: PreloadOptions): Promise<void> {
@@ -530,8 +479,8 @@ export async function removeWithImgly(source: CanvasSource, options: ImglyOption
 }
 
 /**
- * transformers.js 显著性分割（BiRefNet / RMBG）。
- * 这两个模型输出分割蒙版，需通过 image-segmentation 管线取 mask，再与原图合成 alpha。
+ * transformers.js 显著性分割（RMBG）。
+ * 模型输出分割蒙版，需通过 image-segmentation 管线取 mask，再与原图合成 alpha。
  */
 export async function removeWithTransformers(source: CanvasSource, options: TransformersOptions): Promise<AiMattingResult> {
   const canvas = sourceToCanvas(source, resolveInferenceMaxSide(options.maxSide))

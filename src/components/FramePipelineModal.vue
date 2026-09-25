@@ -235,7 +235,7 @@ onMounted(() => { if (pipeline.cropEnabled) void prepareCropSource() })
         <section class="step">
           <h3 class="step-title">
             <label class="check-row"><input v-model="pipeline.matteEnabled" type="checkbox" /><span class="step-no">3</span>抠图</label>
-            <span class="faint">默认使用 AI 模型（BiRefNet），可切回纯色背景算法</span>
+            <span class="faint">默认使用 AI 模型（ISNet），可切回纯色背景算法</span>
           </h3>
           <template v-if="pipeline.matteEnabled">
             <MatteSettingsFields />

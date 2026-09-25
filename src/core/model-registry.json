@@ -1,17 +1,6 @@
 {
   "repos": [
     {
-      "id": "onnx-community/BiRefNet_lite-ONNX",
-      "label": "BiRefNet",
-      "engine": "birefnet",
-      "files": [
-        { "file": "config.json", "size": 81, "tier": "base" },
-        { "file": "preprocessor_config.json", "size": 391, "tier": "base" },
-        { "file": "onnx/model_fp16.onnx", "size": 114538221, "tier": "base", "note": "FP16，界面默认精度" },
-        { "file": "onnx/model.onnx", "size": 224005088, "tier": "extra", "note": "FP32；该仓库没有量化权重，界面不提供 Q8" }
-      ]
-    },
-    {
       "id": "briaai/RMBG-1.4",
       "label": "RMBG-1.4",
       "engine": "rmbg",

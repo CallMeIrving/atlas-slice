@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { persistMediaSettings, workspace, type MatteMode } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
 import { applyColorKey, solidColorKey } from '@/core/color-key'
-import { removeWithImgly, removeWithTransformers, AI_ENGINES, AI_MAX_SIDE_OPTIONS, describeMattingError, deviceOptions, dtypeOptions, imglyDtypeForModel, modelBlockReason, resolveDevice, resolveDtype, type AiEngine, type MatteDtype, type MatteProgress } from '@/core/ai-matting'
+import { removeWithImgly, removeWithTransformers, AI_ENGINES, AI_MAX_SIDE_OPTIONS, describeMattingError, deviceOptions, dtypeOptions, imglyDtypeForModel, resolveDevice, resolveDtype, type AiEngine, type MatteDtype, type MatteProgress } from '@/core/ai-matting'
 import { ensureMatteModelLoaded, matteModelKey, modelStateLabel, modelStatus, setModelState, type ModelEngine, type ModelState } from '@/store/model-status'
 
 const input = ref<HTMLInputElement>()
@@ -23,10 +23,9 @@ const helpCloseButton = ref<HTMLButtonElement>()
 
 const methodHelp = [
   { title: '自动抠图（边缘色）', kind: '颜色抠图', description: '以图像左上角像素作为背景色，并额外去除接近纯白的像素。', scene: '背景颜色比较统一、主体和背景颜色差异明显，想快速处理时。', recommendation: '不确定时可先试；背景颜色不均匀或左上角是主体时，改用纯色背景或 AI 模型。' },
-  { title: '颜色抠图', kind: '颜色抠图', description: '按指定背景颜色和容差生成透明区域，并柔化边缘、抑制彩边。', scene: '绿幕、蓝幕或已知纯色背景。', recommendation: '点击“吸取背景颜色”后在图片背景处取色；背景复杂时用 ISNet 或 BiRefNet。' },
+  { title: '颜色抠图', kind: '颜色抠图', description: '按指定背景颜色和容差生成透明区域，并柔化边缘、抑制彩边。', scene: '绿幕、蓝幕或已知纯色背景。', recommendation: '点击“吸取背景颜色”后在图片背景处取色；背景复杂时用 ISNet 或 RMBG-1.4。' },
   { title: '纯色背景抠图', kind: '颜色抠图', description: '从图片四边采样背景主色，再按容差生成透明区域。', scene: '白底商品图、纯色证件照背景、背景大体均匀的批量图片。', recommendation: '边缘主体较多或背景渐变明显时，手动取色或改用 AI。' },
   { title: 'ISNet（imgly）', kind: 'AI 模型', description: '本地运行的通用前景分割模型，默认使用 FP16。', scene: '常见人像、商品和插画的快速自动抠图。', recommendation: '通用场景优先试用；速度和内存占用相对均衡。' },
-  { title: 'BiRefNet', kind: 'AI 模型', description: '输出前景分割蒙版，再合成为透明 PNG；可选 FP16、FP32 或 Q8。', scene: '复杂轮廓、细节较多，需要更精细前景蒙版的图片。', recommendation: '优先试 FP16；模型较大，浏览器内存不足时改用 ISNet。' },
   { title: 'RMBG-1.4（BRIA）', kind: 'AI 模型', description: '通用显著性分割模型，输出蒙版并合成为透明 PNG。', scene: '主体明确、背景较复杂的单张图片。', recommendation: '仅限非商业用途；模型推理占用较多内存，浏览器资源不足时改用 ISNet。' },
 ]
 
@@ -46,7 +45,6 @@ const modeOptions: { value: MatteMode; label: string }[] = [
   { value: 'color', label: '颜色抠图' },
   { value: 'solid', label: '纯色背景抠图' },
   { value: 'imgly', label: 'ISNet（imgly）' },
-  { value: 'birefnet', label: 'BiRefNet' },
   { value: 'rmbg', label: 'RMBG-1.4（BRIA）' },
 ]
 
@@ -61,22 +59,11 @@ function setBackground(value: 'checker' | 'white' | 'black' | 'original'): void 
   workspace.matte.background = value
 }
 
-const isAiMode = computed(() => ['imgly', 'birefnet', 'rmbg'].includes(workspace.matte.mode))
+const isAiMode = computed(() => ['imgly', 'rmbg'].includes(workspace.matte.mode))
 const canPanImage = computed(() => Boolean(workspace.matte.sourceUrl))
 const zoomPercent = computed(() => `${Math.round(zoomLevel.value * 100)}%`)
 const imageViewStyle = computed(() => ({ width: fitImageSize.value.width ? `${fitImageSize.value.width}px` : 'auto', height: fitImageSize.value.height ? `${fitImageSize.value.height}px` : 'auto', transform: `translate3d(${panOffset.value.x}px, ${panOffset.value.y}px, 0) scale(${zoomLevel.value})` }))
-/**
- * 当前所选 AI 模型在当前设备上的不可用原因（例如内置 BiRefNet 权重超出了
- * wasm 4GB 堆 / WebGPU storage buffer 上限）；可用时为空串。
- * 必须先判定引擎：BiRefNet 的模型 ID 字段在其它引擎下也一直有值，
- * 不加这层判断会给 ISNet / RMBG 误报「不可用」，还会错误地禁用「开始抠图」。
- */
-const blockedReason = computed(() => {
-  if (workspace.matte.mode !== 'birefnet' && workspace.matte.mode !== 'rmbg') return ''
-  const modelId = workspace.matte.mode === 'rmbg' ? workspace.matte.rmbgModelId : workspace.matte.birefnetModelId
-  return modelBlockReason(modelId, workspace.matte.aiDevice) ?? ''
-})
-const runDisabled = computed(() => !workspace.matte.sourceUrl || workspace.matte.status === 'processing' || Boolean(blockedReason.value))
+const runDisabled = computed(() => !workspace.matte.sourceUrl || workspace.matte.status === 'processing')
 /** 当前处理方式对应的模型 key；非 AI 方式返回空串。key 由共享 store 生成，与视频帧一键处理弹窗一致 */
 const selectedModelKey = computed(() => (isAiMode.value ? matteModelKey(workspace.matte.mode as ModelEngine) : ''))
 const selectedModelState = computed<ModelState>(() => (selectedModelKey.value ? (modelStatus[selectedModelKey.value]?.state ?? 'unknown') : 'unknown'))
@@ -95,7 +82,7 @@ const deviceChoices = computed(() => deviceOptions(effectiveDtype.value))
 
 /**
  * 切换处理方式或精度后，把精度与设备写回该模型真正支持的取值。
- * 例如 RMBG 选 Q8 再切到 BiRefNet（没有量化权重）会回到 FP16，设备也跟着回到 CPU；
+ * 例如 RMBG 选 Q8 后设备只能是 CPU；
  * 字段被隐藏时旧值仍会参与推理，所以必须写回而不能只在下拉里收敛。
  */
 watch(
@@ -103,7 +90,7 @@ watch(
   () => {
     const engine = aiEngine.value
     if (!engine) return
-    if (engine === 'birefnet' || engine === 'rmbg') {
+    if (engine === 'rmbg') {
       const dtype = resolveDtype(engine, workspace.matte.aiDtype)
       if (dtype !== workspace.matte.aiDtype) workspace.matte.aiDtype = dtype
     }
@@ -128,7 +115,6 @@ watch(
     aiDevice: workspace.matte.aiDevice,
     aiDtype: workspace.matte.aiDtype,
     aiModelHost: workspace.matte.aiModelHost,
-    birefnetModelId: workspace.matte.birefnetModelId,
     rmbgModelId: workspace.matte.rmbgModelId,
   }),
   () => persistMediaSettings(),
@@ -338,8 +324,8 @@ async function runMatte(): Promise<void> {
     } else if (mode === 'imgly') {
       const result = await removeWithImgly(img, { model: workspace.matte.imglyModel, device: workspace.matte.aiDevice, maxSide: workspace.matte.aiMaxSide, publicPath: workspace.matte.imglyPublicPath || undefined, onProgress })
       blob = result.blob
-    } else if (mode === 'birefnet' || mode === 'rmbg') {
-      const result = await removeWithTransformers(img, { modelId: mode === 'birefnet' ? workspace.matte.birefnetModelId : workspace.matte.rmbgModelId, dtype: workspace.matte.aiDtype, device: workspace.matte.aiDevice, modelHost: workspace.matte.aiModelHost, maxSide: workspace.matte.aiMaxSide, onProgress })
+    } else if (mode === 'rmbg') {
+      const result = await removeWithTransformers(img, { modelId: workspace.matte.rmbgModelId, dtype: workspace.matte.aiDtype, device: workspace.matte.aiDevice, modelHost: workspace.matte.aiModelHost, maxSide: workspace.matte.aiMaxSide, onProgress })
       blob = result.blob
     }
     if (!blob) throw new Error('未生成结果')
@@ -415,8 +401,8 @@ async function exportPackage(): Promise<void> {
   if (mode === 'color' || mode === 'auto' || mode === 'solid') config.tolerance = workspace.matte.tolerance
   if (mode === 'color') config.sampledColor = workspace.matte.sampledColor
   if (mode === 'imgly') { config.engine = 'imgly'; config.model = workspace.matte.imglyModel; config.publicPath = workspace.matte.imglyPublicPath || undefined }
-  if (mode === 'birefnet' || mode === 'rmbg') { config.engine = mode; config.modelId = mode === 'birefnet' ? workspace.matte.birefnetModelId : workspace.matte.rmbgModelId; config.dtype = workspace.matte.aiDtype }
-  if (['imgly', 'birefnet', 'rmbg'].includes(mode)) { config.device = workspace.matte.aiDevice; config.maxSide = workspace.matte.aiMaxSide; config.modelHost = workspace.matte.aiModelHost }
+  if (mode === 'rmbg') { config.engine = mode; config.modelId = workspace.matte.rmbgModelId; config.dtype = workspace.matte.aiDtype }
+  if (['imgly', 'rmbg'].includes(mode)) { config.device = workspace.matte.aiDevice; config.maxSide = workspace.matte.aiMaxSide; config.modelHost = workspace.matte.aiModelHost }
   await downloadZip([{ name: `${base}-cutout.png`, blob }, { name: 'config.json', blob: JSON.stringify(config, null, 2) }], `${base}-cutout.zip`)
 }
 
@@ -480,7 +466,6 @@ onBeforeUnmount(() => {
         </template>
         <template v-if="isAiMode">
           <div v-if="workspace.matte.mode === 'rmbg'" class="warn">⚠️ RMBG 仅供评估，不可商用</div>
-          <div v-if="blockedReason" class="warn">⛔ {{ blockedReason }}</div>
           <label v-if="workspace.matte.mode === 'imgly'" class="field"><span class="field-label">模型</span>
             <select v-model="workspace.matte.imglyModel" class="select">
               <option value="isnet_fp16">ISNet FP16（推荐）</option>
@@ -489,10 +474,9 @@ onBeforeUnmount(() => {
             </select>
           </label>
           <label v-if="workspace.matte.mode === 'imgly'" class="field"><span class="field-label">资源地址（publicPath）</span><input v-model="workspace.matte.imglyPublicPath" class="input" type="text" placeholder="留空使用官方 CDN" /></label>
-          <template v-if="workspace.matte.mode === 'birefnet' || workspace.matte.mode === 'rmbg'">
+          <template v-if="workspace.matte.mode === 'rmbg'">
             <label class="field"><span class="field-label">模型 ID</span>
-              <input v-if="workspace.matte.mode === 'birefnet'" v-model="workspace.matte.birefnetModelId" class="input" type="text" />
-              <input v-else v-model="workspace.matte.rmbgModelId" class="input" type="text" />
+              <input v-model="workspace.matte.rmbgModelId" class="input" type="text" />
             </label>
             <label class="field"><span class="field-label">精度</span>
               <select v-model="workspace.matte.aiDtype" class="select" title="FP16 是推荐默认值，可降低浏览器内存占用；FP32 最吃内存；Q8 仅适用于模型提供量化权重的情况（本模型没有的精度不会列出）">
@@ -516,7 +500,7 @@ onBeforeUnmount(() => {
               <option v-for="option in AI_MAX_SIDE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
-          <p v-if="workspace.matte.mode === 'birefnet' || workspace.matte.mode === 'rmbg'" class="muted">BiRefNet / RMBG 的模型输入被固定为 1024×1024，最大边长只影响合成输出的画布尺寸，不影响推理占用的内存</p>
+          <p v-if="workspace.matte.mode === 'rmbg'" class="muted">RMBG 的模型输入被固定为 1024×1024，最大边长只影响合成输出的画布尺寸，不影响推理占用的内存</p>
         </template>
         <label class="check-row"><input v-model="workspace.matte.cropTransparent" type="checkbox" /> 自动裁切透明边缘</label>
       </div>
@@ -578,7 +562,7 @@ onBeforeUnmount(() => {
           </article>
         </div>
         <footer class="help-foot">
-          <span>快速建议：纯色背景试“纯色背景”；一般图片试 ISNet；复杂细节试 BiRefNet。</span>
+          <span>快速建议：纯色背景试“纯色背景”；一般图片试 ISNet；细节较多时试 RMBG-1.4。</span>
           <button class="btn btn-primary" type="button" @click="closeHelp">知道了</button>
         </footer>
       </section>

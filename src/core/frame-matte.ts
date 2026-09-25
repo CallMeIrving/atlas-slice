@@ -19,7 +19,6 @@ export interface AiMattePrefs {
   aiDevice: 'cpu' | 'gpu'
   aiDtype: 'q8' | 'fp16' | 'fp32'
   aiModelHost: 'huggingface.co' | 'hf-mirror.com'
-  birefnetModelId: string
   rmbgModelId: string
 }
 
@@ -95,7 +94,7 @@ export async function matteFrameImage(
     return fitResultToSize(blob, width, height)
   }
   const { blob } = await removeWithTransformers(image, {
-    modelId: settings.mode === 'birefnet' ? context.ai.birefnetModelId : context.ai.rmbgModelId,
+    modelId: context.ai.rmbgModelId,
     dtype: context.ai.aiDtype,
     device: context.ai.aiDevice,
     modelHost: context.ai.aiModelHost,
