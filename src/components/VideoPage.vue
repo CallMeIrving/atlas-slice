@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { workspace, persistMediaSettings, frameImageUrl } from '@/store/workspace'
+import { workspace, persistMediaSettings, frameImageUrl, startWatermarkFromFrame } from '@/store/workspace'
 import { extractFrames, extractOptionsFrom, extractRangeError } from '@/core/frame-extract'
 import ExtractSettingsFields from '@/components/ExtractSettingsFields.vue'
 import FramePreviewPlayer from '@/components/FramePreviewPlayer.vue'
@@ -92,6 +92,10 @@ function openCrop(): void {
 function openPipeline(): void {
   pipelineOpen.value = true
 }
+/** 跳到去水印页：带上当前预览帧作为样板帧 */
+function openWatermark(): void {
+  startWatermarkFromFrame(previewId.value ?? '')
+}
 /** 一键处理完成或关闭后，把预览定位到首帧 */
 function closePipeline(): void {
   pipelineOpen.value = false
@@ -153,6 +157,7 @@ function closePipeline(): void {
         <span class="muted">拖拽调整顺序 · 点击帧后可单独抠图 · 同一裁切区域可批量应用到全部帧 · 动画预览只播放当前勾选帧</span>
         <button class="btn" :disabled="!workspace.video.frames.length" @click="openCrop">批量裁切</button>
         <button class="btn" :disabled="!workspace.video.frames.length" @click="openMatte">移除背景</button>
+        <button class="btn" :disabled="!workspace.video.frames.length" @click="openWatermark">去水印</button>
       </div>
       <div v-if="!workspace.video.frames.length" class="strip-empty">抽取结果会显示在这里</div>
       <div v-else class="frames">
@@ -160,7 +165,7 @@ function closePipeline(): void {
           v-for="(frame, index) in workspace.video.frames"
           :key="frame.id"
           class="frame-card"
-          :class="{ active: previewId === frame.id, matted: !!frame.matteUrl, cropped: !!frame.cropUrl }"
+          :class="{ active: previewId === frame.id, matted: !!frame.matteUrl, cropped: !!frame.cropUrl, watermarked: !!frame.watermarkUrl }"
           draggable="true"
           @dragstart="draggingId = frame.id"
           @dragover.prevent
@@ -179,5 +184,5 @@ function closePipeline(): void {
 </template>
 
 <style scoped>
-.video-page { flex:1; min-height:0; height:auto; overflow:hidden; display:grid; grid-template-rows:64px minmax(0,1fr) 250px; }.video-toolbar { display:flex; align-items:center; justify-content:space-between; padding:0 16px; border-bottom:1px solid var(--border); background:var(--surface); }.video-toolbar h1 { margin:0; font-size:var(--fs-title); }.video-content { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 280px; gap:1px; min-height:0; overflow:hidden; background:var(--border); }.video-preview, .animation-panel { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:var(--stage); }.panel-title { height:36px; flex:none; display:flex; align-items:center; gap:8px; padding:0 12px; color:var(--text-muted); border-bottom:1px solid var(--border); font-size:var(--fs-caption); }.video-preview video { width:100%; height:calc(100% - 36px); min-width:0; min-height:0; object-fit:contain; }.video-settings { display:flex; flex-direction:column; overflow:hidden; }.video-settings .section-title { flex:none; margin:0; padding:14px 16px 12px; border-bottom:1px solid var(--border); }.settings-body { flex:1; min-height:0; overflow:auto; padding:16px; }.settings-footer { flex:none; padding:12px 16px; border-top:1px solid var(--border); }.range-error { color:var(--danger); font-size:var(--fs-caption); }.full { width:100%; justify-content:center; }.frame-strip { border-top:1px solid var(--border); padding:12px 16px; min-height:0; overflow:auto; }.strip-head { display:flex; justify-content:space-between; align-items:center; gap:12px; }.strip-head h2 { margin:0; }.strip-head .muted { flex:1; }.frames { display:flex; gap:10px; overflow-x:auto; padding:8px 0 12px; }.frame-card { width:120px; flex:none; padding:4px; text-align:left; background:var(--surface-raised); border:1px solid var(--border); border-radius:var(--radius-s); }.frame-card.active { border-color:var(--accent); }.frame-card.matted { border-color:var(--accent-border); }.frame-card.cropped { outline:1px dashed var(--accent); outline-offset:-3px; }.frame-card img { width:110px; height:90px; object-fit:contain; background-color:var(--checker-a); background-image:linear-gradient(45deg, #232734 25%, transparent 25%), linear-gradient(-45deg, transparent 75%, #232734 75%); background-size:12px 12px; }.frame-card span { display:flex; align-items:center; gap:4px; padding-top:3px; color:var(--text-faint); font:11px var(--font-mono); }.strip-empty { color:var(--text-faint); padding:30px 0; }.muted { color:var(--text-faint); }
+.video-page { flex:1; min-height:0; height:auto; overflow:hidden; display:grid; grid-template-rows:64px minmax(0,1fr) 250px; }.video-toolbar { display:flex; align-items:center; justify-content:space-between; padding:0 16px; border-bottom:1px solid var(--border); background:var(--surface); }.video-toolbar h1 { margin:0; font-size:var(--fs-title); }.video-content { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 280px; gap:1px; min-height:0; overflow:hidden; background:var(--border); }.video-preview, .animation-panel { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:var(--stage); }.panel-title { height:36px; flex:none; display:flex; align-items:center; gap:8px; padding:0 12px; color:var(--text-muted); border-bottom:1px solid var(--border); font-size:var(--fs-caption); }.video-preview video { width:100%; height:calc(100% - 36px); min-width:0; min-height:0; object-fit:contain; }.video-settings { display:flex; flex-direction:column; overflow:hidden; }.video-settings .section-title { flex:none; margin:0; padding:14px 16px 12px; border-bottom:1px solid var(--border); }.settings-body { flex:1; min-height:0; overflow:auto; padding:16px; }.settings-footer { flex:none; padding:12px 16px; border-top:1px solid var(--border); }.range-error { color:var(--danger); font-size:var(--fs-caption); }.full { width:100%; justify-content:center; }.frame-strip { border-top:1px solid var(--border); padding:12px 16px; min-height:0; overflow:auto; }.strip-head { display:flex; justify-content:space-between; align-items:center; gap:12px; }.strip-head h2 { margin:0; }.strip-head .muted { flex:1; }.frames { display:flex; gap:10px; overflow-x:auto; padding:8px 0 12px; }.frame-card { width:120px; flex:none; padding:4px; text-align:left; background:var(--surface-raised); border:1px solid var(--border); border-radius:var(--radius-s); }.frame-card.active { border-color:var(--accent); }.frame-card.matted { border-color:var(--accent-border); }.frame-card.cropped { outline:1px dashed var(--accent); outline-offset:-3px; }.frame-card.watermarked { outline:1px dotted var(--accent-strong); outline-offset:-3px; }.frame-card img { width:110px; height:90px; object-fit:contain; background-color:var(--checker-a); background-image:linear-gradient(45deg, #232734 25%, transparent 25%), linear-gradient(-45deg, transparent 75%, #232734 75%); background-size:12px 12px; }.frame-card span { display:flex; align-items:center; gap:4px; padding-top:3px; color:var(--text-faint); font:11px var(--font-mono); }.strip-empty { color:var(--text-faint); padding:30px 0; }.muted { color:var(--text-faint); }
 </style>

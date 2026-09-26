@@ -1,8 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { store, loadImage, loadMetaFile, autoDetectFrames } from '@/store/atlas'
-import { workspace, setPage } from '@/store/workspace'
+import { workspace, setPage, type WatermarkState } from '@/store/workspace'
 import { modelManager } from '@/store/model-status'
+
+/** 去水印页的状态文案：该页没有数值型进度，用中文状态更直观 */
+const WATERMARK_STATUS: Record<WatermarkState['status'], string> = {
+  empty: '未导入',
+  ready: '待处理',
+  processing: '处理中',
+  done: '已生成',
+  error: '出错',
+}
+/** 非精灵图页的状态文案，各页展示自己的进度态 */
+const pageStatus = computed(() => {
+  if (workspace.page === 'matte') return workspace.matte.status
+  if (workspace.page === 'video') return `${workspace.video.frames.length} 帧`
+  return WATERMARK_STATUS[workspace.watermark.status]
+})
 
 const imgInput = ref<HTMLInputElement>()
 const metaInput = ref<HTMLInputElement>()
@@ -35,6 +50,7 @@ defineExpose({})
       <button class="nav-item" :class="{ active: workspace.page === 'atlas' }" @click="setPage('atlas')">精灵图 <span v-if="store.frames.length" class="nav-count">{{ store.frames.length }}</span></button>
       <button class="nav-item" :class="{ active: workspace.page === 'matte' }" @click="setPage('matte')">抠图 <span v-if="workspace.matte.status === 'done'" class="nav-dot">●</span></button>
       <button class="nav-item" :class="{ active: workspace.page === 'video' }" @click="setPage('video')">视频帧 <span v-if="workspace.video.frames.length" class="nav-count">{{ workspace.video.frames.length }}</span></button>
+      <button class="nav-item" :class="{ active: workspace.page === 'watermark' }" @click="setPage('watermark')">去水印 <span v-if="workspace.watermark.status === 'done'" class="nav-dot">●</span></button>
     </nav>
     <div class="topbar-actions">
       <input ref="imgInput" type="file" accept="image/*" hidden @change="onImage" />
@@ -47,7 +63,7 @@ defineExpose({})
         自动识别
         </button>
       </template>
-      <span v-else class="page-status">{{ workspace.page === 'matte' ? workspace.matte.status : `${workspace.video.frames.length} 帧` }}</span>
+      <span v-else class="page-status">{{ pageStatus }}</span>
     </div>
   </header>
 </template>

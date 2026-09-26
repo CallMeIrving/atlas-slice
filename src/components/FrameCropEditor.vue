@@ -3,16 +3,32 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { clampCropRect, type ImageCropRect } from '@/core/crop'
 
 /**
- * 帧裁切框选编辑器。
- * 舞台 + 8 个控制点 + 框外压暗 + X/Y/宽/高 输入 + 实时预览，
- * 批量裁切弹窗与一键处理弹窗共用；裁切区域的持有方是父组件（v-model）。
+ * 通用区域框选编辑器（裁切 / 去水印共用）。
+ * 舞台 + 8 个控制点 + 框外压暗 + X/Y/宽/高 输入 + 实时预览；
+ * 区域持有方是父组件（v-model），附加工具与说明通过插槽注入，避免为不同功能各写一份框选交互。
  */
-const props = defineProps<{
-  /** 裁切输入图像（已抠图的帧传抠图结果） */
-  sourceUrl: string
-  /** 当前裁切区域（图像像素坐标） */
-  modelValue: ImageCropRect
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** 框选输入图像（已抠图的帧传抠图结果，去水印传原始画面） */
+    sourceUrl: string
+    /** 当前区域（图像像素坐标） */
+    modelValue: ImageCropRect
+    /** 第一栏说明文案 */
+    caption?: string
+    /** 是否显示宽高比预设（去水印等不需要比例约束的场景可关闭） */
+    showRatio?: boolean
+    /** 是否显示右侧预览栏（父组件自带放大对比时可关闭） */
+    showPreview?: boolean
+    /** 是否显示「整帧」快捷操作 */
+    showFullFrame?: boolean
+  }>(),
+  {
+    caption: '框选区域 · 拖拽空白处重新框选，拖动框体移动，拖动控制点调整大小',
+    showRatio: true,
+    showPreview: true,
+    showFullFrame: true,
+  },
+)
 const emit = defineEmits<{ 'update:modelValue': [value: ImageCropRect] }>()
 
 /** 控制点方位：用于区分拖动的是哪条边 */
@@ -368,20 +384,20 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="crop-editor">
-    <div class="crop-compare">
+    <div class="crop-compare" :class="{ single: !props.showPreview }">
       <figure class="crop-pane">
-        <figcaption class="faint">框选区域 · 拖拽空白处重新框选，拖动框体移动，拖动控制点调整大小</figcaption>
+        <figcaption class="faint">{{ props.caption }}</figcaption>
         <div ref="stage" class="crop-stage" :class="{ dragging }" @pointerdown="onStageDown">
           <img
             v-if="sourceUrl"
             ref="sourceImage"
             :src="sourceUrl"
-            alt="裁切原图"
+            alt="框选原图"
             draggable="false"
             @load="onImageLoad"
             @error="errorText = '图像加载失败'"
           />
-          <span v-else class="faint">暂无可裁切的图像</span>
+          <span v-else class="faint">暂无可框选的图像</span>
           <div class="crop-box" :style="boxStyle" @pointerdown.stop="onBoxDown">
             <span
               v-for="handle in handles"
@@ -393,10 +409,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </figure>
-      <figure class="crop-pane">
-        <figcaption class="faint">裁切预览 · {{ Math.round(box.width) }} × {{ Math.round(box.height) }} px</figcaption>
+      <figure v-if="props.showPreview" class="crop-pane">
+        <figcaption class="faint">区域预览 · {{ Math.round(box.width) }} × {{ Math.round(box.height) }} px</figcaption>
         <div class="crop-stage checker">
-          <canvas ref="previewCanvas" aria-label="裁切预览"></canvas>
+          <canvas ref="previewCanvas" aria-label="区域预览"></canvas>
         </div>
       </figure>
     </div>
@@ -421,7 +437,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
       <div class="crop-row crop-tools">
-        <label class="field">
+        <label v-if="props.showRatio" class="field">
           <span class="field-label">宽高比</span>
           <select v-model.number="ratio" class="select ratio-select" @change="applyRatio">
             <option v-for="item in RATIO_PRESETS" :key="item.label" :value="item.value">{{ item.label }}</option>
@@ -434,17 +450,21 @@ onBeforeUnmount(() => {
             <button class="seg-item" :class="{ active: tool === 'draw' }" @click="tool = 'draw'">重新框选</button>
           </div>
         </div>
-        <div class="field">
+        <div v-if="props.showFullFrame" class="field">
           <span class="field-label">快捷操作</span>
           <button class="btn" :disabled="!natural.width" @click="fullFrame">整帧</button>
         </div>
+        <!-- 附加工具（自动定位、角落吸附等）由调用方注入，natural/box/setBox 都在本组件内部 -->
+        <slot name="tools" :natural="natural" :box="box" :set-box="setBox"></slot>
       </div>
     </div>
 
-    <p class="modal-help">
-      裁切区域以帧图像像素为单位，会按同一坐标应用到全部帧；已抠图的帧在抠图结果上裁剪，因此抠图后再裁切也不会丢失透明背景。
-      输入框与拖拽会实时同步，右侧预览即时可见。整帧范围等价于取消裁切。
-    </p>
+    <slot name="help">
+      <p class="modal-help">
+        裁切区域以帧图像像素为单位，会按同一坐标应用到全部帧；已抠图的帧在抠图结果上裁剪，因此抠图后再裁切也不会丢失透明背景。
+        输入框与拖拽会实时同步，右侧预览即时可见。整帧范围等价于取消裁切。
+      </p>
+    </slot>
 
     <p v-if="errorText" class="crop-error">{{ errorText }}</p>
   </div>
@@ -461,6 +481,11 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
   gap: var(--sp-3);
+}
+
+/* 关闭预览栏后让框选舞台占满整行 */
+.crop-compare.single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .crop-pane {

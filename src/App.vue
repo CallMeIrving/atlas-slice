@@ -7,6 +7,7 @@ import PreviewPlayer from '@/components/PreviewPlayer.vue'
 import { store, dismissError } from '@/store/atlas'
 import MattePage from '@/components/MattePage.vue'
 import VideoPage from '@/components/VideoPage.vue'
+import WatermarkPage from '@/components/WatermarkPage.vue'
 import ModelManagerModal from '@/components/ModelManagerModal.vue'
 import { modelManager } from '@/store/model-status'
 import { workspace } from '@/store/workspace'
@@ -33,7 +34,8 @@ const progressPct = () => {
     </div>
     <PreviewPlayer v-if="workspace.page === 'atlas'" />
     <MattePage v-else-if="workspace.page === 'matte'" />
-    <VideoPage v-else />
+    <VideoPage v-else-if="workspace.page === 'video'" />
+    <WatermarkPage v-else />
 
     <ModelManagerModal v-if="modelManager.open" @close="modelManager.open = false" />
 

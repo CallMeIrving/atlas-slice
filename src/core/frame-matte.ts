@@ -3,7 +3,7 @@ import { applyColorKey, colorKeyBase, sampleEdgeColor, type ColorKeyBase } from 
 import { removeWithImgly, removeWithTransformers, resolveInferenceMaxSide, type MatteProgress } from '@/core/ai-matting'
 import { fitResultToSize, imageDataToUrl, imageToImageData, loadImage } from '@/core/image'
 import { recropFrame } from '@/core/frame-crop'
-import type { VideoFrame, VideoMatteSettings } from '@/store/workspace'
+import { frameCleanUrl, type VideoFrame, type VideoMatteSettings } from '@/store/workspace'
 import type { CancelToken } from '@/core/frame-extract'
 
 /**
@@ -128,7 +128,8 @@ export async function applyMatteToFrames(
     if (options.reuse && options.reuse.id === frame.id) {
       frame.matteUrl = options.reuse.url
     } else {
-      const image = await loadImage(frame.url)
+      // 抠图在去水印后的画面上进行，避免半透明水印干扰判据（白色水印会被判成前景）
+      const image = await loadImage(frameCleanUrl(frame))
       frame.matteUrl = await matteFrameImage(image, context, undefined)
     }
     await recropFrame(frame)

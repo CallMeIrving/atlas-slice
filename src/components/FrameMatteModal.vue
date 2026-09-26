@@ -13,7 +13,7 @@ import {
 import { recropFrame } from '@/core/frame-crop'
 import { imageToImageData } from '@/core/image'
 import { createCancelToken, type CancelToken } from '@/core/frame-extract'
-import { persistMediaSettings, workspace } from '@/store/workspace'
+import { persistMediaSettings, frameCleanUrl, workspace } from '@/store/workspace'
 import MatteSettingsFields from '@/components/MatteSettingsFields.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
 
@@ -241,7 +241,7 @@ previewUrl.value = frame.value?.matteUrl ?? ''
           <figure class="matte-pane">
             <figcaption class="faint">原图<template v-if="isSolid"> · 点击背景处吸取基准色</template></figcaption>
             <div class="matte-stage" :class="{ pickable: isSolid }">
-              <img v-if="frame" ref="sourceImage" :src="frame.url" alt="原始帧" @load="onImageLoad" @click="pickBaseColor" />
+              <img v-if="frame" ref="sourceImage" :src="frameCleanUrl(frame)" alt="原始帧" @load="onImageLoad" @click="pickBaseColor" />
             </div>
           </figure>
           <figure class="matte-pane">

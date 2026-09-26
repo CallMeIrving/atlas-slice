@@ -213,8 +213,8 @@ export function sampleEdgeColor(data: ImageData): ColorKeyBase {
   return colorKeyBase(base.r, base.g, base.b)
 }
 
-/** 取指定通道偏移的中位数 */
-function medianOf(samples: number[], channelOffset: number): number {
+/** 取指定通道偏移的中位数（采样数组按 r,g,b 三通道交错存放） */
+export function medianOf(samples: number[], channelOffset: number): number {
   const channel: number[] = []
   for (let i = channelOffset; i < samples.length; i += 3) channel.push(samples[i])
   channel.sort((a, b) => a - b)
