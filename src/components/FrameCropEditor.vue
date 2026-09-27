@@ -454,7 +454,7 @@ onBeforeUnmount(() => {
           <span class="field-label">快捷操作</span>
           <button class="btn" :disabled="!natural.width" @click="fullFrame">整帧</button>
         </div>
-        <!-- 附加工具（自动定位、角落吸附等）由调用方注入，natural/box/setBox 都在本组件内部 -->
+        <!-- 附加工具由调用方注入，natural/box/setBox 都在本组件内部 -->
         <slot name="tools" :natural="natural" :box="box" :set-box="setBox"></slot>
       </div>
     </div>

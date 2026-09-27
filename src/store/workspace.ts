@@ -91,8 +91,8 @@ export interface VideoState {
   status: 'empty' | 'ready' | 'processing' | 'done' | 'error'
 }
 
-/** 去水印修复方式：patch 按蒙版替换水印像素，alpha 逆向 Alpha 还原，region 整块重建 */
-export type WatermarkMode = 'patch' | 'alpha' | 'region'
+/** 去水印修复方式：patch 按蒙版替换水印像素，alpha 逆向 Alpha 还原，region 整块重建，texture 环带纹理合成 */
+export type WatermarkMode = 'patch' | 'alpha' | 'region' | 'texture'
 
 export interface WatermarkSettings {
   mode: WatermarkMode
@@ -104,6 +104,8 @@ export interface WatermarkSettings {
   baseColor: string
   /** patch 模式是否保留底色噪点（坐标哈希确定性噪声，逐帧一致） */
   keepNoise: boolean
+  /** 重建精细度（0 快速 / 1 标准 / 2 精细），仅 texture 模式使用 */
+  quality: number
 }
 
 export interface WatermarkState {
@@ -155,7 +157,7 @@ export const workspace = reactive({
   } as VideoState,
   watermark: {
     source: 'image', fileName: '', sourceUrl: '', resultUrl: '', frameId: '', status: 'empty', error: '', roi: null,
-    settings: { mode: 'alpha', watermarkColor: '#ffffff', threshold: 48, baseColor: '', keepNoise: true } as WatermarkSettings,
+    settings: { mode: 'alpha', watermarkColor: '#ffffff', threshold: 48, baseColor: '', keepNoise: true, quality: 1 } as WatermarkSettings,
   } as WatermarkState,
 })
 
@@ -163,7 +165,7 @@ const SETTINGS_KEY = 'atlas-slice:media-settings'
 /** 界面支持的处理方式，用于丢弃本地设置里已下线的取值 */
 const MATTE_MODES: MatteMode[] = ['auto', 'color', 'solid', 'imgly', 'rmbg']
 /** 去水印支持的修复方式，同样用于收敛本地设置 */
-const WATERMARK_MODES: WatermarkMode[] = ['patch', 'alpha', 'region']
+const WATERMARK_MODES: WatermarkMode[] = ['patch', 'alpha', 'region', 'texture']
 try {
   const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null') as {
     matte?: Partial<MatteState>
@@ -211,7 +213,7 @@ export function resetWatermark(): void {
 
 /**
  * 从视频帧页进入去水印：把指定帧作为样板并切页。
- * ROI 与结果一律清空，交由页面按新来源重新自动定位，避免沿用上一张画面的坐标。
+ * ROI 与结果一律清空，交由页面按新来源给出一块初始 ROI，避免沿用上一张画面的坐标。
  */
 export function startWatermarkFromFrame(frameId: string): void {
   const frames = workspace.video.frames

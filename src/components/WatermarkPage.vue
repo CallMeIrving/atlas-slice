@@ -8,9 +8,7 @@ import { downloadBlob } from '@/core/media-export'
 import {
   applyWatermarkToFrames,
   clearWatermarkFromFrames,
-  detectWatermarkRect,
   watermarkImageData,
-  type WatermarkCorner,
   type WatermarkPlan,
 } from '@/core/watermark'
 import {
@@ -32,48 +30,40 @@ import TaskProgress from '@/components/TaskProgress.vue'
 const MODE_OPTIONS: { value: WatermarkMode; label: string; hint: string }[] = [
   {
     value: 'alpha',
-    label: '逆向 Alpha 还原（半透明水印首选）',
-    hint: '由 C_comp = α·C_wm + (1-α)·C_bg 解出 α 并精确还原底色，α 本身即混合权重，抗锯齿边缘自动得到中间值，不需要阈值与羽化。',
+    label: '逆向 Alpha 还原（纯色底半透明水印）',
+    hint: '由 C_comp = α·C_wm + (1-α)·C_bg 解出 α 并精确还原底色，α 本身即混合权重，抗锯齿边缘自动得到中间值，不需要阈值与羽化。底色不是纯色时不适用。',
+  },
+  {
+    value: 'texture',
+    label: '环带纹理合成（有纹理底首选）',
+    hint: '从 ROI 外圈环带复制真实纹理块重建整个区域：环带与 ROI 同材质，搬过来的颗粒与渐变就是原图本身的细节，不会被磨平。水印压在主体结构上时仍会留下痕迹。',
   },
   {
     value: 'patch',
     label: '按蒙版替换水印像素',
-    hint: '按色差阈值判定水印像素并替换为底色，适合不透明水印、框选留有余量的情况。',
+    hint: '按色差阈值判定水印像素并替换为底色，适合不透明水印、框选留有余量的情况。底色带纹理时建议改用「环带纹理合成」。',
   },
   {
     value: 'region',
     label: '整块重建（四边界插值）',
-    hint: '无视蒙版，用 ROI 四边界逆向距离加权插值重建整块区域，适合底色有渐变或水印边界不确定的情况。',
+    hint: '无视蒙版，用 ROI 四边界逆向距离加权插值重建整块区域，适合底色有渐变或水印边界不确定的情况。结果是平滑的，不含纹理。',
   },
 ]
 
-const CORNER_OPTIONS: { value: WatermarkCorner | 'auto'; label: string }[] = [
-  { value: 'auto', label: '自动（四角各扫一次）' },
-  { value: 'nw', label: '左上' },
-  { value: 'ne', label: '右上' },
-  { value: 'sw', label: '左下' },
-  { value: 'se', label: '右下' },
+/** 重建精细度：直接决定 PatchMatch 的金字塔层数与迭代次数，越精细越慢 */
+const QUALITY_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: '快速' },
+  { value: 1, label: '标准' },
+  { value: 2, label: '精细（较慢）' },
 ]
 
-/** 放大对比的倍数选项 */
-const ZOOM_SCALES = [2, 4, 8]
-/** 放大对比画布的长边上限，避免大 ROI 配高倍数时分配超大画布 */
-const ZOOM_MAX_SIDE = 420
-
 const input = ref<HTMLInputElement>()
-const beforeCanvas = ref<HTMLCanvasElement>()
-const afterCanvas = ref<HTMLCanvasElement>()
-/** 自动定位的目标角落 */
-const autoCorner = ref<WatermarkCorner | 'auto'>('auto')
-/** 自动定位实际命中的角落，供用户确认 */
-const detectedCorner = ref<WatermarkCorner | null>(null)
 /** 自动采样到的底色，展示用 */
 const sampledBase = ref('')
 /** alpha 模式退化提示 */
 const degraded = ref(false)
-/** ROI 是否已为当前来源准备好（准备好后才挂载编辑器，避免编辑器先按整帧兜底覆盖自动定位结果） */
+/** ROI 是否已为当前来源准备好（准备好后才挂载编辑器，避免编辑器先按整帧兜底覆盖初始 ROI） */
 const roiReady = ref(false)
-const zoomScale = ref(4)
 const batch = ref({ running: false, done: 0, total: 0 })
 const statusText = ref('')
 const errorText = ref('')
@@ -81,14 +71,13 @@ const errorText = ref('')
 let token: CancelToken = createCancelToken()
 /** 本次解析出的参数：批量应用时全帧共用这一份，保证时域一致 */
 const plan = ref<WatermarkPlan | null>(null)
-let previewTimer = 0
-let zoomFrame = 0
-/** 预览令牌：参数变化后丢弃过期的异步结果 */
-let previewToken = 0
-/** 单条像素数据缓存与单条图像缓存，调参时避免重复解码（结果图每次都是新 dataURL，不做缓存以免堆积） */
+/** 手动处理期间的忙碌标记：按钮禁用与结果区文案共用 */
+const processing = ref(false)
+/** 处理令牌：重复点击时丢弃过期的异步结果 */
+let runToken = 0
+/** 来源图像的像素数据与图像元素各缓存一条，避免重复解码 */
 let sampleCache: { url: string; data: ImageData } | null = null
 let sourceImageCache: { url: string; image: HTMLImageElement } | null = null
-let resultImageCache: { url: string; image: HTMLImageElement } | null = null
 
 const frames = computed(() => workspace.video.frames)
 const isFrames = computed(() => workspace.watermark.source === 'frames')
@@ -98,6 +87,8 @@ const hasSource = computed(() => Boolean(sourceUrl.value))
 const resultUrl = computed(() => workspace.watermark.resultUrl)
 const watermarkedCount = computed(() => frames.value.filter((frame) => frame.watermarkUrl).length)
 const usesThreshold = computed(() => plan.value?.mode === 'patch')
+/** 精细度只作用于 texture 模式（PatchMatch 的金字塔层数与迭代次数），其余模式不看这个值 */
+const isTextureMode = computed(() => workspace.watermark.settings.mode === 'texture')
 const activeModeHint = computed(() => MODE_OPTIONS.find((item) => item.value === workspace.watermark.settings.mode)?.hint ?? '')
 const editorCaption = computed(() => `点击水印所在位置框选 · 当前 ROI ${roiLabel.value}`)
 const roiLabel = computed(() => {
@@ -123,13 +114,13 @@ async function sourceData(url: string): Promise<ImageData> {
   return sampleCache.data
 }
 
-/** 取来源图像元素（单条缓存，放大对比反复绘制时避免重复解码） */
+/** 取来源图像元素（缓存一条，准备 ROI 与后续处理复用同一次解码） */
 async function sourceImage(url: string): Promise<HTMLImageElement> {
   if (sourceImageCache?.url !== url) sourceImageCache = { url, image: await loadImage(url) }
   return sourceImageCache.image
 }
 
-/** 自动定位失败时的兜底 ROI：右下角一小块（水印最常见的位置） */
+/** 新来源的初始 ROI：右下角一小块（水印最常见的位置），之后一律由用户手动框选 */
 function defaultCornerRect(width: number, height: number): ImageCropRect {
   const boxWidth = Math.max(8, Math.round(width * 0.28))
   const boxHeight = Math.max(8, Math.round(height * 0.12))
@@ -138,26 +129,20 @@ function defaultCornerRect(width: number, height: number): ImageCropRect {
 }
 
 /**
- * 来源变化后的准备：清缓存 → 自动定位 ROI（定位不到则给右下角默认框）→ 允许挂载编辑器。
+ * 来源变化后的准备：清缓存 → 给一个初始 ROI → 允许挂载编辑器。
  * ROI 已存在（例如用户切回同一来源）时只做范围收敛，保留用户手工框选的结果。
  */
 async function prepareSource(): Promise<void> {
   roiReady.value = false
   sampleCache = null
   sourceImageCache = null
-  resultImageCache = null
   const url = sourceUrl.value
   if (!url) { workspace.watermark.roi = null; return }
   try {
     const image = await sourceImage(url)
-    const data = await sourceData(url)
-    if (workspace.watermark.roi) {
-      workspace.watermark.roi = clampCropRect(workspace.watermark.roi, image.naturalWidth, image.naturalHeight)
-    } else {
-      const found = detectWatermarkRect(data, { corner: autoCorner.value })
-      detectedCorner.value = found?.corner ?? null
-      workspace.watermark.roi = found ? found.rect : defaultCornerRect(image.naturalWidth, image.naturalHeight)
-    }
+    workspace.watermark.roi = workspace.watermark.roi
+      ? clampCropRect(workspace.watermark.roi, image.naturalWidth, image.naturalHeight)
+      : defaultCornerRect(image.naturalWidth, image.naturalHeight)
   } catch (error) {
     errorText.value = error instanceof Error ? error.message : '图像加载失败'
     return
@@ -166,73 +151,32 @@ async function prepareSource(): Promise<void> {
 }
 
 /**
- * 按当前参数生成样板预览。
- * 三种修复方式都是零模型本地运算，速度足够快，因此参数一改就刷新，不需要「生成预览」按钮。
+ * 手动处理：按当前框选区域与参数生成结果图。
+ * 修复方式是零模型本地运算，但精细档的纹理合成耗时明显，因此统一改为点「去水印」才执行。
  */
-async function runPreview(): Promise<void> {
+async function runWatermark(): Promise<void> {
   const url = sourceUrl.value
   const area = workspace.watermark.roi
-  if (!url || !area || batch.value.running) return
-  const stamp = ++previewToken
+  if (!url || !area || processing.value || batch.value.running) return
+  const stamp = ++runToken
+  processing.value = true
   errorText.value = ''
   workspace.watermark.status = 'processing'
   try {
     const result = watermarkImageData(workspace.watermark.settings, area, await sourceData(url))
-    if (stamp !== previewToken) return
+    if (stamp !== runToken) return
     plan.value = result.plan
     degraded.value = result.degraded
     sampledBase.value = rgbToHex(result.plan.base.r, result.plan.base.g, result.plan.base.b)
     workspace.watermark.resultUrl = result.url
     workspace.watermark.status = 'done'
-    scheduleZoom()
   } catch (error) {
-    if (stamp !== previewToken) return
+    if (stamp !== runToken) return
     workspace.watermark.status = 'error'
     errorText.value = error instanceof Error ? error.message : '去水印处理失败'
+  } finally {
+    if (stamp === runToken) processing.value = false
   }
-}
-
-/** 合并高频参数与 ROI 变化的预览重算 */
-function schedulePreview(): void {
-  if (previewTimer) window.clearTimeout(previewTimer)
-  previewTimer = window.setTimeout(() => {
-    previewTimer = 0
-    void runPreview()
-  }, 120)
-}
-
-/** 绘制 ROI 局部放大对比：处理前取原始画面，处理后取本次结果 */
-async function renderZoom(): Promise<void> {
-  const canvas = beforeCanvas.value
-  const url = sourceUrl.value
-  const area = workspace.watermark.roi
-  if (!canvas || !url || !area) return
-  const source = await sourceImage(url)
-  const rect = clampCropRect(area, source.naturalWidth, source.naturalHeight)
-  const scale = Math.min(zoomScale.value, ZOOM_MAX_SIDE / Math.max(1, rect.width, rect.height))
-  const draw = (target: HTMLCanvasElement, image: HTMLImageElement): void => {
-    target.width = Math.max(1, Math.round(rect.width * scale))
-    target.height = Math.max(1, Math.round(rect.height * scale))
-    const ctx = target.getContext('2d')!
-    ctx.imageSmoothingEnabled = false
-    ctx.clearRect(0, 0, target.width, target.height)
-    ctx.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, target.width, target.height)
-  }
-  draw(canvas, source)
-  const after = afterCanvas.value
-  const result = workspace.watermark.resultUrl
-  if (!after || !result) return
-  if (resultImageCache?.url !== result) resultImageCache = { url: result, image: await loadImage(result) }
-  draw(after, resultImageCache.image)
-}
-
-/** 用 rAF 合并拖动 ROI 时的高频对比图重绘 */
-function scheduleZoom(): void {
-  if (zoomFrame) return
-  zoomFrame = window.requestAnimationFrame(() => {
-    zoomFrame = 0
-    void renderZoom()
-  })
 }
 
 /** 导入单张图片：切到图片模式，ROI 与结果交给 prepareSource 重算 */
@@ -243,21 +187,6 @@ function load(file?: File): void {
     source: 'image', fileName: file.name, sourceUrl: URL.createObjectURL(file),
     resultUrl: '', frameId: '', status: 'ready', error: '', roi: null,
   })
-}
-
-/** 自动定位水印并把结果写入编辑器 */
-async function autoDetect(setBox: (rect: ImageCropRect) => void): Promise<void> {
-  const url = sourceUrl.value
-  if (!url || !batch.value.running) return
-  errorText.value = ''
-  try {
-    const found = detectWatermarkRect(await sourceData(url), { corner: autoCorner.value })
-    if (!found) { errorText.value = '未定位到明显的水印区域，请手动框选'; return }
-    detectedCorner.value = found.corner
-    setBox(found.rect)
-  } catch (error) {
-    errorText.value = error instanceof Error ? error.message : '自动定位失败'
-  }
 }
 
 /** 把同一份参数应用到全部帧（带进度、可中途取消） */
@@ -306,33 +235,41 @@ async function downloadResult(): Promise<void> {
   }
 }
 
-/** 重置去水印页（参数保留，来源、ROI 与结果清空） */
-function resetAll(): void {
-  resetWatermark()
+/** 作废当前结果：框选、参数或来源一变，旧结果与旧参数就不再对应当前画面 */
+function invalidateResult(): void {
+  // 同时作废在途处理，避免迟到的结果写回作废后的状态
+  runToken += 1
+  processing.value = false
   plan.value = null
+  workspace.watermark.resultUrl = ''
   sampledBase.value = ''
   degraded.value = false
+}
+
+/** 重置去水印页（参数保留，来源、ROI 与结果清空） */
+function resetAll(): void {
+  invalidateResult()
+  resetWatermark()
   statusText.value = ''
   errorText.value = ''
 }
 
-// 来源变化：重新准备 ROI 并出一次预览
+// 来源变化：作废旧结果后重新准备 ROI；结果一律由「去水印」按钮触发，不自动重算
 watch(sourceUrl, () => {
   statusText.value = ''
-  void prepareSource().then(() => schedulePreview())
+  invalidateResult()
+  void prepareSource()
 })
-// ROI 变化（拖拽 / 输入 / 自动定位）后重算预览与放大对比
-watch(() => workspace.watermark.roi, () => { schedulePreview(); scheduleZoom() })
-// 参数变化即刷新预览，同时持久化（与抠图页共用同一份本地设置）
-watch(workspace.watermark.settings, () => { persistMediaSettings(); schedulePreview() }, { deep: true })
-watch(zoomScale, scheduleZoom)
+// 框选区域或参数变化后作废旧结果：旧 plan 与当前画面已不对应，
+// 既避免右侧结果误导，也避免「应用到全部帧」按过期参数批量处理
+watch(() => workspace.watermark.roi, () => invalidateResult())
+// 参数变化只持久化（与抠图页共用同一份本地设置），并作废旧结果
+watch(workspace.watermark.settings, () => { persistMediaSettings(); invalidateResult() }, { deep: true })
 
-// 首次进入页面：已有来源时补齐 ROI 与预览
-void prepareSource().then(() => schedulePreview())
+// 首次进入页面：已有来源时补齐 ROI
+void prepareSource()
 
 onBeforeUnmount(() => {
-  if (previewTimer) window.clearTimeout(previewTimer)
-  if (zoomFrame) window.cancelAnimationFrame(zoomFrame)
   // 离开页面时中断尚未结束的批量处理，保留已完成的帧
   token.cancelled = true
 })
@@ -411,12 +348,25 @@ onBeforeUnmount(() => {
         </label>
         <p v-if="usesThreshold" class="muted">底色本身带噪点时，平填会出现一块过于平滑的补丁；噪点用坐标哈希生成，逐帧完全一致。</p>
 
+        <label v-if="isTextureMode" class="field">
+          <span class="field-label">重建精细度</span>
+          <select v-model.number="workspace.watermark.settings.quality" class="select full">
+            <option v-for="item in QUALITY_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select>
+        </label>
+        <p v-if="isTextureMode" class="muted">
+          精细度决定纹理合成的金字塔层数与迭代次数：层数越多，粗层越能约束整块结构，细层只需局部修正，结果越贴合原图纹理，代价是耗时成倍增加。
+        </p>
+
         <div v-if="degraded" class="warn">水印色与底色过于接近，投影无意义，已自动退化为「按蒙版替换水印像素」。</div>
       </div>
 
       <div class="section actions">
+        <button class="btn btn-primary full" :disabled="!roiReady || processing" @click="runWatermark">
+          {{ processing ? '处理中…' : '去水印' }}
+        </button>
         <template v-if="isFrames">
-          <button class="btn btn-primary full" :disabled="!plan || batch.running || !frames.length" @click="batchApply">应用到全部帧</button>
+          <button class="btn full" :disabled="!plan || batch.running || !frames.length" @click="batchApply">应用到全部帧</button>
           <button class="btn full" :disabled="!watermarkedCount || batch.running" @click="restoreFrames">还原全部帧（{{ watermarkedCount }}）</button>
         </template>
         <button class="btn full" :disabled="!resultUrl" @click="downloadResult">下载 PNG</button>
@@ -440,61 +390,30 @@ onBeforeUnmount(() => {
           <span>导入一张图片，或先在「视频帧」页抽帧后回到这里</span>
         </div>
 
-        <FrameCropEditor
-          v-else-if="roiReady"
-          v-model="roiModel"
-          :source-url="sourceUrl"
-          :caption="editorCaption"
-          :show-ratio="false"
-          :show-preview="false"
-          :show-full-frame="false"
-        >
-          <template #tools="{ natural, setBox }">
-            <label class="field">
-              <span class="field-label">定位角落</span>
-              <select v-model="autoCorner" class="select corner-select">
-                <option v-for="item in CORNER_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
-              </select>
-            </label>
-            <div class="field">
-              <span class="field-label">自动定位</span>
-              <button class="btn" :disabled="!hasSource || !natural.width || batch.running" @click="autoDetect(setBox)">自动框选水印</button>
-            </div>
-            <span v-if="detectedCorner" class="mono faint corner-status">已定位：{{ CORNER_OPTIONS.find((item) => item.value === detectedCorner)?.label }}</span>
-          </template>
-          <template #help>
-            <p class="modal-help">
-              在图上框住水印（可留一点余量），底色由 ROI 外圈环带中位采样得到。角落水印外侧就是确定可采样的纯色背景，
-              因此这里用解方程的方式精确还原，而不是让模型去猜纹理——猜出来的纹理逐帧都不一样，画面会抖动。
-            </p>
-          </template>
-        </FrameCropEditor>
+        <div v-else class="wm-workspace">
+          <section class="wm-column">
+            <FrameCropEditor
+              v-if="roiReady"
+              v-model="roiModel"
+              :source-url="sourceUrl"
+              :caption="editorCaption"
+              :show-ratio="false"
+              :show-preview="false"
+              :show-full-frame="false"
+            >
+              <!-- 显式传空插槽：覆盖编辑器自带的裁切说明文案 -->
+              <template #help></template>
+            </FrameCropEditor>
+          </section>
 
-        <section v-if="resultUrl && roiReady" class="zoom-panel panel">
-          <div class="zoom-head">
-            <h3>ROI 放大对比</h3>
-            <span class="mono faint">{{ roiLabel }}</span>
-            <div class="seg">
-              <button
-                v-for="scale in ZOOM_SCALES"
-                :key="scale"
-                class="seg-item"
-                :class="{ active: zoomScale === scale }"
-                @click="zoomScale = scale"
-              >{{ scale }}×</button>
+          <figure class="wm-column wm-result">
+            <figcaption class="faint">结果图</figcaption>
+            <div class="wm-stage">
+              <img v-if="resultUrl" :src="resultUrl" alt="去水印结果" />
+              <span v-else class="faint">{{ processing ? '处理中…' : '尚未处理' }}</span>
             </div>
-          </div>
-          <div class="zoom-body">
-            <figure class="zoom-pane">
-              <figcaption class="faint">处理前</figcaption>
-              <div class="zoom-stage"><canvas ref="beforeCanvas"></canvas></div>
-            </figure>
-            <figure class="zoom-pane">
-              <figcaption class="faint">处理后</figcaption>
-              <div class="zoom-stage"><canvas ref="afterCanvas"></canvas></div>
-            </figure>
-          </div>
-        </section>
+          </figure>
+        </div>
 
         <TaskProgress
           v-if="batch.running || statusText || errorText"
@@ -522,19 +441,16 @@ onBeforeUnmount(() => {
 .actions { display: flex; flex-direction: column; gap: var(--sp-2); }
 .file-name { margin: var(--sp-2) 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .section .field + .field, .section .field + .check-row { margin-top: var(--sp-3); }
+.section p + .field { margin-top: var(--sp-3); }
 .range { width: 100%; accent-color: var(--accent); }
 .color-input { width: 42px; height: 28px; flex: none; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised); }
 .field-row .btn { height: 26px; padding: 0 var(--sp-2); font-size: var(--fs-caption); }
 .field-row .faint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.corner-select { width: 100%; }
-.corner-status { align-self: center; }
-.zoom-panel { padding: var(--sp-3) var(--sp-4); }
-.zoom-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
-.zoom-head h3 { margin: 0; font-size: var(--fs-title); }
-.zoom-head .seg { margin-left: auto; }
-.zoom-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
-.zoom-pane { margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.zoom-pane figcaption { font-size: var(--fs-caption); }
-.zoom-stage { height: 200px; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: var(--sp-2); background: var(--stage); border: 1px solid var(--border); border-radius: var(--radius-s); }
-.zoom-stage canvas { max-width: 100%; max-height: 100%; image-rendering: pixelated; }
+/* 工作区：左侧原图框选 + 处理按钮，右侧结果图对照 */
+.wm-workspace { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+.wm-column { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.wm-result { margin: 0; }
+.wm-result figcaption { font-size: var(--fs-caption); }
+.wm-stage { height: 320px; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: var(--sp-2); background: var(--stage); border: 1px solid var(--border); border-radius: var(--radius-s); }
+.wm-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
 </style>

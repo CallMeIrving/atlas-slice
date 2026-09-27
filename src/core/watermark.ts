@@ -1,9 +1,10 @@
 import { nextTick } from 'vue'
 import { medianOf, sampleEdgeColor } from '@/core/color-key'
 import { clampCropRect, type ImageCropRect } from '@/core/crop'
+import { patchMatchInpaint } from '@/core/inpaint'
 import { hexToRgb } from '@/core/frame-matte'
 import { recropFrame } from '@/core/frame-crop'
-import { imageDataToUrl, imageToImageData, loadImage, releaseCanvas } from '@/core/image'
+import { imageDataToUrl, imageToImageData, loadImage } from '@/core/image'
 import type { CancelToken } from '@/core/frame-extract'
 import type { VideoFrame, WatermarkMode, WatermarkSettings } from '@/store/workspace'
 
@@ -17,6 +18,18 @@ import type { VideoFrame, WatermarkMode, WatermarkSettings } from '@/store/works
  *
  * 时域一致性：底色、水印色、ROI 在样板帧求一次后全部帧共用，运算对同一坐标完全确定
  * （噪点用坐标哈希伪随机数，禁止 Math.random），因此逐帧结果一致、不会闪烁。
+ *
+ * 底色是有纹理/颗粒的照片（而非纯色）时，alpha 解算与平填都只能给出「干净但发糊」的结果：
+ * 水印之下的原始纹理已经不可逆丢失，此时唯一的出路是**重建**而不是还原，因此有 `texture` 模式：
+ * 用 core/inpaint 的多尺度 PatchMatch 从 ROI 外圈环带复制真实纹理，环带与 ROI 同材质，
+ * 搬过来的颗粒/渐变就是原图本身的细节，不是伪造的白噪声。
+ *
+ * 关于梯度域（泊松）融合：不在这里使用。core/inpaint 的 seamlessFuse 以 target 在 ROI 外侧
+ * 1px 的像素为 Dirichlet 边界、以 guidance 的梯度为引导场解 ∇²f = ∇²g；而本流程里取出的
+ * guidance（patchMatchInpaint 的输出）保持 ROI 外像素与输入逐字节相同，
+ * 于是 guidance 的边界值与 target 的边界值恒等，色差项为 0、f ≡ g 本身就是精确解，
+ * 迭代一步都不会移动——属于该方程组的性质，不是参数问题。融合真正有价值的前提是
+ * 「引导场与目标边界来自不同图像」，本流程没有这样的引导场，故不保留该开关。
  */
 
 /** RGB 三元组（0-255） */
@@ -25,9 +38,6 @@ export interface Rgb {
   g: number
   b: number
 }
-
-/** 水印所在角落，决定自动定位的搜索窗方位 */
-export type WatermarkCorner = 'nw' | 'ne' | 'sw' | 'se'
 
 /** 单帧去水印的完整参数：全帧共用同一份，保证时域一致 */
 export interface WatermarkPlan {
@@ -44,6 +54,8 @@ export interface WatermarkPlan {
   keepNoise: boolean
   /** 底色噪声幅度（0-255 通道值） */
   noise: number
+  /** 重建精细度（0 快速 / 1 标准 / 2 精细），仅 texture 模式使用 */
+  quality: number
 }
 
 export interface WatermarkResult {
@@ -53,12 +65,6 @@ export interface WatermarkResult {
   degraded: boolean
 }
 
-/** 自动定位的搜索窗占图像长边比例 */
-const DETECT_WINDOW_RATIO = 0.4
-/** 自动定位前降采样到的长边像素（抑噪 + 限制 flood fill 规模） */
-const DETECT_MAX_SIDE = 256
-/** 连通域至少占搜索窗该比例才当作水印，滤掉孤立噪点 */
-const DETECT_MIN_AREA_RATIO = 0.002
 /** 退化为蒙版填充的判据：投影方向长度的平方下限（|V| < 3） */
 const MIN_PROJECTION_LENGTH = 9
 
@@ -240,12 +246,32 @@ export function fillByEdges(data: ImageData, rect: ImageCropRect, base: Rgb): vo
   }
 }
 
+/** 把 value 钳制在 a、b 两点构成的闭区间内（不要求 a ≤ b） */
+function clampSegment(value: number, a: number, b: number): number {
+  return a < b ? (value < a ? a : value > b ? b : value) : (value < b ? b : value > a ? a : value)
+}
+
 /**
  * 逆向 Alpha 解算：由混色方程得 α = clamp((D · V) / (V · V), 0, 1)，其中
- * D = C_comp - C_bg、V = C_wm - C_bg；再按 out = orig + (C_bg - orig) · α 回写。
+ * D = C_comp - base、V = C_wm - base；再按 out = C_comp - α · V 回写。
  * α 本身就是混合权重，不需要额外阈值与羽化：底色像素 α≈0 保持不变，
  * 被水印完全覆盖处 α≈1 精确还原为底色，抗锯齿边缘自动得到中间值。
  * V·V 过小（水印色与底色几乎相同、水印本身不可见）时返回 false，交调用方退化为蒙版填充。
+ *
+ * 为什么回写项是 α·V 而不是 α·D（former 写法 out = orig + (base - orig)·α）：
+ * 后者等价于减去 α·D，代入模型 D = α·V 立即得到 out = base + α(1-α)·V，
+ * 残差 α(1-α)(C_wm - base) 在 0 < α < 1 时**恒不为 0**（α=0.5 时高达 0.25|V|），
+ * 半透明水印只会被压淡、永远压不干净——α 越小残差越大，这正是「水印去不掉」的根因。
+ * 减去 α·V 等于扣掉水印自身那一份估计贡献：纯色底上 out 恒等于 base，属数学精确复原；
+ * 且 α→1 时无需除以 (1-α) 放大噪声，比精确反解 (C_comp - α·C_wm)/(1-α) 更稳。
+ * 与 V 正交的残余分量被保留，因此 ROI 内沿其它方向的真实结构不会被抹掉。
+ *
+ * 为什么要再钳回「原像素 ↔ base」区间：α 是用环带采样出来的**单一**底色估的，
+ * 底色不是纯色时（水印压在草地、布料这类纹理上）水印正下方的真实底色与 base 有偏差，
+ * α 会被高估，直接相减会把浅色水印**反向压成深色鬼影**——比原来的「压不干净」更难看。
+ * 钳制后修正幅度恒不超过该像素原本偏离 base 的幅度，于是：底色准确时仍精确落在 base；
+ * 底色不准时最多停在 base，不会越过它继续下沉。即新公式在任何输入下都不会比旧公式
+ * 更偏离底色，只会在旧公式的基础上把残差抹平，属于单调改进而非换一种失败方式。
  */
 export function recoverAlpha(data: ImageData, rect: ImageCropRect, base: Rgb, watermark: Rgb): boolean {
   const vr = watermark.r - base.r
@@ -264,9 +290,12 @@ export function recoverAlpha(data: ImageData, rect: ImageCropRect, base: Rgb, wa
       const db = pixels[offset + 2] - base.b
       const alpha = Math.min(1, Math.max(0, (dr * vr + dg * vg + db * vb) / vv))
       if (alpha <= 0) continue
-      pixels[offset] += (base.r - pixels[offset]) * alpha
-      pixels[offset + 1] += (base.g - pixels[offset + 1]) * alpha
-      pixels[offset + 2] += (base.b - pixels[offset + 2]) * alpha
+      const r0 = pixels[offset]
+      const g0 = pixels[offset + 1]
+      const b0 = pixels[offset + 2]
+      pixels[offset] = clampSegment(r0 - alpha * vr, r0, base.r)
+      pixels[offset + 1] = clampSegment(g0 - alpha * vg, g0, base.g)
+      pixels[offset + 2] = clampSegment(b0 - alpha * vb, b0, base.b)
     }
   }
   return true
@@ -317,133 +346,6 @@ export function estimateWatermarkColor(data: ImageData, rect: ImageCropRect, bas
   return { r: medianOf(samples, 0), g: medianOf(samples, 1), b: medianOf(samples, 2) }
 }
 
-/** 降采样到长边不超过 maxSide，长边已足够小时直接复用原数据 */
-function downsample(data: ImageData, maxSide: number): { data: ImageData; scale: number } {
-  const scale = Math.min(1, maxSide / Math.max(data.width, data.height))
-  if (scale >= 1) return { data, scale: 1 }
-  const width = Math.max(1, Math.round(data.width * scale))
-  const height = Math.max(1, Math.round(data.height * scale))
-  const source = document.createElement('canvas')
-  source.width = data.width
-  source.height = data.height
-  source.getContext('2d')!.putImageData(data, 0, 0)
-  const target = document.createElement('canvas')
-  target.width = width
-  target.height = height
-  const ctx = target.getContext('2d')!
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(source, 0, 0, width, height)
-  const result = ctx.getImageData(0, 0, width, height)
-  releaseCanvas(source)
-  releaseCanvas(target)
-  return { data: result, scale }
-}
-
-/**
- * 在指定角落的搜索窗内找水印连通域。
- * 栈式 4 邻域 flood fill 累计包围盒与面积；贴住搜索窗「内侧边」的连通域通常是主体
- * 而非水印（水印贴的是图像边，即搜索窗的外侧），因此直接排除。
- */
-function detectInCorner(data: ImageData, corner: WatermarkCorner, threshold: number, base: Rgb): { area: number; rect: ImageCropRect } | null {
-  const width = data.width
-  const height = data.height
-  const windowWidth = Math.max(4, Math.round(width * DETECT_WINDOW_RATIO))
-  const windowHeight = Math.max(4, Math.round(height * DETECT_WINDOW_RATIO))
-  const x0 = corner === 'ne' || corner === 'se' ? width - windowWidth : 0
-  const y0 = corner === 'sw' || corner === 'se' ? height - windowHeight : 0
-  const interiorLeft = corner === 'ne' || corner === 'se'
-  const interiorTop = corner === 'sw' || corner === 'se'
-  const pixels = data.data
-  const visited = new Uint8Array(windowWidth * windowHeight)
-  const minArea = windowWidth * windowHeight * DETECT_MIN_AREA_RATIO
-  let best: { area: number; rect: ImageCropRect } | null = null
-
-  /** 降采样后仍与底色差异明显的像素才作为候选 */
-  const isCandidate = (lx: number, ly: number): boolean => {
-    const offset = ((y0 + ly) * width + x0 + lx) * 4
-    return Math.abs(pixels[offset] - base.r) + Math.abs(pixels[offset + 1] - base.g) + Math.abs(pixels[offset + 2] - base.b) > threshold
-  }
-
-  for (let sy = 0; sy < windowHeight; sy += 1) {
-    for (let sx = 0; sx < windowWidth; sx += 1) {
-      const start = sy * windowWidth + sx
-      if (visited[start] || !isCandidate(sx, sy)) continue
-      const stack: number[] = [start]
-      visited[start] = 1
-      let area = 0
-      let minX = sx
-      let maxX = sx
-      let minY = sy
-      let maxY = sy
-      let touchesInterior = false
-      const push = (lx: number, ly: number): void => {
-        const index = ly * windowWidth + lx
-        if (visited[index] || !isCandidate(lx, ly)) return
-        visited[index] = 1
-        stack.push(index)
-      }
-      while (stack.length) {
-        const index = stack.pop()!
-        const lx = index % windowWidth
-        const ly = (index - lx) / windowWidth
-        area += 1
-        if (lx < minX) minX = lx
-        if (lx > maxX) maxX = lx
-        if (ly < minY) minY = ly
-        if (ly > maxY) maxY = ly
-        if ((interiorLeft && lx === 0) || (interiorTop && ly === 0)) touchesInterior = true
-        if (lx > 0) push(lx - 1, ly)
-        if (lx < windowWidth - 1) push(lx + 1, ly)
-        if (ly > 0) push(lx, ly - 1)
-        if (ly < windowHeight - 1) push(lx, ly + 1)
-      }
-      if (touchesInterior || area < minArea) continue
-      if (!best || area > best.area) {
-        best = { area, rect: { x: x0 + minX, y: y0 + minY, width: maxX - minX + 1, height: maxY - minY + 1 } }
-      }
-    }
-  }
-  return best
-}
-
-export interface DetectOptions {
-  /** 目标角落；auto（默认）时四个角各扫一次取面积最大者 */
-  corner?: WatermarkCorner | 'auto'
-  /** 色差阈值（曼哈顿距离），低于该值的像素视为背景 */
-  threshold?: number
-}
-
-/**
- * 自动定位角落水印：长边降采样到 ~256px（已足够抑噪，无需再做形态学膨胀）
- * → 逐角在搜索窗内 flood fill 取连通域 → 选面积最大者取包围盒 + padding 映射回图像坐标。
- * 定位不到（水印过淡、无角落水印）时返回 null，由调用方提示手动框选。
- */
-export function detectWatermarkRect(data: ImageData, options: DetectOptions = {}): { rect: ImageCropRect; corner: WatermarkCorner } | null {
-  const threshold = options.threshold ?? 48
-  const { data: small, scale } = downsample(data, DETECT_MAX_SIDE)
-  const edge = sampleEdgeColor(small)
-  const base: Rgb = { r: edge.r, g: edge.g, b: edge.b }
-  const corners: WatermarkCorner[] = options.corner && options.corner !== 'auto' ? [options.corner] : ['se', 'sw', 'ne', 'nw']
-  let best: { area: number; rect: ImageCropRect; corner: WatermarkCorner } | null = null
-  for (const corner of corners) {
-    const found = detectInCorner(small, corner, threshold, base)
-    if (found && (!best || found.area > best.area)) best = { area: found.area, rect: found.rect, corner }
-  }
-  if (!best) return null
-  // 映射回原图坐标并留出余量，保证水印抗锯齿边缘也被 ROI 覆盖
-  const padding = Math.max(2, Math.round(Math.min(data.width, data.height) * 0.01))
-  return {
-    corner: best.corner,
-    rect: clampCropRect({
-      x: best.rect.x / scale - padding,
-      y: best.rect.y / scale - padding,
-      width: best.rect.width / scale + padding * 2,
-      height: best.rect.height / scale + padding * 2,
-    }, data.width, data.height),
-  }
-}
-
 /**
  * 在样板帧上解析出完整参数：底色（手动优先，否则环带中位采样）、水印色（手动优先，否则投影估算）。
  * alpha 模式在投影方向过短时自动退化为蒙版填充，返回的 plan.mode 即实际执行方式。
@@ -474,17 +376,33 @@ export function resolveWatermarkPlan(settings: WatermarkSettings, rect: ImageCro
     threshold: settings.threshold,
     keepNoise: settings.keepNoise && mode === 'patch',
     noise: 0,
+    quality: settings.quality,
   }
   // 噪声幅度只在需要时统计；噪声取坐标哈希值，全帧一致，不引入时域抖动
   if (plan.keepNoise) plan.noise = Math.min(24, ringDeviation(source, area, band, base))
   return { plan, degraded }
 }
 
-/** 按已解析的参数处理一帧画面，返回结果 dataURL；同一份 plan 对同一输入永远得到同一结果 */
+/** 把 guidance 的 ROI 区域整块复制进 target（texture 模式的落地步骤） */
+function copyRegion(target: ImageData, guidance: ImageData, rect: ImageCropRect): void {
+  for (let y = 0; y < rect.height; y += 1) {
+    const rowOffset = ((rect.y + y) * target.width + rect.x) * 4
+    const rowEnd = rowOffset + rect.width * 4
+    target.data.set(guidance.data.subarray(rowOffset, rowEnd), rowOffset)
+  }
+}
+
+/**
+ * 按已解析的参数处理一帧画面，返回结果 dataURL；同一份 plan 对同一输入永远得到同一结果。
+ * texture 模式用 PatchMatch 重建 ROI 后整块替换；其余模式在原位修复。
+ */
 export function applyWatermarkPlan(plan: WatermarkPlan, source: ImageData): string {
   const work = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height)
   const area = clampCropRect(plan.rect, work.width, work.height)
-  if (plan.mode === 'region') {
+  if (area.width <= 0 || area.height <= 0) return imageDataToUrl(work)
+  if (plan.mode === 'texture') {
+    copyRegion(work, patchMatchInpaint(source, area, { quality: plan.quality }), area)
+  } else if (plan.mode === 'region') {
     fillByEdges(work, area, plan.base)
   } else if (plan.mode === 'alpha') {
     if (!recoverAlpha(work, area, plan.base, plan.watermark)) {
