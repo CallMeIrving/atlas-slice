@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { store, loadImage, loadMetaFile, autoDetectFrames } from '@/store/atlas'
-import { workspace, setPage, type WatermarkState } from '@/store/workspace'
+import { workspace, setPage, type LayerSplitState, type WatermarkState } from '@/store/workspace'
 import { modelManager } from '@/store/model-status'
 
 /** 去水印页的状态文案：该页没有数值型进度，用中文状态更直观 */
@@ -12,10 +12,21 @@ const WATERMARK_STATUS: Record<WatermarkState['status'], string> = {
   done: '已生成',
   error: '出错',
 }
+/** 图层拆分页的状态文案：离线时以连接状态优先，避免误以为是拆分本身出错 */
+const LAYER_SPLIT_STATUS: Record<LayerSplitState['status'], string> = {
+  empty: '未导入',
+  ready: '待拆分',
+  processing: '拆分中',
+  done: '已拆分',
+  error: '出错',
+}
 /** 非精灵图页的状态文案，各页展示自己的进度态 */
 const pageStatus = computed(() => {
   if (workspace.page === 'matte') return workspace.matte.status
   if (workspace.page === 'video') return `${workspace.video.frames.length} 帧`
+  if (workspace.page === 'layersplit') {
+    return workspace.layersplit.serverOnline ? LAYER_SPLIT_STATUS[workspace.layersplit.status] : '服务离线'
+  }
   return WATERMARK_STATUS[workspace.watermark.status]
 })
 
@@ -51,6 +62,7 @@ defineExpose({})
       <button class="nav-item" :class="{ active: workspace.page === 'matte' }" @click="setPage('matte')">抠图 <span v-if="workspace.matte.status === 'done'" class="nav-dot">●</span></button>
       <button class="nav-item" :class="{ active: workspace.page === 'video' }" @click="setPage('video')">视频帧 <span v-if="workspace.video.frames.length" class="nav-count">{{ workspace.video.frames.length }}</span></button>
       <button class="nav-item" :class="{ active: workspace.page === 'watermark' }" @click="setPage('watermark')">去水印 <span v-if="workspace.watermark.status === 'done'" class="nav-dot">●</span></button>
+      <button class="nav-item" :class="{ active: workspace.page === 'layersplit' }" @click="setPage('layersplit')">图层拆分 <span v-if="workspace.layersplit.status === 'done'" class="nav-dot">●</span></button>
     </nav>
     <div class="topbar-actions">
       <input ref="imgInput" type="file" accept="image/*" hidden @change="onImage" />

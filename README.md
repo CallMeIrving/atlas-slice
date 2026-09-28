@@ -2,7 +2,11 @@
 
 面向游戏开发 / 美术人员的**图集切片工具**：把游戏图集（Sprite Atlas / Spritesheet）按元数据、透明边缘或手动框选切分为独立小图，并支持批量导出、动画预览与配置预设。
 
-纯本地 Web 应用，所有图片处理都在浏览器内完成，**不上传任何服务器**，素材零泄露风险。
+纯本地 Web 应用。素材处理分三种情况，都是**本机内完成，素材不会被上传到任何外部服务器**：
+
+1. **浏览器内处理（默认）**：图集切片、抠图、抽帧、去水印等全部在页面里用 Canvas / WebAssembly 完成；
+2. **本机回环服务（可选）**：图层拆分需要开放词表检测 + 精细分割这类大模型，由项目内的 Python 服务（`server/`）在 `127.0.0.1` 上推理，只接收本机发出的请求；
+3. **模型权重下载**：仅在下载抠图/拆分模型权重时访问 HuggingFace 或镜像站，业务素材不参与。
 
 ## 功能特性
 
@@ -58,6 +62,8 @@ pnpm run dev                  # 启动开发服务器（默认 http://localhost:
 pnpm run build                # 类型检查 + 生产构建，产物在 dist/
 pnpm run preview              # 本地预览生产构建
 pnpm run models:download      # 下载抠图模型到 public/models/（可选，约 640MB）
+pnpm run server:dev           # 启动图层拆分的本地 Python 服务（可选，需先按 server/README.md 准备环境）
+pnpm run server:models        # 下载图层拆分模型的权重到 server/models/（可选，约 1.5GB）
 ```
 
 ## 抠图模型下载
@@ -161,6 +167,49 @@ public/models/
 
 RMBG-1.4 还需要遵守 [BRIA 模型许可证](https://huggingface.co/briaai/RMBG-1.4/tree/main) 的使用限制。
 
+## 图层拆分（本地 Python 服务）
+
+「图层拆分」页把一张游戏 UI 截图（商店面板 / 背包 / HUD 等）拆成**可独立复用的图层**：自动识别按钮、图标、文本、面板、边框、装饰、进度条，逐元素抠出带 alpha 的 PNG，并标注类别与层序，可勾选、重命名、调序、合并后导出。
+
+这一页依赖 `server/` 下的 Python 服务，它不是必需的：不做图层拆分时无需启动它。
+
+### 启动服务
+
+```bash
+cd server
+python3 -m venv .venv && source .venv/bin/activate
+pip install -U pip && pip install -r requirements.txt
+python scripts/doctor.py     # 检查 torch 版本、mps 可用性与权重就位情况
+python scripts/download_models.py --host=https://hf-mirror.com   # 权重约 1.5GB，可中断续传
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+也可以回到项目根目录用快捷脚本：
+
+```bash
+pnpm run server:models       # 等价于 download_models.py
+pnpm run server:dev          # 等价于 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+服务在 `127.0.0.1:8000` 上提供 HTTP API（`/api/health`、`/api/models`、`/api/layers/...`），开发环境由 Vite 代理 `/layer-api` 转发，因此页面用相对路径调用，不需要处理跨域。生产构建没有代理，页面上的「服务地址」输入框会回落到 `http://127.0.0.1:8000`。
+
+> **安全边界**：服务只监听 `127.0.0.1`，**不要改成 `--host 0.0.0.0`**。素材只在本机的浏览器与 Python 进程之间流转，临时产物写在 `server/tmp/` 并在到期后清理。
+
+### 模型权重
+
+| 角色 | 仓库 | 约体积 | 落地路径 |
+|---|---|---|---|
+| 检测（detect） | `IDEA-Research/grounding-dino-tiny` | ~694MB | `server/models/IDEA-Research/grounding-dino-tiny/` |
+| 分割（segment） | `facebook/sam-vit-base` | ~375MB | `server/models/facebook/sam-vit-base/` |
+| 文本（ocr，可选） | `microsoft/Florence-2-base-ft` | ~464MB | `server/models/microsoft/Florence-2-base-ft/` |
+
+权重默认从 `hf-mirror.com` 下载，可用 `--host=` 或 `MODEL_HOST` 换成 `https://huggingface.co`。权重缺失时服务会返回 `409 MODEL_MISSING` 并给出下载命令，**不会静默降级**成半成品。推理设备按 `cuda > mps > cpu` 自动探测（Apple Silicon 走 MPS，一律 fp32），可用 `--device` 或环境变量 `LAYER_SPLIT_DEVICE` 覆盖。检测器与分割器分阶段互斥驻留，峰值内存约 3-4GB；推理长边默认 1536，坐标会映射回原图。
+
+### 两条导出路径
+
+- **客户端 ZIP**（主按钮）：尊重列表里的改名、隐藏、层序与合并结果，命名走统一的命名模板；
+- **服务端整包**（次要按钮）：按原始类别命名，并附带 `atlas.json`（TexturePacker 哈希格式），可直接导入「精灵图」页按 `frame` 反查每个元素。
+
 ## 使用流程
 
 1. 点「导入图片」载入图集，工具会自动识别透明边缘生成帧
@@ -222,6 +271,12 @@ scripts/
   gen-test-atlas.mjs     生成测试图集（图片 + 4 种元数据）
   download-models.mjs    下载抠图模型到 public/models/
 public/models/           本地抠图权重（被 .gitignore 忽略，用脚本下载）
+server/                  图层拆分的本地 Python 服务（FastAPI + PyTorch，只监听 127.0.0.1）
+  app/                   配置、路由、作业系统、检测/分割/后处理管线
+  models/                拆分模型权重（被 .gitignore 忽略，用 download_models.py 落地）
+  scripts/               download_models.py（下权重）· doctor.py（环境自检）
+  tests/                 pytest 用例（免权重用例默认全跑，真实推理用例见 LAYER_SPLIT_TEST_MODELS）
+  tmp/jobs/              运行期产物（被 .gitignore 忽略，按 TTL 清理）
 test-fixtures/           生成的测试图集产物
 ```
 

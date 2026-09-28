@@ -2,7 +2,7 @@ import { reactive } from 'vue'
 import type { ShadowMode } from '@/core/color-key'
 import type { ImageCropRect } from '@/core/crop'
 
-export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark'
+export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit'
 
 export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'rmbg'
 
@@ -125,6 +125,124 @@ export interface WatermarkState {
   settings: WatermarkSettings
 }
 
+/** 图层类别：与本地 Python 服务的 LayerCategory 枚举一致（category 决定同深度时的层序） */
+export type LayerCategory =
+  | 'button'
+  | 'icon'
+  | 'text'
+  | 'panel'
+  | 'border'
+  | 'decoration'
+  | 'progress'
+  | 'background'
+  | 'other'
+
+/** 一类要拆的 UI 元素：prompt 必须英文（模型词表决定），label 是界面文案 */
+export interface LayerClassSpec {
+  label: string
+  prompt: string
+  category: LayerCategory
+  /** 编辑器里的启用开关：false 表示保留在列表但不提交给服务端（undefined 视为启用） */
+  enabled?: boolean
+}
+
+export type LayerDetector = 'grounding-dino' | 'florence2' | 'auto'
+export type LayerSegmenter = 'sam' | 'none'
+export type LayerBackgroundMode = 'none' | 'erase' | 'inpaint'
+export type LayerDevice = 'auto' | 'cuda' | 'mps' | 'cpu'
+
+export interface LayerSplitSettings {
+  classes: LayerClassSpec[]
+  detector: LayerDetector
+  segmenter: LayerSegmenter
+  ocr: boolean
+  boxThreshold: number
+  textThreshold: number
+  nmsIou: number
+  minArea: number
+  maxLayers: number
+  maxSide: number
+  background: LayerBackgroundMode
+  exclusiveLayers: boolean
+  feather: number
+  device: LayerDevice
+}
+
+/** 一个拆分结果图层；列表按 z 降序展示（从上到下 = 前景到背景） */
+export interface SplitLayer {
+  id: string
+  name: string
+  label: string
+  category: LayerCategory
+  score: number
+  bbox: { x: number; y: number; w: number; h: number }
+  /** 内容矩形：PNG 已按它裁切，拼回原位时用它作为绘制坐标 */
+  alphaBbox: { x: number; y: number; w: number; h: number }
+  area: number
+  z: number
+  parentId: string | null
+  source: string
+  text: string | null
+  /** 服务端图层是绝对 http 地址，客户端合并层是 blob 地址（重置时需 revoke） */
+  pngUrl: string
+  visible: boolean
+  /** 由「合并选中」在客户端合成，不受服务端命名约束 */
+  merged: boolean
+}
+
+/** 背景层（method 对应 background 策略）；默认不参与合成与导出 */
+export interface SplitLayerBackground {
+  id: string
+  method: string
+  pngUrl: string
+  visible: boolean
+}
+
+export interface LayerSplitState {
+  fileName: string
+  /** 本地导入图像的 blob URL：既作为上传源，也作为导出 ZIP 里的 source.png */
+  sourceUrl: string
+  jobId: string
+  status: 'empty' | 'ready' | 'processing' | 'done' | 'error'
+  error: string
+  image: { width: number; height: number; scale: number } | null
+  layers: SplitLayer[]
+  background: SplitLayerBackground | null
+  counts: Record<string, number>
+  warnings: string[]
+  settings: LayerSplitSettings
+  /** 本地服务是否可达，顶部栏与页面共用这一份状态 */
+  serverOnline: boolean
+  serverDevice: string
+}
+
+export const DEFAULT_LAYER_CLASSES: LayerClassSpec[] = [
+  { label: '按钮', prompt: 'button', category: 'button' },
+  { label: '图标', prompt: 'icon', category: 'icon' },
+  { label: '文本', prompt: 'text', category: 'text' },
+  { label: '面板', prompt: 'panel', category: 'panel' },
+  { label: '边框', prompt: 'border', category: 'border' },
+  { label: '装饰', prompt: 'decoration', category: 'decoration' },
+  { label: '进度条', prompt: 'progress bar', category: 'progress' },
+]
+
+export const DEFAULT_LAYER_SETTINGS: LayerSplitSettings = {
+  classes: DEFAULT_LAYER_CLASSES,
+  detector: 'grounding-dino',
+  segmenter: 'sam',
+  ocr: true,
+  boxThreshold: 0.30,
+  textThreshold: 0.25,
+  nmsIou: 0.55,
+  minArea: 64,
+  maxLayers: 80,
+  maxSide: 1536,
+  background: 'inpaint',
+  exclusiveLayers: false,
+  feather: 1,
+  device: 'auto',
+}
+
 /** 帧的干净原图：作为抠图的输入，保证抠图在无水印画面上进行 */
 export function frameCleanUrl(frame: VideoFrame): string {
   return frame.watermarkUrl ?? frame.url
@@ -159,6 +277,11 @@ export const workspace = reactive({
     source: 'image', fileName: '', sourceUrl: '', resultUrl: '', frameId: '', status: 'empty', error: '', roi: null,
     settings: { mode: 'alpha', watermarkColor: '#ffffff', threshold: 48, baseColor: '', keepNoise: true, quality: 1 } as WatermarkSettings,
   } as WatermarkState,
+  layersplit: {
+    fileName: '', sourceUrl: '', jobId: '', status: 'empty', error: '', image: null,
+    layers: [], background: null, counts: {}, warnings: [], serverOnline: false, serverDevice: '',
+    settings: { ...DEFAULT_LAYER_SETTINGS, classes: DEFAULT_LAYER_CLASSES.map((item) => ({ ...item })) },
+  } as LayerSplitState,
 })
 
 const SETTINGS_KEY = 'atlas-slice:media-settings'
@@ -166,11 +289,41 @@ const SETTINGS_KEY = 'atlas-slice:media-settings'
 const MATTE_MODES: MatteMode[] = ['auto', 'color', 'solid', 'imgly', 'rmbg']
 /** 去水印支持的修复方式，同样用于收敛本地设置 */
 const WATERMARK_MODES: WatermarkMode[] = ['patch', 'alpha', 'region', 'texture']
+/** 图层拆分支持的类别与选项，用于丢弃本地设置里已下线的取值 */
+const LAYER_CATEGORIES: LayerCategory[] = ['button', 'icon', 'text', 'panel', 'border', 'decoration', 'progress', 'background', 'other']
+const LAYER_DETECTORS: LayerDetector[] = ['grounding-dino', 'florence2', 'auto']
+const LAYER_SEGMENTERS: LayerSegmenter[] = ['sam', 'none']
+const LAYER_BACKGROUNDS: LayerBackgroundMode[] = ['none', 'erase', 'inpaint']
+const LAYER_DEVICES: LayerDevice[] = ['auto', 'cuda', 'mps', 'cpu']
+
+/**
+ * 收敛本地保存的图层拆分设置。
+ * 类别列表是用户可增删的：未知 category 直接丢弃，整份为空时回落到默认，避免出现无类可拆的空列表。
+ */
+function convergeLayerSettings(saved: Partial<LayerSplitSettings> | undefined): LayerSplitSettings {
+  const base: LayerSplitSettings = { ...DEFAULT_LAYER_SETTINGS, classes: DEFAULT_LAYER_CLASSES.map((item) => ({ ...item })) }
+  if (!saved) return base
+  const { classes, ...rest } = saved
+  const merged = { ...base, ...rest }
+  if (Array.isArray(classes)) {
+    const kept = classes
+      .filter((item): item is LayerClassSpec => Boolean(item?.label?.trim() && item?.prompt?.trim()))
+      .filter((item) => LAYER_CATEGORIES.includes(item.category))
+      .map((item) => ({ label: item.label, prompt: item.prompt, category: item.category, enabled: item.enabled !== false }))
+    merged.classes = kept.length ? kept : base.classes
+  }
+  if (!LAYER_DETECTORS.includes(merged.detector)) merged.detector = base.detector
+  if (!LAYER_SEGMENTERS.includes(merged.segmenter)) merged.segmenter = base.segmenter
+  if (!LAYER_BACKGROUNDS.includes(merged.background)) merged.background = base.background
+  if (!LAYER_DEVICES.includes(merged.device)) merged.device = base.device
+  return merged
+}
 try {
   const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null') as {
     matte?: Partial<MatteState>
     video?: Partial<VideoState>
     watermark?: { settings?: Partial<WatermarkSettings> }
+    layersplit?: { settings?: Partial<LayerSplitSettings> }
   } | null
   if (saved?.matte) Object.assign(workspace.matte, saved.matte)
   // 旧版本可能存过已经移除的处理方式，直接收敛到默认值，避免下拉框出现空选项
@@ -179,6 +332,8 @@ try {
   // 去水印只持久化参数（ROI 与来源不落盘，重新打开时按新画面重新定位）
   if (saved?.watermark?.settings) Object.assign(workspace.watermark.settings, saved.watermark.settings)
   if (!WATERMARK_MODES.includes(workspace.watermark.settings.mode)) workspace.watermark.settings.mode = 'alpha'
+  // 图层拆分同样只持久化设置（结果与服务端作业一一对应，不跨会话保留）
+  workspace.layersplit.settings = convergeLayerSettings(saved?.layersplit?.settings)
 } catch { /* ignore invalid local settings */ }
 
 export function persistMediaSettings(): void {
@@ -186,6 +341,7 @@ export function persistMediaSettings(): void {
     matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, rmbgModelId: workspace.matte.rmbgModelId },
     video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte }, pipeline: { ...workspace.video.pipeline }, },
     watermark: { settings: { ...workspace.watermark.settings } },
+    layersplit: { settings: { ...workspace.layersplit.settings, classes: workspace.layersplit.settings.classes.map((item) => ({ ...item })) } },
   }))
 }
 
@@ -224,4 +380,18 @@ export function startWatermarkFromFrame(frameId: string): void {
     resultUrl: '', status: 'ready', error: '', roi: null,
   })
   setPage('watermark')
+}
+
+/**
+ * 重置图层拆分页：释放本地来源与客户端合并层的 blob URL，清空结果（设置保留）。
+ * 服务端图层 PNG 是 http 地址，不能 revoke；只有合并层与来源是本地 blob。
+ */
+export function resetLayerSplit(): void {
+  const split = workspace.layersplit
+  if (split.sourceUrl) URL.revokeObjectURL(split.sourceUrl)
+  split.layers.filter((layer) => layer.merged).forEach((layer) => URL.revokeObjectURL(layer.pngUrl))
+  Object.assign(split, {
+    fileName: '', sourceUrl: '', jobId: '', status: 'empty', error: '',
+    image: null, layers: [], background: null, counts: {}, warnings: [],
+  })
 }

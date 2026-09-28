@@ -31,6 +31,7 @@ import {
   type ModelState,
 } from '@/store/model-status'
 import { workspace } from '@/store/workspace'
+import ServerModelCard from '@/components/ServerModelCard.vue'
 
 /**
  * 全局「模型管理」弹窗。
@@ -285,6 +286,9 @@ onMounted(() => {
             </p>
           </div>
         </article>
+
+        <!-- 本地 Python 服务：运行时与下载器都和上面的浏览器引擎不同，因此单列一张卡片 -->
+        <ServerModelCard />
       </div>
 
       <div class="modal-foot">

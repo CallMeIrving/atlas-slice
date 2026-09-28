@@ -36,7 +36,17 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    watch: {
+      // 本地 Python 服务的权重有数 GB，放在项目根下会拖慢 HMR，直接排除
+      ignored: ['**/server/**'],
+    },
     proxy: {
+      // dev 环境把图层拆分请求转发到本机 Python 服务，前端用相对路径 → 零 CORS 预检
+      '/layer-api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/layer-api/, ''),
+      },
       // dev 环境将 hf-mirror 模型请求转发到国内镜像，规避浏览器直连外网限制
       // 前缀用 /hf-mirror2：与旧 /hf-mirror 缓存隔离，避免命中陈旧缓存（调试期遗留）
       '/hf-mirror2': {

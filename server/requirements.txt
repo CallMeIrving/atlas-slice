@@ -1,0 +1,16 @@
+# 图层拆分本地推理服务 —— 核心依赖
+# 目标环境：macOS arm64 + Python 3.10（Apple Silicon，torch 走默认 PyPI wheel，无需 CUDA index）
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+pydantic==2.9.2
+pydantic-settings==2.6.1
+pillow==11.0.0
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+torch==2.5.1
+torchvision==0.20.1
+transformers==4.46.3
+accelerate==1.1.1
+safetensors==0.4.5
+huggingface_hub==0.26.2

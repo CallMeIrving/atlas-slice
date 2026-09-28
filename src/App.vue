@@ -8,6 +8,7 @@ import { store, dismissError } from '@/store/atlas'
 import MattePage from '@/components/MattePage.vue'
 import VideoPage from '@/components/VideoPage.vue'
 import WatermarkPage from '@/components/WatermarkPage.vue'
+import LayerSplitPage from '@/components/LayerSplitPage.vue'
 import ModelManagerModal from '@/components/ModelManagerModal.vue'
 import { modelManager } from '@/store/model-status'
 import { workspace } from '@/store/workspace'
@@ -35,7 +36,10 @@ const progressPct = () => {
     <PreviewPlayer v-if="workspace.page === 'atlas'" />
     <MattePage v-else-if="workspace.page === 'matte'" />
     <VideoPage v-else-if="workspace.page === 'video'" />
-    <WatermarkPage v-else />
+    <WatermarkPage v-else-if="workspace.page === 'watermark'" />
+    <LayerSplitPage v-else-if="workspace.page === 'layersplit'" />
+    <!-- 兜底：页面枚举与分支不同步时也不会整屏空白 -->
+    <div v-else class="page-fallback">未知页面</div>
 
     <ModelManagerModal v-if="modelManager.open" @close="modelManager.open = false" />
 
@@ -84,5 +88,10 @@ const progressPct = () => {
 
 .toast-close:hover {
   opacity: 1;
+}
+
+.page-fallback {
+  padding: 24px;
+  color: var(--text-faint);
 }
 </style>

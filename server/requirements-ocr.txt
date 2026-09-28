@@ -1,0 +1,4 @@
+# 可选：启用 Florence-2 做 OCR / 开放词表检测时才需要
+-r requirements.txt
+timm==1.0.12
+einops==0.8.0
