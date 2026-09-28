@@ -322,8 +322,8 @@ async function pollJob(jobId: string, handlers: JobHandlers, stageDriven = true)
 }
 
 /** 界面设置 → 后端参数（camelCase → snake_case，并剔除未启用的类别） */
-export function toServerParams(settings: LayerSplitSettings): Record<string, unknown> {
-  return {
+export function toServerParams(settings: LayerSplitSettings, overrideBoxes?: UserBox[]): Record<string, unknown> {
+  const params: Record<string, unknown> = {
     classes: settings.classes
       .filter((item) => item.enabled !== false)
       .map((item) => ({ label: item.label, prompt: item.prompt, category: item.category })),
@@ -341,6 +341,52 @@ export function toServerParams(settings: LayerSplitSettings): Record<string, unk
     feather: settings.feather,
     device: settings.device,
   }
+  if (overrideBoxes && overrideBoxes.length) {
+    params.override_boxes = overrideBoxes
+  }
+  return params
+}
+
+/** 用户框选区域（图像像素坐标） */
+export interface UserBox {
+  x: number
+  y: number
+  w: number
+  h: number
+  label: string
+  category: string
+}
+
+/** 检测端点返回的单个框 */
+export interface DetectBox {
+  x: number
+  y: number
+  w: number
+  h: number
+  label: string
+  category: string
+  score: number
+}
+
+/** 检测端点返回 */
+export interface DetectResult {
+  boxes: DetectBox[]
+  width: number
+  height: number
+  scale: number
+  warnings: string[]
+}
+
+/** 仅检测（不分割），供前端预检和编辑框选 */
+export async function detectBoxes(
+  image: Blob,
+  fileName: string,
+  settings: LayerSplitSettings,
+): Promise<DetectResult> {
+  const form = new FormData()
+  form.append('file', image, fileName || 'image.png')
+  form.append('params', JSON.stringify(toServerParams(settings)))
+  return (await request('/api/layers/detect', { method: 'POST', body: form })) as unknown as DetectResult
 }
 
 /** 提交拆分并轮询到终态 */
@@ -349,10 +395,11 @@ export async function startSplit(
   fileName: string,
   settings: LayerSplitSettings,
   handlers: JobHandlers = {},
+  overrideBoxes?: UserBox[],
 ): Promise<ServerJob> {
   const form = new FormData()
   form.append('file', image, fileName || 'image.png')
-  form.append('params', JSON.stringify(toServerParams(settings)))
+  form.append('params', JSON.stringify(toServerParams(settings, overrideBoxes)))
   const accepted = (await request('/api/layers/split', { method: 'POST', body: form })) as { job_id: string }
   return pollJob(accepted.job_id, handlers)
 }

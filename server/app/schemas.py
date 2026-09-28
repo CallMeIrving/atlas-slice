@@ -64,6 +64,8 @@ class SplitParams(BaseModel):
     background: BackgroundMode = "inpaint"
     exclusive_layers: bool = False
     feather: int = Field(default=1, ge=0, le=8)
+    """用户编辑后的框选区域；存在时跳过检测，直接用这些框执行分割和导出"""
+    override_boxes: list["UserBox"] | None = None
 
     @field_validator("classes")
     @classmethod
@@ -73,11 +75,44 @@ class SplitParams(BaseModel):
         return value
 
 
+class UserBox(BaseModel):
+    """用户框选或编辑后的检测区域（图像像素坐标）。"""
+
+    x: int = Field(ge=0)
+    y: int = Field(ge=0)
+    w: int = Field(ge=1)
+    h: int = Field(ge=1)
+    label: str = ""
+    category: LayerCategory = "other"
+
+
 class SplitAccepted(BaseModel):
     job_id: str
     status: str
     created_at: str
     position: int = 0
+
+
+class DetectBoxOut(BaseModel):
+    """单个检测结果（仅检测，未分割）。"""
+
+    x: int
+    y: int
+    w: int
+    h: int
+    label: str
+    category: str
+    score: float
+
+
+class DetectResultOut(BaseModel):
+    """检测端点的同步响应：返回框列表，不创建作业。"""
+
+    boxes: list[DetectBoxOut]
+    width: int
+    height: int
+    scale: float = 1.0
+    warnings: list[str] = Field(default_factory=list)
 
 
 class StageStat(BaseModel):

@@ -27,7 +27,7 @@ from ..models.registry import MODEL_FOR_KEY, ROLE_LABELS, model_by_id
 from ..runtime.jobs import JobHandle, JobManager, JobRecord
 from ..runtime.model_manager import ModelManager
 from ..runtime.storage import safe_job_id, safe_layer_id
-from ..schemas import JobStatusOut, LayerListOut, SplitAccepted, SplitParams
+from ..schemas import DetectResultOut, JobStatusOut, LayerListOut, SplitAccepted, SplitParams
 
 router = APIRouter(prefix="/layers", tags=["layers"])
 
@@ -167,6 +167,46 @@ async def start_split(
 
     record = jobs.submit(kind="split", runner=runner, message="已排队")
     return SplitAccepted(**record.accepted())
+
+
+@router.post("/detect", response_model=DetectResultOut)
+async def start_detect(
+    file: UploadFile = File(..., description="待检测的 UI 截图"),
+    params: str = Form(..., description="SplitParams 的 JSON 字符串（只用 classes/detector/box_threshold/text_threshold/max_side）"),
+    settings: Settings = Depends(get_settings_dep),
+    models: ModelManager = Depends(get_model_manager),
+) -> DetectResultOut:
+    """仅检测不分割：返回框列表，供前端预检和编辑后提交拆分。"""
+    spec = _parse_params(params)
+    _assert_image(file)
+    payload = await file.read()
+    if len(payload) > settings.max_upload_bytes:
+        raise payload_too_large(settings.max_upload_bytes, len(payload))
+    if not payload:
+        raise invalid_params("上传内容为空")
+    # detect 端点只需要检测器，不需要 segmenter
+    detect_keys: list[str] = []
+    if spec.detector == "florence2":
+        detect_keys.append("detect:florence2")
+    elif spec.detector == "grounding-dino":
+        detect_keys.append("detect")
+    elif not (_installed(models, "detect") or _installed(models, "detect:florence2")):
+        detect_keys.append("detect")
+    for key in detect_keys:
+        model = model_by_id(MODEL_FOR_KEY[key])
+        if model is None or models.is_installed(model):
+            continue
+        raise model_missing(model.repo_id, ROLE_LABELS.get(key, key), models.missing(model))
+
+    from ..pipeline.runner import detect_only  # noqa: PLC0415
+
+    result = detect_only(
+        image_bytes=payload,
+        params=spec,
+        models=models,
+        settings=settings,
+    )
+    return DetectResultOut(**result)
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusOut)

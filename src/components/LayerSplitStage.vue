@@ -18,6 +18,8 @@ const props = defineProps<{
   height: number
 }>()
 
+const emit = defineEmits<{ select: [id: string] }>()
+
 const canvas = ref<HTMLCanvasElement>()
 const error = ref('')
 /** 图像缓存：同一 url 只解码一次，反复勾选/换序时不会重复请求 */
@@ -51,6 +53,31 @@ async function image(url: string): Promise<HTMLImageElement> {
   const loaded = await loadImage(url, '图层加载失败')
   cache.set(url, loaded)
   return loaded
+}
+
+/**
+ * 点击 canvas 选中图层：把视口坐标换算为图像像素坐标，
+ * 找到 alphaBbox 包含该点的最顶层可见图层（z 最大），emit select。
+ */
+function onClick(event: MouseEvent): void {
+  const target = canvas.value
+  if (!target || !props.width || !props.height) return
+  const rect = target.getBoundingClientRect()
+  if (!rect.width || !rect.height) return
+  const scaleX = props.width / rect.width
+  const scaleY = props.height / rect.height
+  const px = Math.round((event.clientX - rect.left) * scaleX)
+  const py = Math.round((event.clientY - rect.top) * scaleY)
+
+  // 按 z 降序（前景在前）找第一个命中的可见图层
+  const visible = props.layers.filter((l) => l.visible).sort((a, b) => b.z - a.z)
+  for (const layer of visible) {
+    const { x, y, w, h } = layer.alphaBbox
+    if (px >= x && px <= x + w && py >= y && py <= y + h) {
+      emit('select', layer.id)
+      return
+    }
+  }
 }
 
 async function draw(): Promise<void> {
@@ -103,7 +130,7 @@ watch(
 
 <template>
   <figure class="ls-stage">
-    <canvas ref="canvas"></canvas>
+    <canvas ref="canvas" @click="onClick"></canvas>
     <figcaption v-if="error" class="faint">{{ error }}</figcaption>
   </figure>
 </template>

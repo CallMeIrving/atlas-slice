@@ -73,46 +73,53 @@ class GroundingDinoDetector:
         box_threshold: float,
         text_threshold: float,
     ) -> list[Detection]:
-        prompt, mapping = build_prompt(classes)
-        if not prompt:
-            return []
-        inputs = self._processor(images=image, text=prompt, return_tensors="pt").to(self._device)
-        with self._torch.no_grad():
-            outputs = self._model(**inputs)
-        results = self._processor.post_process_grounded_object_detection(
-            outputs,
-            inputs["input_ids"],
-            box_threshold=box_threshold,
-            text_threshold=text_threshold,
-            target_sizes=[image.size[::-1]],
-        )
-        if not results:
-            return []
-        result = results[0]
-        scores = result.get("scores")
-        boxes = result.get("boxes")
-        labels = result.get("labels")
-        if labels is None:
-            # 4.46 起 labels 取代了旧的 text_labels，这里兼容两种键名
-            labels = result.get("text_labels")
-        if scores is None or boxes is None or labels is None:
-            return []
+        """逐类检测再合并。
 
+        GroundingDINO 的文本编码器在一次塞入 4+ 个差异较大的概念时会注意力溃散，
+        典型表现是「不报错但返回 0 个框」。逐类跑能让每个 prompt 独占模型的文本通道，
+        代价是推理次数 ×类别数（MPS 上单类约 1-2 秒，可接受）。
+        """
         detections: list[Detection] = []
-        for score, box, label in zip(scores.tolist(), boxes.tolist(), list(labels)):
-            spec = match_class(str(label), mapping)
-            if spec is None:
+        for spec in classes:
+            prompt, mapping = build_prompt([spec])
+            if not prompt:
                 continue
-            x1, y1, x2, y2 = (int(round(v)) for v in box)
-            if x2 - x1 < 1 or y2 - y1 < 1:
-                continue
-            detections.append(
-                Detection(
-                    label=str(spec.get("label") or label),
-                    prompt=str(spec.get("prompt") or label),
-                    category=str(spec.get("category") or "other"),
-                    score=float(score),
-                    box=Box((x1, y1, x2, y2)),
-                )
+            inputs = self._processor(images=image, text=prompt, return_tensors="pt").to(self._device)
+            with self._torch.no_grad():
+                outputs = self._model(**inputs)
+            results = self._processor.post_process_grounded_object_detection(
+                outputs,
+                inputs["input_ids"],
+                box_threshold=box_threshold,
+                text_threshold=text_threshold,
+                target_sizes=[image.size[::-1]],
             )
+            if not results:
+                continue
+            result = results[0]
+            scores = result.get("scores")
+            boxes = result.get("boxes")
+            labels = result.get("labels")
+            if labels is None:
+                # 4.46 起 labels 取代了旧的 text_labels，这里兼容两种键名
+                labels = result.get("text_labels")
+            if scores is None or boxes is None or labels is None:
+                continue
+
+            for score, box, label in zip(scores.tolist(), boxes.tolist(), list(labels)):
+                matched = match_class(str(label), mapping)
+                if matched is None:
+                    continue
+                x1, y1, x2, y2 = (int(round(v)) for v in box)
+                if x2 - x1 < 1 or y2 - y1 < 1:
+                    continue
+                detections.append(
+                    Detection(
+                        label=str(matched.get("label") or label),
+                        prompt=str(matched.get("prompt") or label),
+                        category=str(matched.get("category") or "other"),
+                        score=float(score),
+                        box=Box((x1, y1, x2, y2)),
+                    )
+                )
         return detections

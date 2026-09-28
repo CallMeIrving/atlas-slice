@@ -104,6 +104,77 @@ def _resolve_detector_key(choice: str, models: ModelManager, warnings: list[str]
     return "detect"
 
 
+def detect_only(
+    *,
+    image_bytes: bytes,
+    params: Any,
+    models: ModelManager,
+    settings: Settings,
+    progress: ProgressFn | None = None,
+    check_cancel: CancelFn | None = None,
+) -> dict[str, Any]:
+    """仅执行检测阶段，返回框列表（不分割、不导出）。
+
+    供 ``POST /api/layers/detect`` 同步调用，让用户在拆分前预检和编辑框选区域。
+    """
+    report = progress or _noop_progress
+    cancelled = check_cancel or _never_cancel
+    warnings: list[str] = []
+
+    report("detect", 0.02, "正在解析图片…")
+    image = decode_image(image_bytes)
+    width, height = image.size
+    if max(width, height) > settings.max_side_hard:
+        raise bad_image(
+            f"图片过大：{width}×{height}，硬上限为 {settings.max_side_hard}px",
+            {"width": width, "height": height, "max_side": settings.max_side_hard},
+        )
+
+    max_side = min(int(params.max_side), settings.max_side_hard)
+    scale = min(1.0, max_side / max(width, height))
+    work = image if scale >= 1.0 else image.resize(
+        (max(1, round(width * scale)), max(1, round(height * scale))), Image.LANCZOS
+    )
+    _check(cancelled)
+
+    classes = [spec.model_dump() for spec in params.classes]
+    detect_key = _resolve_detector_key(params.detector, models, warnings)
+    warm = models.is_loaded(detect_key)
+    report("detect", 0.1, "正在检测 UI 元素…" if warm else "首次加载检测模型，约 20-40 秒…")
+    detector = models.require(detect_key)
+    detections: list[Detection] = detector.detect(
+        work, classes, params.box_threshold, params.text_threshold
+    )
+    if not detections:
+        warnings.append(
+            "检测器没有返回任何元素。请确认类别 prompt 为英文小写，且各类之间以句点分隔。"
+        )
+    max_layers = min(int(params.max_layers), settings.max_layers_hard)
+    detections = detections[: max_layers * 2]
+    report("detect", 1.0, f"检测到 {len(detections)} 个候选")
+    _check(cancelled)
+
+    # 把工作分辨率坐标映射回原图坐标
+    boxes_out = []
+    for det in detections:
+        x1, y1, x2, y2 = det.box
+        if scale < 1.0:
+            x1, y1, x2, y2 = scale_box((x1, y1, x2, y2), 1.0 / scale)
+        x1, y1, x2, y2 = clamp_box((x1, y1, x2, y2), width, height)
+        boxes_out.append({
+            "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1,
+            "label": det.label, "category": det.category, "score": det.score,
+        })
+
+    return {
+        "boxes": boxes_out,
+        "width": width,
+        "height": height,
+        "scale": round(scale, 4),
+        "warnings": warnings,
+    }
+
+
 def run_pipeline(
     *,
     job_id: str,
@@ -139,19 +210,35 @@ def run_pipeline(
 
     # ---------- detect ----------
     classes = [spec.model_dump() for spec in params.classes]
-    detect_key = _resolve_detector_key(params.detector, models, warnings)
-    warm = models.is_loaded(detect_key)
-    report("detect", 0.1, "正在检测 UI 元素…" if warm else "首次加载检测模型，约 20-40 秒…")
-    detector = models.require(detect_key)
-    detections: list[Detection] = detector.detect(
-        work, classes, params.box_threshold, params.text_threshold
-    )
-    if not detections:
-        warnings.append(
-            "检测器没有返回任何元素。请确认类别 prompt 为英文小写，且各类之间以句点分隔。"
+    override = getattr(params, "override_boxes", None)
+    if override:
+        # 用户已在框选编辑器中确认了区域，跳过检测直接用用户框
+        scale_back = 1.0 / scale if scale < 1.0 else 1.0
+        detections = [
+            Detection(
+                label=b.label or b.category,
+                prompt=b.label or b.category,
+                category=b.category,
+                score=1.0,
+                box=clamp_box(scale_box((b.x, b.y, b.x + b.w, b.y + b.h), scale), work.width, work.height),
+            )
+            for b in override
+        ]
+        report("detect", 1.0, f"使用 {len(detections)} 个用户框选区域")
+    else:
+        detect_key = _resolve_detector_key(params.detector, models, warnings)
+        warm = models.is_loaded(detect_key)
+        report("detect", 0.1, "正在检测 UI 元素…" if warm else "首次加载检测模型，约 20-40 秒…")
+        detector = models.require(detect_key)
+        detections = detector.detect(
+            work, classes, params.box_threshold, params.text_threshold
         )
-    detections = detections[: max_layers * 2]
-    report("detect", 1.0, f"检测到 {len(detections)} 个候选")
+        if not detections:
+            warnings.append(
+                "检测器没有返回任何元素。请确认类别 prompt 为英文小写，且各类之间以句点分隔。"
+            )
+        detections = detections[: max_layers * 2]
+        report("detect", 1.0, f"检测到 {len(detections)} 个候选")
     _check(cancelled)
 
     # ---------- ocr ----------

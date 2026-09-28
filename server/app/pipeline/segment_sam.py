@@ -38,7 +38,14 @@ class SamSegmenter:
     def segment(self, image: Image.Image, boxes: Sequence[Box]) -> list[np.ndarray]:
         if not boxes:
             return []
-        inputs = self._processor(image, input_boxes=[list(boxes)], return_tensors="pt").to(self._device)
+        # SamProcessor 会把 input_boxes 建成 float64，而 MPS 不支持 float64；
+        # 所以这里先过 processor，再把所有浮点输入强制转成 float32 才搬到设备
+        float_boxes = [[[float(v) for v in box] for box in boxes]]
+        inputs = self._processor(image, input_boxes=float_boxes, return_tensors="pt")
+        for key, value in list(inputs.items()):
+            if hasattr(value, "is_floating_point") and value.is_floating_point():
+                inputs[key] = value.to(self._torch.float32)
+        inputs = inputs.to(self._device)
         with self._torch.no_grad():
             outputs = self._model(**inputs, multimask_output=False).pred_masks
         masks = self._processor.image_processor.post_process_masks(

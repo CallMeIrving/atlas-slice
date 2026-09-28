@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { downloadLayerPng, mergeLayers, moveLayer, raiseLayer } from '@/core/layer-split'
 import { workspace, type LayerCategory, type SplitLayer } from '@/store/workspace'
+import LayerPreviewModal from '@/components/LayerPreviewModal.vue'
 
 /**
  * 图层列表。
@@ -28,6 +29,8 @@ const draggingId = ref<string | null>(null)
 const merging = ref(false)
 const downloading = ref('')
 const error = ref('')
+/** 大图查看中的图层 id；空串表示弹窗关闭 */
+const previewId = ref('')
 
 const layers = computed(() => workspace.layersplit.layers)
 const selectedSet = computed(() => new Set(props.selected))
@@ -158,7 +161,13 @@ async function download(layer: SplitLayer): Promise<void> {
           <label class="layer-check" title="参与合成与导出" @click.stop>
             <input v-model="layer.visible" type="checkbox" />
           </label>
-          <img class="thumb" :src="layer.pngUrl" :alt="layer.name" />
+          <img
+            class="thumb"
+            :src="layer.pngUrl"
+            :alt="layer.name"
+            title="双击查看大图"
+            @dblclick.stop="previewId = layer.id"
+          />
           <input v-model="layer.name" class="input name-input" maxlength="48" title="重命名（只影响导出的文件名）" @click.stop />
         </div>
         <div class="row-meta">
@@ -167,12 +176,20 @@ async function download(layer: SplitLayer): Promise<void> {
             {{ layer.alphaBbox.w }}×{{ layer.alphaBbox.h }}
           </span>
           <span class="row-spacer"></span>
+          <button class="mini" title="查看大图" @click.stop="previewId = layer.id">⤢</button>
           <button class="mini" title="置顶" @click.stop="raise(layer.id, true)">⇧</button>
           <button class="mini" title="置底" @click.stop="raise(layer.id, false)">⇩</button>
           <button class="mini" :disabled="downloading === layer.id" title="下载该层 PNG" @click.stop="download(layer)">⤓</button>
         </div>
       </li>
     </ul>
+    <LayerPreviewModal
+      v-if="previewId"
+      :layers="layers"
+      :current-id="previewId"
+      @update:current-id="previewId = $event"
+      @close="previewId = ''"
+    />
   </section>
 </template>
 

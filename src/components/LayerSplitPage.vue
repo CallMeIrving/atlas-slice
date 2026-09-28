@@ -14,8 +14,10 @@ import {
   startSplit,
   type ServerHealth,
   type ModeToken,
+  type UserBox,
 } from '@/core/layer-split'
 import { persistMediaSettings, resetLayerSplit, workspace } from '@/store/workspace'
+import LayerBoxEditor from '@/components/LayerBoxEditor.vue'
 import LayerSplitList from '@/components/LayerSplitList.vue'
 import LayerSplitSettingsFields from '@/components/LayerSplitSettingsFields.vue'
 import LayerSplitStage from '@/components/LayerSplitStage.vue'
@@ -49,6 +51,10 @@ const errorText = ref('')
 const notice = ref('')
 const exporting = ref(false)
 const progress = ref({ running: false, percent: -1, text: '', cancelling: false })
+/** 框选编辑模式：null = 不在编辑，UserBox[] = 用户确认的框选 */
+const boxEditing = ref(false)
+/** 用户在框选编辑器中确认的区域 */
+const userBoxes = ref<UserBox[]>([])
 
 let token: ModeToken = createCancelToken()
 /** 提交代号：重置或重复提交后，迟到的作业结果不再写回 */
@@ -121,7 +127,15 @@ function load(file?: File): void {
   selectedIds.value = []
   errorText.value = ''
   notice.value = ''
+  boxEditing.value = false
+  userBoxes.value = []
   void measureSource()
+}
+
+/** input[type=file] change 事件处理 */
+function onFileChange(event: Event): void {
+  const input = event.target as HTMLInputElement
+  load(input.files?.[0])
 }
 
 /** 只清结果，保留来源与设置；合并层的 blob URL 由客户端创建，必须手动释放 */
@@ -142,7 +156,7 @@ function invalidateResult(): void {
   if (hasSource.value) split.value.status = 'ready'
 }
 
-async function runSplit(): Promise<void> {
+async function runSplit(overrides?: UserBox[]): Promise<void> {
   if (!canSplit.value) return
   const stamp = ++runToken
   clearResult()
@@ -158,7 +172,7 @@ async function runSplit(): Promise<void> {
       onProgress: (update) => {
         progress.value = { running: true, percent: update.percent, text: update.text, cancelling: progress.value.cancelling }
       },
-    })
+    }, overrides)
     if (stamp !== runToken) return
     const { layers, background } = mapJobToLayers(job)
     split.value.jobId = job.job_id
@@ -241,6 +255,32 @@ function reset(): void {
   selectedIds.value = []
   errorText.value = ''
   notice.value = ''
+  boxEditing.value = false
+  userBoxes.value = []
+}
+
+/** 进入框选编辑模式 */
+function startBoxEdit(): void {
+  boxEditing.value = true
+  errorText.value = ''
+  notice.value = ''
+}
+
+/** 框选编辑确认：用用户框选拆分 */
+function confirmBoxEdit(boxes: UserBox[]): void {
+  boxEditing.value = false
+  userBoxes.value = boxes
+  void runSplit(boxes)
+}
+
+/** 框选编辑取消 */
+function cancelBoxEdit(): void {
+  boxEditing.value = false
+}
+
+/** 直接拆分（不经过框选编辑） */
+function quickSplit(): void {
+  void runSplit()
 }
 
 // 设置只持久化（与其余处理页共用同一份本地设置），同时作废旧结果
@@ -260,7 +300,7 @@ onMounted(() => { void probeServer() })
           hidden
           type="file"
           accept="image/png,image/jpeg,image/webp"
-          @change="load(($event.target as HTMLInputElement).files?.[0])"
+          @change="onFileChange"
         />
         <p class="muted file-name">
           {{ split.fileName || '未选择素材' }}
@@ -288,9 +328,18 @@ onMounted(() => { void probeServer() })
       <LayerSplitSettingsFields />
 
       <div class="section actions">
-        <button class="btn btn-primary full" :disabled="!canSplit" @click="runSplit">
-          {{ progress.running ? '拆分中…' : hasLayers ? '重新拆分' : '开始拆分' }}
+        <template v-if="hasSource && !hasLayers && !boxEditing">
+          <button class="btn btn-primary full" :disabled="!canSplit" @click="startBoxEdit">
+            框选编辑
+          </button>
+          <button class="btn full" :disabled="!canSplit" @click="quickSplit">
+            快速拆分
+          </button>
+        </template>
+        <button v-if="hasLayers" class="btn btn-primary full" :disabled="!canSplit" @click="startBoxEdit">
+          重新框选拆分
         </button>
+        <button v-if="boxEditing" class="btn full" @click="cancelBoxEdit">退出编辑</button>
         <TaskProgress
           v-if="progress.running || progress.text || errorText"
           :running="progress.running"
@@ -352,7 +401,12 @@ onMounted(() => { void probeServer() })
         </div>
 
         <div v-else class="ls-workspace">
-          <figure v-if="!hasLayers" class="ls-source">
+          <LayerBoxEditor
+            v-if="boxEditing"
+            @confirm="confirmBoxEdit"
+            @cancel="cancelBoxEdit"
+          />
+          <figure v-else-if="!hasLayers" class="ls-source">
             <img :src="split.sourceUrl" alt="待拆分素材" />
             <figcaption class="faint">
               {{ progress.running ? '正在拆分…' : '尚未拆分' }}
@@ -366,6 +420,7 @@ onMounted(() => { void probeServer() })
             :selected="selectedIds"
             :width="size.width"
             :height="size.height"
+            @select="selectedIds = [$event]"
           />
           <LayerSplitList
             v-if="hasLayers"
