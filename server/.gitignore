@@ -3,7 +3,8 @@ __pycache__/
 *.pyc
 *.log
 .env
-models/
+# 只忽略仓库根下的权重目录；不锚定会连带忽略 app/models/ 这个 Python 包
+/models/
 tmp/
 .pytest_cache/
 .ruff_cache/
