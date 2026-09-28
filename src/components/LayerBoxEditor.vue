@@ -98,8 +98,8 @@ function toCssCoords(x: number, y: number, w: number, h: number): { left: number
   const scaleX = rect.width / natural.value.width
   const scaleY = rect.height / natural.value.height
   return {
-    left: x * scaleX,
-    top: y * scaleY,
+    left: rect.left + x * scaleX,
+    top: rect.top + y * scaleY,
     width: w * scaleX,
     height: h * scaleY,
   }
