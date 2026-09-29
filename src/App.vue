@@ -9,6 +9,8 @@ import MattePage from '@/components/MattePage.vue'
 import VideoPage from '@/components/VideoPage.vue'
 import WatermarkPage from '@/components/WatermarkPage.vue'
 import LayerSplitPage from '@/components/LayerSplitPage.vue'
+import NineSlicePage from '@/components/NineSlicePage.vue'
+import PalettePage from '@/components/PalettePage.vue'
 import ModelManagerModal from '@/components/ModelManagerModal.vue'
 import { modelManager } from '@/store/model-status'
 import { workspace } from '@/store/workspace'
@@ -38,6 +40,8 @@ const progressPct = () => {
     <VideoPage v-else-if="workspace.page === 'video'" />
     <WatermarkPage v-else-if="workspace.page === 'watermark'" />
     <LayerSplitPage v-else-if="workspace.page === 'layersplit'" />
+    <NineSlicePage v-else-if="workspace.page === 'nineslice'" />
+    <PalettePage v-else-if="workspace.page === 'palette'" />
     <!-- 兜底：页面枚举与分支不同步时也不会整屏空白 -->
     <div v-else class="page-fallback">未知页面</div>
 

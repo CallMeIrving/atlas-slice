@@ -1,8 +1,9 @@
 import { reactive } from 'vue'
 import type { ShadowMode } from '@/core/color-key'
 import type { ImageCropRect } from '@/core/crop'
+import type { PaletteSlot, PaletteVariant } from '@/core/palette'
 
-export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit'
+export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette'
 
 export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'rmbg'
 
@@ -216,6 +217,57 @@ export interface LayerSplitState {
   serverDevice: string
 }
 
+/** 调色板换色（Team Color / 皮肤）页状态 */
+export interface PaletteState {
+  fileName: string
+  /** 导入图片的 blob URL */
+  sourceUrl: string
+  /** 原图尺寸 */
+  image: { width: number; height: number } | null
+  /** 提取出的可编辑色槽 */
+  slots: PaletteSlot[]
+  /** 变体列表（每套一组「槽 → 目标色」映射） */
+  variants: PaletteVariant[]
+  /** 当前在预览区查看的变体 id */
+  activeVariantId: string
+  /** 颜色容差，决定色相/饱和度匹配窗口 */
+  tolerance: number
+  /** 色槽数量上限 */
+  maxSlots: number
+  /** 是否把中性色（黑/灰/白）列入色板 */
+  includeNeutrals: boolean
+  /** 导出命名模板 */
+  nameTemplate: string
+  /** 预览棋盘底 */
+  checkerBg: boolean
+  /** 渲染进度（0-1），-1 表示空闲 */
+  progress: number
+  status: 'empty' | 'ready' | 'processing' | 'done' | 'error'
+  error: string
+}
+
+/** 九宫格四边距离（图像像素坐标）：left/right 为竖直分割线到左右边缘的距离，top/bottom 为水平分割线到上下边缘的距离 */
+export interface NineSliceBorder {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+export interface NineSliceState {
+  fileName: string
+  /** 导入图片的 blob URL */
+  sourceUrl: string
+  /** 原图尺寸，分割线取值范围与导出尺寸依赖它 */
+  image: { width: number; height: number } | null
+  /** 当前四边距离；未导入图片时为 null */
+  border: NineSliceBorder | null
+  /** 拉伸预览的目标尺寸（用户可调，用于观察九宫格拉伸效果） */
+  previewSize: { width: number; height: number }
+  status: 'empty' | 'ready' | 'done' | 'error'
+  error: string
+}
+
 export const DEFAULT_LAYER_CLASSES: LayerClassSpec[] = [
   { label: '按钮', prompt: 'button', category: 'button' },
   { label: '图标', prompt: 'icon', category: 'icon' },
@@ -282,6 +334,15 @@ export const workspace = reactive({
     layers: [], background: null, counts: {}, warnings: [], serverOnline: false, serverDevice: '',
     settings: { ...DEFAULT_LAYER_SETTINGS, classes: DEFAULT_LAYER_CLASSES.map((item) => ({ ...item })) },
   } as LayerSplitState,
+  nineslice: {
+    fileName: '', sourceUrl: '', image: null, border: null,
+    previewSize: { width: 320, height: 200 }, status: 'empty', error: '',
+  } as NineSliceState,
+  palette: {
+    fileName: '', sourceUrl: '', image: null, slots: [], variants: [], activeVariantId: '',
+    tolerance: 24, maxSlots: 8, includeNeutrals: true, nameTemplate: '{base}_{variant}.png',
+    checkerBg: true, progress: -1, status: 'empty', error: '',
+  } as PaletteState,
 })
 
 const SETTINGS_KEY = 'atlas-slice:media-settings'
@@ -393,5 +454,22 @@ export function resetLayerSplit(): void {
   Object.assign(split, {
     fileName: '', sourceUrl: '', jobId: '', status: 'empty', error: '',
     image: null, layers: [], background: null, counts: {}, warnings: [],
+  })
+}
+
+/** 重置九宫格页：释放来源 blob URL，清空图片与分割线（预览尺寸保留） */
+export function resetNineSlice(): void {
+  if (workspace.nineslice.sourceUrl) URL.revokeObjectURL(workspace.nineslice.sourceUrl)
+  Object.assign(workspace.nineslice, {
+    fileName: '', sourceUrl: '', image: null, border: null, status: 'empty', error: '',
+  })
+}
+
+/** 重置调色板换色页：释放来源 blob URL，清空色板与变体（容差等参数保留） */
+export function resetPalette(): void {
+  if (workspace.palette.sourceUrl) URL.revokeObjectURL(workspace.palette.sourceUrl)
+  Object.assign(workspace.palette, {
+    fileName: '', sourceUrl: '', image: null, slots: [], variants: [],
+    activeVariantId: '', progress: -1, status: 'empty', error: '',
   })
 }

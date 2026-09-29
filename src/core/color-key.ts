@@ -46,8 +46,8 @@ const SHADOW_VALUE_DROP = 0.06
 /** 明度低于基准明度该比例即视为前景，避免吃掉黑色线稿 */
 const SHADOW_VALUE_FLOOR = 0.25
 
-/** RGB → HSV（h 为 0-360 度，s/v 为 0-1） */
-function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+/** RGB → HSV（h 为 0-360 度，s/v 为 0-1）。调色板换色复用同一套色相/饱和度判据 */
+export function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
   const rn = r / 255; const gn = g / 255; const bn = b / 255
   const max = Math.max(rn, gn, bn); const min = Math.min(rn, gn, bn)
   const delta = max - min
@@ -61,10 +61,29 @@ function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
   return [hue, max === 0 ? 0 : delta / max, max]
 }
 
-/** 环形色相差（0-180 度） */
-function hueDelta(a: number, b: number): number {
+/** 环形色相差（0-180 度）。调色板换色按色相距离归并色槽时复用 */
+export function hueDelta(a: number, b: number): number {
   const d = Math.abs(a - b) % 360
   return d > 180 ? 360 - d : d
+}
+
+/** 容差换算出的匹配窗口（抠图与调色板换色共用同一判据） */
+export interface ColorMatchWindows {
+  /** 色相窗口（度） */
+  hue: number
+  /** 饱和度窗口（0-1） */
+  sat: number
+}
+
+/**
+ * 把「颜色容差」换算为色相窗口与饱和度窗口。
+ * 抠图页与调色板换色页共用这套判据，保证同一容差取值在两页得到一致的匹配范围。
+ */
+export function colorMatchWindows(tolerance: number): ColorMatchWindows {
+  return {
+    hue: Math.max(1, tolerance * HUE_WINDOW_RATIO),
+    sat: Math.max(0.02, tolerance * SAT_WINDOW_RATIO),
+  }
 }
 
 /**
@@ -77,8 +96,7 @@ function applyHueKey(data: ImageData, options: ColorKeyOptions): void {
   const { r: baseR, g: baseG, b: baseB, tolerance } = options
   const shadow = options.shadow ?? 'ignore'
   const [baseHue, baseSat, baseValue] = rgbToHsv(baseR, baseG, baseB)
-  const hueWindow = Math.max(1, tolerance * HUE_WINDOW_RATIO)
-  const satWindow = Math.max(0.02, tolerance * SAT_WINDOW_RATIO)
+  const { hue: hueWindow, sat: satWindow } = colorMatchWindows(tolerance)
   const valueFloor = baseValue * SHADOW_VALUE_FLOOR
   const valueDrop = baseValue * SHADOW_VALUE_DROP
   // 中性色背景不做色溢抑制；有彩色背景把主色通道压到其他通道的水平，消除彩边
