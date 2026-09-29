@@ -11,6 +11,9 @@ import WatermarkPage from '@/components/WatermarkPage.vue'
 import LayerSplitPage from '@/components/LayerSplitPage.vue'
 import NineSlicePage from '@/components/NineSlicePage.vue'
 import PalettePage from '@/components/PalettePage.vue'
+import AtlasPackPage from '@/components/AtlasPackPage.vue'
+import DirectionSpritePage from '@/components/DirectionSpritePage.vue'
+import TilemapPage from '@/components/TilemapPage.vue'
 import ModelManagerModal from '@/components/ModelManagerModal.vue'
 import { modelManager } from '@/store/model-status'
 import { workspace } from '@/store/workspace'
@@ -42,6 +45,9 @@ const progressPct = () => {
     <LayerSplitPage v-else-if="workspace.page === 'layersplit'" />
     <NineSlicePage v-else-if="workspace.page === 'nineslice'" />
     <PalettePage v-else-if="workspace.page === 'palette'" />
+    <AtlasPackPage v-else-if="workspace.page === 'atlaspack'" />
+    <DirectionSpritePage v-else-if="workspace.page === 'directionsprite'" />
+    <TilemapPage v-else-if="workspace.page === 'tilemap'" />
     <!-- 兜底：页面枚举与分支不同步时也不会整屏空白 -->
     <div v-else class="page-fallback">未知页面</div>
 

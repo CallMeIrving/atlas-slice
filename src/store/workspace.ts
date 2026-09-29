@@ -1,9 +1,11 @@
 import { reactive } from 'vue'
 import type { ShadowMode } from '@/core/color-key'
 import type { ImageCropRect } from '@/core/crop'
+import type { DirectionFrame, DirectionSlot } from '@/core/direction-sprite'
 import type { PaletteSlot, PaletteVariant } from '@/core/palette'
+import type { TilemapOptions } from '@/core/tilemap'
 
-export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette'
+export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette' | 'atlaspack' | 'directionsprite' | 'tilemap'
 
 export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'rmbg'
 
@@ -268,6 +270,92 @@ export interface NineSliceState {
   error: string
 }
 
+/** 智能图集打包：导入的多张素材 */
+export interface AtlasPackItem {
+  id: string
+  name: string
+  /** 素材的 blob URL，供解码与预览 */
+  url: string
+  width: number
+  height: number
+}
+
+export interface AtlasPackSettings {
+  /** 每个素材四周留白 */
+  padding: number
+  /** 图集四周外边距 */
+  margin: number
+  /** 图集最大边长上限 */
+  maxSize: number
+  /** 是否允许 90° 旋转以提升紧凑度 */
+  allowRotate: boolean
+  /** 图集宽高是否为 2 的幂 */
+  powerOfTwo: boolean
+  /** 是否裁掉透明边 */
+  trim: boolean
+  /** 裁剪 alpha 阈值 */
+  alphaThreshold: number
+  /** 是否附带 JSON 元数据 */
+  withMetaJson: boolean
+  /** 是否附带 plist 元数据 */
+  withMetaPlist: boolean
+  /** 图集文件名（不带扩展名） */
+  name: string
+}
+
+/** 打包落位（相对图集的百分比展示只需 x/y/w/h 与图集尺寸） */
+export interface AtlasPackPlacement {
+  id: string
+  name: string
+  x: number
+  y: number
+  w: number
+  h: number
+  rotated: boolean
+  trimmed: boolean
+  sourceSize: { w: number; h: number }
+}
+
+export interface AtlasPackResult {
+  width: number
+  height: number
+  fillRatio: number
+  placements: AtlasPackPlacement[]
+}
+
+export interface AtlasPackState {
+  items: AtlasPackItem[]
+  settings: AtlasPackSettings
+  result: AtlasPackResult | null
+  /** 打包结果预览图（dataURL） */
+  previewUrl: string
+  status: 'empty' | 'ready' | 'packed' | 'error'
+  error: string
+}
+
+export interface DirectionSpriteState {
+  frames: DirectionFrame[]
+  directionSet: 2 | 4 | 8
+  slots: DirectionSlot[]
+  /** 单元格留白 */
+  padding: number
+  /** 单元格边长（0 表示按最大帧自动） */
+  cellSize: number
+  status: 'empty' | 'ready' | 'done' | 'error'
+  error: string
+}
+
+export interface TilemapState {
+  fileName: string
+  sourceUrl: string
+  image: { width: number; height: number } | null
+  options: TilemapOptions
+  /** 切分出的 tile 数量（跳过空白后的实际数量） */
+  tiles: number
+  status: 'empty' | 'ready' | 'done' | 'error'
+  error: string
+}
+
 export const DEFAULT_LAYER_CLASSES: LayerClassSpec[] = [
   { label: '按钮', prompt: 'button', category: 'button' },
   { label: '图标', prompt: 'icon', category: 'icon' },
@@ -343,6 +431,23 @@ export const workspace = reactive({
     tolerance: 24, maxSlots: 8, includeNeutrals: true, nameTemplate: '{base}_{variant}.png',
     checkerBg: true, progress: -1, status: 'empty', error: '',
   } as PaletteState,
+  atlaspack: {
+    items: [], result: null, previewUrl: '', status: 'empty', error: '',
+    settings: {
+      padding: 2, margin: 0, maxSize: 4096, allowRotate: false, powerOfTwo: false,
+      trim: true, alphaThreshold: 8, withMetaJson: true, withMetaPlist: false, name: 'atlas',
+    },
+  } as AtlasPackState,
+  directionsprite: {
+    frames: [], directionSet: 4, slots: [], padding: 0, cellSize: 0, status: 'empty', error: '',
+  } as DirectionSpriteState,
+  tilemap: {
+    fileName: '', sourceUrl: '', image: null, tiles: 0, status: 'empty', error: '',
+    options: {
+      tileW: 32, tileH: 32, margin: 0, spacing: 0, offsetX: 0, offsetY: 0,
+      skipEmpty: false, alphaThreshold: 8, pattern: '{name}_{index}.png',
+    },
+  } as TilemapState,
 })
 
 const SETTINGS_KEY = 'atlas-slice:media-settings'
@@ -385,6 +490,9 @@ try {
     video?: Partial<VideoState>
     watermark?: { settings?: Partial<WatermarkSettings> }
     layersplit?: { settings?: Partial<LayerSplitSettings> }
+    atlaspack?: { settings?: Partial<AtlasPackSettings> }
+    directionsprite?: { directionSet?: 2 | 4 | 8; padding?: number; cellSize?: number }
+    tilemap?: { options?: Partial<TilemapOptions> }
   } | null
   if (saved?.matte) Object.assign(workspace.matte, saved.matte)
   // 旧版本可能存过已经移除的处理方式，直接收敛到默认值，避免下拉框出现空选项
@@ -395,6 +503,16 @@ try {
   if (!WATERMARK_MODES.includes(workspace.watermark.settings.mode)) workspace.watermark.settings.mode = 'alpha'
   // 图层拆分同样只持久化设置（结果与服务端作业一一对应，不跨会话保留）
   workspace.layersplit.settings = convergeLayerSettings(saved?.layersplit?.settings)
+  // 智能图集打包 / 多方向精灵 / Tilemap 只持久化参数，素材与结果不跨会话保留
+  if (saved?.atlaspack?.settings) Object.assign(workspace.atlaspack.settings, saved.atlaspack.settings)
+  if (saved?.directionsprite) {
+    if ([2, 4, 8].includes(saved.directionsprite.directionSet ?? 4)) {
+      workspace.directionsprite.directionSet = saved.directionsprite.directionSet ?? 4
+    }
+    if (Number.isFinite(saved.directionsprite.padding)) workspace.directionsprite.padding = saved.directionsprite.padding!
+    if (Number.isFinite(saved.directionsprite.cellSize)) workspace.directionsprite.cellSize = saved.directionsprite.cellSize!
+  }
+  if (saved?.tilemap?.options) Object.assign(workspace.tilemap.options, saved.tilemap.options)
 } catch { /* ignore invalid local settings */ }
 
 export function persistMediaSettings(): void {
@@ -403,6 +521,9 @@ export function persistMediaSettings(): void {
     video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte }, pipeline: { ...workspace.video.pipeline }, },
     watermark: { settings: { ...workspace.watermark.settings } },
     layersplit: { settings: { ...workspace.layersplit.settings, classes: workspace.layersplit.settings.classes.map((item) => ({ ...item })) } },
+    atlaspack: { settings: { ...workspace.atlaspack.settings } },
+    directionsprite: { directionSet: workspace.directionsprite.directionSet, padding: workspace.directionsprite.padding, cellSize: workspace.directionsprite.cellSize },
+    tilemap: { options: { ...workspace.tilemap.options } },
   }))
 }
 
@@ -472,4 +593,22 @@ export function resetPalette(): void {
     fileName: '', sourceUrl: '', image: null, slots: [], variants: [],
     activeVariantId: '', progress: -1, status: 'empty', error: '',
   })
+}
+
+/** 重置智能图集打包页：逐个释放素材 blob URL，清空素材与打包结果（参数保留） */
+export function resetAtlasPack(): void {
+  workspace.atlaspack.items.forEach((item) => URL.revokeObjectURL(item.url))
+  Object.assign(workspace.atlaspack, { items: [], result: null, previewUrl: '', status: 'empty', error: '' })
+}
+
+/** 重置多方向精灵页：逐个释放基准帧 blob URL，清空帧与方向配置（参数保留） */
+export function resetDirectionSprite(): void {
+  workspace.directionsprite.frames.forEach((frame) => URL.revokeObjectURL(frame.url))
+  Object.assign(workspace.directionsprite, { frames: [], slots: [], status: 'empty', error: '' })
+}
+
+/** 重置 Tilemap 切片页：释放来源 blob URL，清空图片与切分统计（参数保留） */
+export function resetTilemap(): void {
+  if (workspace.tilemap.sourceUrl) URL.revokeObjectURL(workspace.tilemap.sourceUrl)
+  Object.assign(workspace.tilemap, { fileName: '', sourceUrl: '', image: null, tiles: 0, status: 'empty', error: '' })
 }

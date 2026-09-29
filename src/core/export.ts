@@ -1,5 +1,6 @@
 import JSZip from 'jszip'
 import type { AtlasFrame } from '@/types/atlas'
+import { buildAtlasJson, buildPlist, type FrameMeta } from './atlas-meta'
 import { cropFrame, type CropMode } from './crop'
 import { layoutSpriteFrames, type SpriteSheetLayout } from './spritesheet'
 
@@ -64,64 +65,6 @@ export interface ExportProgress {
   total: number
 }
 
-/**
- * 已导出帧的元数据描述。
- * 几何字段一律以「原始图集坐标」记录（而非裁切后 PNG 的坐标），
- * 这样重新导入元数据时能还原出与导出前一致的帧。
- */
-interface FrameMeta {
-  /** 帧在图集中的打包矩形（raw，未处理旋转） */
-  frame: { x: number; y: number; w: number; h: number }
-  rotated: boolean
-  trimmed: boolean
-  /** 内容矩形，相对原始源帧坐标 */
-  spriteSourceSize: { x: number; y: number; w: number; h: number }
-  /** 原始帧尺寸（未旋转） */
-  sourceSize: { w: number; h: number }
-  /** 工具私有字段：是否为手动框选创建的帧 */
-  manual: boolean
-}
-
-/** plist 矩形字符串 {{x,y},{w,h}} */
-function plistRect(r: { x: number; y: number; w: number; h: number }): string {
-  return `{{${r.x},${r.y}},{${r.w},${r.h}}}`
-}
-
-/** 生成 cocos2d 格式 3 的 plist 元数据 */
-function buildPlist(meta: Record<string, FrameMeta>, atlas: { w: number; h: number }): string {
-  const entries = Object.entries(meta)
-    .map(([name, m]) => {
-      return `    <key>${name}</key>
-    <dict>
-      <key>frame</key><string>${plistRect(m.frame)}</string>
-      <key>offset</key><string>{0,0}</string>
-      <key>rotated</key>${m.rotated ? '<true/>' : '<false/>'}
-      <key>trimmed</key>${m.trimmed ? '<true/>' : '<false/>'}
-      <key>sourceColorRect</key><string>${plistRect(m.spriteSourceSize)}</string>
-      <key>sourceSize</key><string>{${m.sourceSize.w},${m.sourceSize.h}}</string>
-      <key>manual</key>${m.manual ? '<true/>' : '<false/>'}
-    </dict>`
-    })
-    .join('\n')
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>frames</key>
-  <dict>
-${entries}
-  </dict>
-  <key>metadata</key>
-  <dict>
-    <key>format</key><integer>3</integer>
-    <key>size</key><string>{${atlas.w},${atlas.h}}</string>
-    <key>textureFileName</key><string>atlas.png</string>
-  </dict>
-</dict>
-</plist>
-`
-}
-
 /** 批量裁切导出：单帧且不需要元数据时直接下载 PNG，其余情况打包 ZIP（可选附元数据 JSON / plist） */
 export async function exportFrames(
   source: HTMLCanvasElement,
@@ -174,17 +117,7 @@ export async function exportFrames(
   for (const { name, blob } of blobs) zip.file(path + name, blob)
   const atlasSize = { w: source.width, h: source.height }
   if (opts.withMetaJson) {
-    zip.file(
-      `${path}atlas.json`,
-      JSON.stringify(
-        {
-          frames: meta,
-          meta: { app: 'atlas-slice', format: 'RGBA8888', size: atlasSize },
-        },
-        null,
-        2,
-      ),
-    )
+    zip.file(`${path}atlas.json`, buildAtlasJson(meta, atlasSize))
   }
   if (opts.withMetaPlist) {
     zip.file(`${path}atlas.plist`, buildPlist(meta, atlasSize))
@@ -250,17 +183,8 @@ export async function exportSpriteSheet(
   const zip = new JSZip()
   zip.file(pngName, png)
   const atlasSize = { w: canvas.width, h: canvas.height }
-  if (opts.withMetaJson) {
-    zip.file(
-      `${filename}.json`,
-      JSON.stringify(
-        { frames: meta, meta: { app: 'atlas-slice', format: 'RGBA8888', size: atlasSize } },
-        null,
-        2,
-      ),
-    )
-  }
-  if (opts.withMetaPlist) zip.file(`${filename}.plist`, buildPlist(meta, atlasSize))
+  if (opts.withMetaJson) zip.file(`${filename}.json`, buildAtlasJson(meta, atlasSize, pngName))
+  if (opts.withMetaPlist) zip.file(`${filename}.plist`, buildPlist(meta, atlasSize, pngName))
   const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
   downloadBlob(content, `${filename}.zip`)
 }

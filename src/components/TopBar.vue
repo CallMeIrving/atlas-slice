@@ -7,14 +7,17 @@ import { modelManager } from '@/store/model-status'
 /** 2D 工具下拉框条目：page 为 null 表示本期未实现（禁用展示） */
 const TOOL_ENTRIES: { page: WorkspacePage | null; label: string }[] = [
   { page: 'nineslice', label: '九宫格切图' },
-  { page: null, label: '智能图集打包' },
+  { page: 'atlaspack', label: '智能图集打包' },
   { page: 'palette', label: '调色板换色' },
-  { page: null, label: 'Tilemap 切片' },
+  { page: 'tilemap', label: 'Tilemap 切片' },
   { page: null, label: '洋葱皮预览' },
-  { page: null, label: '多方向精灵' },
+  { page: 'directionsprite', label: '多方向精灵' },
 ]
 /** 当前是否处于 2D 工具页；触发按钮据此显示模块名并高亮 */
-const isToolPage = computed(() => workspace.page === 'nineslice' || workspace.page === 'palette')
+const isToolPage = computed(() =>
+  workspace.page === 'nineslice' || workspace.page === 'palette'
+  || workspace.page === 'atlaspack' || workspace.page === 'directionsprite' || workspace.page === 'tilemap',
+)
 const toolLabel = computed(() => {
   const entry = TOOL_ENTRIES.find((item) => item.page === workspace.page)
   return entry ? entry.label : '2D 工具'
@@ -48,6 +51,18 @@ const pageStatus = computed(() => {
     if (!workspace.palette.image) return '未导入'
     if (workspace.palette.status === 'processing') return `渲染中 ${Math.round(workspace.palette.progress * 100)}%`
     return `${workspace.palette.slots.length} 色槽 · ${workspace.palette.variants.length} 套变体`
+  }
+  if (workspace.page === 'atlaspack') {
+    return workspace.atlaspack.status === 'packed'
+      ? `${workspace.atlaspack.result?.placements.length ?? 0} 处落位`
+      : `${workspace.atlaspack.items.length} 张素材`
+  }
+  if (workspace.page === 'directionsprite') {
+    if (!workspace.directionsprite.frames.length) return '未导入'
+    return `${workspace.directionsprite.frames.length} 帧 · ${workspace.directionsprite.slots.filter((slot) => slot.source).length} 方向`
+  }
+  if (workspace.page === 'tilemap') {
+    return workspace.tilemap.image ? `${workspace.tilemap.tiles} 块` : '未导入'
   }
   return WATERMARK_STATUS[workspace.watermark.status]
 })
