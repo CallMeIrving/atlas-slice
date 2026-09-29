@@ -6,7 +6,6 @@ import {
   type LayerCategory,
   type LayerClassSpec,
   type LayerDetector,
-  type LayerSegmenter,
 } from '@/store/workspace'
 
 /**
@@ -31,11 +30,6 @@ const DETECTOR_OPTIONS: { value: LayerDetector; label: string }[] = [
   { value: 'grounding-dino', label: 'GroundingDINO（开放词表，推荐）' },
   { value: 'florence2', label: 'Florence-2（需额外权重）' },
   { value: 'auto', label: '自动（优先 DINO，缺权重时回落）' },
-]
-
-const SEGMENTER_OPTIONS: { value: LayerSegmenter; label: string }[] = [
-  { value: 'sam', label: 'SAM（按检测框精细分割，推荐）' },
-  { value: 'none', label: '不做分割（按检测框给矩形）' },
 ]
 
 const BACKGROUND_OPTIONS: { value: LayerBackgroundMode; label: string; hint: string }[] = [
@@ -153,19 +147,6 @@ function removeClass(index: number): void {
           <option v-for="option in DETECTOR_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
       </div>
-      <div class="field">
-        <span class="field-label">分割</span>
-        <select v-model="settings.segmenter" class="select">
-          <option v-for="option in SEGMENTER_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
-        </select>
-      </div>
-      <div class="field">
-        <span class="field-label">推理设备（服务端）</span>
-        <p class="mono device-value">{{ workspace.layersplit.serverDevice || '未连接' }}</p>
-        <p class="muted">
-          服务端按 cuda &gt; mps &gt; cpu 自动探测，也可用启动参数 --device 或环境变量 LAYER_SPLIT_DEVICE 覆盖（重启服务生效）。
-        </p>
-      </div>
       <label class="check-row"><input v-model="settings.ocr" type="checkbox" /> 识别文本（用 Florence-2 取紧致笔画，需额外权重）</label>
     </div>
 
@@ -264,16 +245,6 @@ function removeClass(index: number): void {
 .full {
   width: 100%;
   justify-content: center;
-}
-
-.device-value {
-  margin: 0;
-  padding: 5px 8px;
-  color: var(--accent-strong);
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  font-size: var(--fs-caption);
 }
 
 .range {

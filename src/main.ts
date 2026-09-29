@@ -1,9 +1,10 @@
 import { createApp } from 'vue'
+import VueKonva from 'vue-konva'
 import App from './App.vue'
 import '@/styles/tokens.css'
 import '@/styles/base.css'
 
-createApp(App).mount('#app')
+createApp(App).use(VueKonva).mount('#app')
 
 // 注册模型缓存 Worker：把 ISNet / RMBG 的权重写进 Cache Storage，下载一次后刷新不再重下。
 // 只拦截模型资源，失败时静默跳过，不影响应用本身（见 public/model-cache-sw.js）。

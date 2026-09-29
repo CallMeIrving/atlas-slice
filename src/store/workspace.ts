@@ -292,7 +292,6 @@ const WATERMARK_MODES: WatermarkMode[] = ['patch', 'alpha', 'region', 'texture']
 /** 图层拆分支持的类别与选项，用于丢弃本地设置里已下线的取值 */
 const LAYER_CATEGORIES: LayerCategory[] = ['button', 'icon', 'text', 'panel', 'border', 'decoration', 'progress', 'background', 'other']
 const LAYER_DETECTORS: LayerDetector[] = ['grounding-dino', 'florence2', 'auto']
-const LAYER_SEGMENTERS: LayerSegmenter[] = ['sam', 'none']
 const LAYER_BACKGROUNDS: LayerBackgroundMode[] = ['none', 'erase', 'inpaint']
 const LAYER_DEVICES: LayerDevice[] = ['auto', 'cuda', 'mps', 'cpu']
 
@@ -313,7 +312,8 @@ function convergeLayerSettings(saved: Partial<LayerSplitSettings> | undefined): 
     merged.classes = kept.length ? kept : base.classes
   }
   if (!LAYER_DETECTORS.includes(merged.detector)) merged.detector = base.detector
-  if (!LAYER_SEGMENTERS.includes(merged.segmenter)) merged.segmenter = base.segmenter
+  // 分割方式不再暴露给用户，固定使用推荐值 SAM
+  merged.segmenter = base.segmenter
   if (!LAYER_BACKGROUNDS.includes(merged.background)) merged.background = base.background
   if (!LAYER_DEVICES.includes(merged.device)) merged.device = base.device
   return merged

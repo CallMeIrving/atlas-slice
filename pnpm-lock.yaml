@@ -20,12 +20,18 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.2
+      konva:
+        specifier: ^10.7.0
+        version: 10.7.0
       onnxruntime-web:
         specifier: 1.21.0
         version: 1.21.0
       vue:
         specifier: ^3.5.13
         version: 3.5.43(typescript@5.6.3)
+      vue-konva:
+        specifier: ^4.0.1
+        version: 4.0.1(konva@10.7.0)(vue@3.5.43(typescript@5.6.3))
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -752,6 +758,17 @@ packages:
   jszip@3.10.2:
     resolution: {integrity: sha512-3l+rb15IOWtUhU0H5MFqES/T6Kh7abYwjosBey/vD6hDt8zoEffkSC5Ws5SGtgVw3gBx2NEbhTeSW1+kWkpyTQ==}
 
+  konva@10.7.0:
+    resolution: {integrity: sha512-2CwuytBrOlTh7WHCSeXyUeysB2rpwHruUUDD5etYtrzijkCVH+00+CQz5fJUGI0hm7mzxxDLYLw4Wpo+8QGJ4g==}
+    peerDependencies:
+      canvas: ^3.0.0
+      skia-canvas: ^3.0.0
+    peerDependenciesMeta:
+      canvas:
+        optional: true
+      skia-canvas:
+        optional: true
+
   lie@3.3.0:
     resolution: {integrity: sha512-UaiMJzeWRlEujzAuw5LokY1L5ecNQYZKfmyZ9L7wDHb/p5etKaxXhohBcrw0EYby+G/NA52vRSN4N39dxHAIwQ==}
 
@@ -939,6 +956,13 @@ packages:
 
   vscode-uri@3.2.0:
     resolution: {integrity: sha512-m2gXo3bn0G1kT9InzMf07fTbqMbGtyckj3bH5ktLO+1Ssv+yiATZ4dhwaQv9UZWxJh6E9IFGnQyjgWVDWVBDrg==}
+
+  vue-konva@4.0.1:
+    resolution: {integrity: sha512-y38dwDxGU+ZmWFcCLdCqG8OOvBnUXt6wDp5sRHD+gADzu3JUxVVg4vri1cw+4S+zjL3NW1Kr6lKoB72YitqClw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      konva: '>7'
+      vue: ^3
 
   vue-tsc@2.2.12:
     resolution: {integrity: sha512-P7OP77b2h/Pmk+lZdJ0YWs+5tJ6J2+uOQPo7tlBnY44QqQSPYvS0qVT4wqDJgwrZaLe47etJLLQRFia71GYITw==}
@@ -1498,6 +1522,8 @@ snapshots:
       readable-stream: 2.3.8
       setimmediate: 1.0.5
 
+  konva@10.7.0: {}
+
   lie@3.3.0:
     dependencies:
       immediate: 3.0.6
@@ -1713,6 +1739,11 @@ snapshots:
       fsevents: 2.3.3
 
   vscode-uri@3.2.0: {}
+
+  vue-konva@4.0.1(konva@10.7.0)(vue@3.5.43(typescript@5.6.3)):
+    dependencies:
+      konva: 10.7.0
+      vue: 3.5.43(typescript@5.6.3)
 
   vue-tsc@2.2.12(typescript@5.6.3):
     dependencies:
