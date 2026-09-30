@@ -435,7 +435,7 @@ onMounted(() => {
     canvasResizeObserver = new ResizeObserver(() => fitImageToCanvas())
     canvasResizeObserver.observe(canvasRef.value)
   }
-  // 刷新后重新初始化运行时；模型文件会优先复用浏览器缓存或 public/models/。
+  // 刷新后重新初始化运行时；模型文件会优先复用浏览器缓存或 models/。
   if (isAiMode.value) void preloadSelectedModel()
 })
 onBeforeUnmount(() => {
@@ -517,7 +517,7 @@ onBeforeUnmount(() => {
               <option value="isnet_quint8">ISNet 量化（最快）</option>
             </select>
           </label>
-          <label v-if="workspace.matte.mode === 'imgly'" class="field"><span class="field-label">资源地址（publicPath）</span><input v-model="workspace.matte.imglyPublicPath" class="input" type="text" placeholder="留空时优先用 public/models 下的本地镜像，无镜像才用官方 CDN" /></label>
+          <label v-if="workspace.matte.mode === 'imgly'" class="field"><span class="field-label">资源地址（publicPath）</span><input v-model="workspace.matte.imglyPublicPath" class="input" type="text" placeholder="留空时优先用本地镜像目录 /models，无镜像才用官方 CDN" /></label>
           <template v-if="workspace.matte.mode === 'rmbg'">
             <label class="field"><span class="field-label">模型 ID</span>
               <input v-model="workspace.matte.rmbgModelId" class="input" type="text" />

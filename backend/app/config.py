@@ -1,7 +1,7 @@
 """服务配置。
 
 全部字段都可用 ``LAYER_SPLIT_`` 前缀的环境变量覆盖（例如 ``LAYER_SPLIT_DEVICE=mps``），
-也可以在 ``server/.env`` 里写。默认只绑回环地址，素材不出本机。
+也可以在 ``backend/.env`` 里写。默认只绑回环地址，素材不出本机。
 """
 
 from functools import lru_cache
@@ -11,7 +11,9 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVER_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODELS_DIR = SERVER_ROOT / "models"
+"""统一模型目录：仓库根下的 models/（浏览器抠图与图层拆分权重放在一起）。
+保留 LAYER_SPLIT_MODELS_DIR 环境变量覆盖能力。"""
+DEFAULT_MODELS_DIR = SERVER_ROOT.parent / "models"
 DEFAULT_TMP_DIR = SERVER_ROOT / "tmp"
 
 

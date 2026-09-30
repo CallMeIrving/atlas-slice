@@ -1,4 +1,4 @@
-# 图层拆分服务（server/）
+# 图层拆分服务（backend/）
 
 把一张游戏 UI 截图拆成**可独立复用的图层**：GroundingDINO 出框 → SAM 精细分割 →
 OCR 给文本层做紧致 alpha → 包含森林算 z-order → 生成带透明通道的独立 PNG 与清单。
@@ -8,13 +8,13 @@ OCR 给文本层做紧致 alpha → 包含森林算 z-order → 生成带透明�
 | 场景 | 素材去哪 |
 |---|---|
 | 其余页面（精灵图 / 抠图 / 视频 / 去水印） | 全部在浏览器内处理，不出本机 |
-| 本服务 | 只在本机回环（`127.0.0.1`）内传输，文件落在 `server/tmp/` |
-| 模型权重 | 从镜像站下载到 `server/models/`，只在本机加载 |
+| 本服务 | 只在本机回环（`127.0.0.1`）内传输，文件落在 `backend/tmp/` |
+| 模型权重 | 从镜像站下载到仓库根 `models/`，只在本机加载 |
 
 ## 安装
 
 ```bash
-cd server
+cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip && pip install -r requirements.txt
 python scripts/doctor.py          # 解释器 / torch / MPS / 权重 / 磁盘余量
@@ -46,7 +46,8 @@ python scripts/download_models.py --list                         # 只看清单�
 | segment | `facebook/sam-vit-base` | 375MB |
 | ocr（可选） | `microsoft/Florence-2-base-ft` | 464MB |
 
-权重落在 `server/models/<repo_id>/`。**不设 `allow_patterns`**：Florence-2 的 remote code
+权重落在仓库根 `models/<repo_id>/`（与浏览器抠图权重同目录，由 `LAYER_SPLIT_MODELS_DIR` 覆盖）。
+**不设 `allow_patterns`**：Florence-2 的 remote code
 必须整仓落地。中断可续传；`--force` 强制重下。
 
 ## 启动
@@ -130,7 +131,7 @@ curl -s -o /tmp/layers.zip "http://127.0.0.1:8000/api/layers/jobs/$JOB/bundle.zi
   由服务启动时自动设置。
 - 作业只存在内存里，进程重启即失效。前端遇到 `404 JOB_NOT_FOUND` 应回到「待处理」态并提示
   「服务已重启」，而不是继续轮询。
-- 临时产物在 `server/tmp/jobs/<job_id>/`，TTL 1 小时、最多保留 20 个作业，启动时全量清扫。
+- 临时产物在 `backend/tmp/jobs/<job_id>/`，TTL 1 小时、最多保留 20 个作业，启动时全量清扫。
 
 ## 脱离 HTTP 单跑管线
 
@@ -141,7 +142,7 @@ python -m app.pipeline.runner --image ../public/assets/testImages/gameUI.png \
   --prompt "button,icon,text,panel" --max-side 1536
 ```
 
-产物默认落在 `server/tmp/manual/`。
+产物默认落在 `backend/tmp/manual/`。
 
 ## 测试
 
@@ -152,6 +153,6 @@ LAYER_SPLIT_TEST_MODELS=1 python -m pytest -q -m slow   # 需要真实权重
 
 ## 配置
 
-全部字段都能用 `LAYER_SPLIT_` 前缀的环境变量覆盖（也可写 `server/.env`）：
+全部字段都能用 `LAYER_SPLIT_` 前缀的环境变量覆盖（也可写 `backend/.env`）：
 `LAYER_SPLIT_DEVICE` `LAYER_SPLIT_MODELS_DIR` `LAYER_SPLIT_TMP_DIR` `LAYER_SPLIT_PORT`
 `LAYER_SPLIT_MAX_UPLOAD_BYTES` `LAYER_SPLIT_JOB_TTL_SECONDS` `LAYER_SPLIT_MAX_QUEUE` 等。

@@ -60,7 +60,7 @@ def model_missing(repo_id: str, role: str, missing: list[str]) -> ApiError:
             "repo_id": repo_id,
             "role": role,
             "missing": missing,
-            "hint": f"cd server && .venv/bin/python scripts/download_models.py --repo={role}",
+            "hint": f"cd backend && .venv/bin/python scripts/download_models.py --repo={role}",
         },
     )
 

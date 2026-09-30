@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { formatBytes } from '@/core/model-registry'
 import {
   checkServer,
   fetchServerModels,
   loadServerModel,
+  onServerStatus,
   requestModelDownload,
   unloadServerModel,
   type ServerModel,
@@ -18,7 +19,7 @@ import { workspace } from '@/store/workspace'
  * 这组权重与浏览器里的 ONNX 权重是两套东西：不同运行时（本机 PyTorch/MPS vs 浏览器 wasm）、
  * 不同下载器（snapshot_download vs 下载脚本）、不同设备语义（服务启动参数 vs WebGPU 支持），
  * 因此单独一张卡片，而不是塞进 model-registry.json。
- * 权重落在 server/models 下，不在 public/models，浏览器也无法写入。
+ * 权重落在仓库根 models/ 下（与浏览器抠图权重同目录），由本地 Python 服务按需下载。
  */
 const list = ref<ServerModelList | null>(null)
 const online = ref(false)
@@ -35,6 +36,8 @@ const downloadText = ref('')
 const downloadPercent = ref(-1)
 /** 复制反馈：失败时保留命令原文供手动选中 */
 const copied = ref<{ key: string; ok: boolean; text: string } | null>(null)
+/** Electron 下主进程服务状态的取消订阅函数 */
+let offServerStatus: (() => void) | null = null
 
 /** 与弹窗顶部的「模型源」保持一致：服务端 snapshot_download 走同一个镜像 */
 const host = computed(() => (workspace.matte.aiModelHost === 'huggingface.co' ? 'https://huggingface.co' : 'https://hf-mirror.com'))
@@ -114,6 +117,15 @@ async function copy(text: string, key: string): Promise<void> {
 
 onMounted(() => {
   void refresh()
+  // Electron 下服务由主进程拉起，冷启动晚于弹窗打开：就绪后自动刷新，无需手动重试
+  offServerStatus = onServerStatus((ready) => {
+    if (ready) void refresh()
+  })
+})
+
+onUnmounted(() => {
+  offServerStatus?.()
+  offServerStatus = null
 })
 </script>
 
@@ -136,11 +148,11 @@ onMounted(() => {
 
     <p class="card-meta muted">
       GroundingDINO（开放词表检测）+ SAM（框驱动分割），可选 Florence-2 识别文本。
-      这组权重由本地 Python 服务用 PyTorch 推理，<strong>不在 public/models 下</strong>，也不经过浏览器；
+      这组权重由本地 Python 服务用 PyTorch 推理，<strong>统一落在仓库根 models/ 下</strong>，不经过浏览器；
       服务只监听 127.0.0.1，素材不出本机。
     </p>
     <p v-if="checked && !online" class="card-meta faint">
-      先按 server/README.md 建好虚拟环境与依赖，再启动服务：<span class="mono">npm run server:dev</span>
+      先按 backend/README.md 建好虚拟环境与依赖，再启动服务：<span class="mono">npm run backend:dev</span>
     </p>
     <p v-if="error" class="card-error">{{ error }}</p>
 

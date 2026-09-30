@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { preloadMattingModel, releaseMattingModel, type MatteProgress } from '@/core/ai-matting'
+import { inspectLocalRepo, repoForEngine } from '@/core/model-registry'
 import { workspace } from '@/store/workspace'
 
 /**
@@ -41,6 +42,20 @@ export function setModelState(key: string, state: ModelState, message?: string):
 const pendingLoads = new Map<string, Promise<void>>()
 
 /**
+ * RMBG 权重在代码里强制 local_files_only，缺文件不会回落远程。
+ * Electron 环境下（window.atlasSlice 存在）在应用内把权重补到 models/ 后再加载，
+ * 免去用户手动跑终端命令；纯 Web 环境没有写权限，交给界面提示用户自行下载。
+ */
+async function ensureBuiltinWeights(modelId: string, host: string): Promise<void> {
+  const repo = repoForEngine('rmbg')
+  if (!repo || repo.id.toLowerCase() !== modelId.trim().toLowerCase()) return
+  const status = await inspectLocalRepo(repo)
+  if (status.ready || !window.atlasSlice) return
+  const result = await window.atlasSlice.downloadModel({ repo: repo.id, host })
+  if (!result.ok) throw new Error(result.message || '模型权重下载失败')
+}
+
+/**
  * 确保指定引擎的模型已加载。
  * ready 立即返回；loading 复用同一个 pending Promise；error 允许重试；
  * 未加载时才真正下载并初始化模型（内部复用 ai-matting 的实例缓存）。
@@ -58,6 +73,7 @@ export async function ensureMatteModelLoaded(engine: ModelEngine, onProgress?: (
       if (engine === 'imgly') {
         await preloadMattingModel({ engine: 'imgly', model: ai.imglyModel, device: ai.aiDevice, maxSide: 1, publicPath: ai.imglyPublicPath || undefined, onProgress })
       } else {
+        await ensureBuiltinWeights(ai.rmbgModelId, ai.aiModelHost === 'huggingface.co' ? 'https://huggingface.co' : 'https://hf-mirror.com')
         await preloadMattingModel({ engine: 'rmbg', modelId: ai.rmbgModelId, dtype: ai.aiDtype, device: ai.aiDevice, modelHost: ai.aiModelHost, maxSide: ai.aiMaxSide, onProgress })
       }
       setModelState(key, 'ready')

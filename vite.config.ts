@@ -1,34 +1,67 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { existsSync } from 'node:fs'
-import { join, normalize } from 'node:path'
+import { createReadStream, existsSync, statSync } from 'node:fs'
+import { extname, join, normalize } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 
-function modelAssetNotFoundPlugin() {
-  const publicRoot = fileURLToPath(new URL('./public/', import.meta.url))
+/**
+ * 统一模型目录的静态供给：把浏览器对 `/models/*` 的请求映射到仓库根下的 `models/`。
+ * 模型权重已从 public/models 移出，这里读盘直接回文件；缺失返回 404，避免把首页 HTML 当模型解析。
+ */
+function modelFilesPlugin() {
+  const modelsRoot = fileURLToPath(new URL('./models/', import.meta.url))
+  const MIME: Record<string, string> = {
+    '.json': 'application/json',
+    '.onnx': 'application/octet-stream',
+    '.wasm': 'application/wasm',
+    '.bin': 'application/octet-stream',
+    '.data': 'application/octet-stream',
+    '.pt': 'application/octet-stream',
+    '.js': 'text/javascript',
+  }
   return {
-    name: 'model-asset-not-found',
-    configureServer(server: { middlewares: { use: (handler: (req: { url?: string }, res: { statusCode: number; end: () => void }, next: () => void) => void) => void } }) {
+    name: 'model-files',
+    configureServer(server: {
+      middlewares: { use: (handler: (req: { url?: string; method?: string }, res: {
+        statusCode: number
+        setHeader: (name: string, value: string) => void
+        end: () => void
+      }, next: () => void) => void) => void }
+    }) {
       server.middlewares.use((request, response, next) => {
-        const pathname = request.url?.split('?')[0] ?? ''
-        if (!pathname.startsWith('/models/')) {
+        const url = decodeURIComponent(request.url?.split('?')[0] ?? '')
+        if (!url.startsWith('/models/')) {
           next()
           return
         }
-        const filePath = normalize(join(publicRoot, pathname.slice('/'.length)))
-        if (!filePath.startsWith(publicRoot) || existsSync(filePath)) {
-          next()
+        const filePath = join(modelsRoot, url.slice('/models/'.length))
+        if (!normalize(filePath).startsWith(normalize(modelsRoot))) {
+          response.statusCode = 403
+          response.end()
           return
         }
-        response.statusCode = 404
-        response.end()
+        if (!existsSync(filePath)) {
+          response.statusCode = 404
+          response.end()
+          return
+        }
+        const size = statSync(filePath).size
+        response.statusCode = 200
+        response.setHeader('Content-Type', MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream')
+        response.setHeader('Content-Length', String(size))
+        response.setHeader('Cache-Control', 'no-cache')
+        if (request.method === 'HEAD') {
+          response.end()
+          return
+        }
+        createReadStream(filePath).pipe(response as unknown as NodeJS.WritableStream)
       })
     },
   }
 }
 
 export default defineConfig({
-  plugins: [vue(), modelAssetNotFoundPlugin()],
+  plugins: [vue(), modelFilesPlugin()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -37,8 +70,8 @@ export default defineConfig({
   server: {
     port: 5173,
     watch: {
-      // 本地 Python 服务的权重有数 GB，放在项目根下会拖慢 HMR，直接排除
-      ignored: ['**/server/**'],
+      // 本地 Python 虚拟环境与模型权重（数 GB）在项目根附近，直接排除，避免拖慢 HMR
+      ignored: ['**/backend/**', '**/models/**'],
     },
     proxy: {
       // dev 环境把图层拆分请求转发到本机 Python 服务，前端用相对路径 → 零 CORS 预检

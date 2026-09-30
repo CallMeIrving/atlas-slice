@@ -162,6 +162,10 @@ function normalizeBase(value: string): string {
 }
 
 export function detectApiBase(): string {
+  // Electron 下始终读主进程给出的动态端口，避免缓存过期（Python 服务可能晚于页面启动）
+  if (window.atlasSlice) {
+    return normalizeBase(window.atlasSlice.getPythonBaseUrl() || '') || DEFAULT_SERVER
+  }
   if (apiBase) return apiBase
   const saved = localStorage.getItem(SERVER_KEY)
   apiBase = normalizeBase(saved || (import.meta.env.DEV ? '/layer-api' : DEFAULT_SERVER)) || DEFAULT_SERVER
@@ -171,6 +175,20 @@ export function detectApiBase(): string {
 /** 当前生效的服务地址（供页面输入框展示） */
 export function currentApiBase(): string {
   return detectApiBase()
+}
+
+/**
+ * Electron 下订阅主进程的 Python 服务状态，供页面在服务就绪时自动重新探活。
+ *
+ * Python 冷启动（uvicorn 导入 torch）通常晚于页面加载，此时 getPythonBaseUrl() 仍是 null；
+ * 且 Electron 里的服务端口是动态挑选的（不是 8000），所以必须等就绪事件到来后再探活。
+ * 纯 Web 环境没有主进程，返回一个空的取消订阅函数。
+ * @param cb 状态变化回调，参数为服务是否就绪
+ * @returns 取消订阅函数
+ */
+export function onServerStatus(cb: (ready: boolean) => void): () => void {
+  if (!window.atlasSlice) return () => {}
+  return window.atlasSlice.onPythonStatus((status) => cb(status.ready))
 }
 
 /** 覆盖服务地址并持久化；返回归一化后的结果 */

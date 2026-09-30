@@ -8,7 +8,7 @@
     python scripts/download_models.py --list                   # 只看清单与就位情况
     python scripts/download_models.py --check                  # 只校验体积/存在性，失败退出码 1
 
-权重落在 ``server/models/<repo_id>/``，与浏览器侧 ``public/models/`` 完全是两套。
+权重落在仓库根下的 ``models/<repo_id>/``，与浏览器抠图权重同处一个统一模型目录。
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default="all", help="all | detect | segment | ocr | 模型 id")
     parser.add_argument("--host", default=os.environ.get("MODEL_HOST") or DEFAULT_HOST)
     parser.add_argument("--force", action="store_true", help="忽略本地已有文件，强制重新下载")
-    parser.add_argument("--models-dir", default="", help="覆盖权重目录（默认 server/models）")
+    parser.add_argument("--models-dir", default="", help="覆盖权重目录（默认仓库根 models/）")
     parser.add_argument("--list", action="store_true", help="只打印清单与就位情况")
     parser.add_argument("--check", action="store_true", help="只校验，不做下载")
     args = parser.parse_args(argv)

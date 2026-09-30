@@ -368,7 +368,7 @@ def _main(argv: list[str] | None = None) -> int:
     """脱离 HTTP 单跑，用于先把模型调通：python -m app.pipeline.runner --image xxx.png"""
     parser = argparse.ArgumentParser(description="图层拆分管线单跑")
     parser.add_argument("--image", required=True)
-    parser.add_argument("--out", default="", help="输出目录，默认 server/tmp/manual")
+    parser.add_argument("--out", default="", help="输出目录，默认 backend/tmp/manual")
     parser.add_argument("--prompt", default="button,icon,text,panel", help="逗号分隔的英文提示词")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--max-side", type=int, default=1536)

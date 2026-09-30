@@ -22,7 +22,7 @@ from ..schemas import (
 
 router = APIRouter(prefix="/models", tags=["models"])
 
-DOWNLOAD_COMMAND = "cd server && .venv/bin/python scripts/download_models.py"
+DOWNLOAD_COMMAND = "cd backend && .venv/bin/python scripts/download_models.py"
 
 
 @router.get("", response_model=ModelListOut)

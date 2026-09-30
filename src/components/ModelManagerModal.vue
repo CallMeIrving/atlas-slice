@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import {
   AI_ENGINES,
   describeMattingError,
@@ -39,8 +39,8 @@ import ServerModelCard from '@/components/ServerModelCard.vue'
  * 内存中的加载状态、卸载入口与下载命令。
  *
  * 注意浏览器没有文件系统写权限：ISNet 的资源运行时就会下载（本地镜像优先，无镜像才回落官方 CDN，
- * 由浏览器缓存），也可以先用下载脚本镜像到 public/models 下；而 RMBG-1.4 的权重必须落在
- * public/models 下（代码对它们强制 local_files_only，缺文件不会回落远程），这里只做检测并提供终端命令。
+ * 由浏览器缓存），也可以先用下载脚本镜像到 models/ 下；而 RMBG-1.4 的权重必须落在
+ * models/ 下（代码对它们强制 local_files_only，缺文件不会回落远程），这里只做检测并提供终端命令。
  */
 const emit = defineEmits<{ close: [] }>()
 
@@ -57,6 +57,14 @@ const checking = ref(false)
 const progress = reactive<Record<string, { text: string; percent: number }>>({})
 /** 复制反馈：key 定位是哪个按钮被点过；text 保留命令原文，复制失败时展示出来让用户手动选中 */
 const copied = ref<{ key: string; ok: boolean; text: string } | null>(null)
+
+/** Electron 环境：权重可直接经主进程落到 models/，不必手工跑终端命令 */
+const isElectron = Boolean(window.atlasSlice)
+/** 应用内下载进行中；进度文本来自主进程脚本的 stdout */
+const downloading = ref(false)
+const downloadText = ref('')
+const downloadOk = ref(false)
+let offProgress: (() => void) | null = null
 
 interface EngineRow {
   engine: ModelEngine
@@ -157,6 +165,30 @@ async function unload(engine: ModelEngine): Promise<void> {
 }
 
 /**
+ * Electron 下的应用内下载：RMBG 传 repo id，ISNet 镜像传 imgly=true。
+ * 完成后刷新本地文件检测，让「已就位 / 缺失」状态即时更新。
+ */
+async function download(repoId?: string): Promise<void> {
+  if (downloading.value || !window.atlasSlice) return
+  downloading.value = true
+  downloadOk.value = false
+  downloadText.value = repoId ? '下载模型权重…' : '下载 ISNet 镜像…'
+  try {
+    const result = repoId
+      ? await window.atlasSlice.downloadModel({ repo: repoId, host: commandHost.value })
+      : await window.atlasSlice.downloadModel({ imgly: true })
+    downloadOk.value = result.ok
+    downloadText.value = result.message || (result.ok ? '下载完成' : '下载失败')
+  } catch (cause) {
+    downloadOk.value = false
+    downloadText.value = cause instanceof Error ? cause.message : '下载失败'
+  } finally {
+    downloading.value = false
+  }
+  await checkLocal()
+}
+
+/**
  * 复制文本到剪贴板并给出结果反馈。
  * 失败（浏览器未授予剪贴板权限等）时保留命令原文，由模板就地展示供手动选中，
  * 且不自动消失——否则用户还没选中，提示和命令就一起没了。
@@ -184,6 +216,15 @@ function fileStateText(file: LocalFileStatus): string {
 
 onMounted(() => {
   void checkLocal()
+  offProgress = window.atlasSlice?.onDownloadProgress((text) => {
+    if (!downloading.value) return
+    downloadText.value = text
+  }) ?? null
+})
+
+onUnmounted(() => {
+  offProgress?.()
+  offProgress = null
 })
 </script>
 
@@ -207,6 +248,11 @@ onMounted(() => {
         </div>
 
         <code v-if="copied && !copied.ok" class="cmd-fallback">{{ copied.text }}</code>
+
+        <div v-if="downloading || downloadText" class="load-status" :class="{ 'download-error': !downloadOk }">
+          <p class="faint">{{ downloadText }}</p>
+          <div class="load-track"><div class="load-fill" :class="{ done: downloadOk && !downloading }" style="width: 100%"></div></div>
+        </div>
 
         <article v-for="row in rows" :key="row.engine" class="model-card">
           <header class="card-head">
@@ -241,6 +287,7 @@ onMounted(() => {
           <template v-if="row.engine === 'imgly'">
             <div class="file-head">
               <span class="mono">{{ IMGLY_MIRROR_PATH }}</span>
+              <button v-if="isElectron" class="btn btn-ghost" :disabled="downloading" @click="download()">{{ downloading ? '下载中…' : '直接下载镜像' }}</button>
               <button class="btn btn-ghost" @click="copy(IMGLY_MIRROR_COMMAND, 'imgly-mirror')">复制镜像命令</button>
               <span v-if="copied?.key === 'imgly-mirror'" class="copy-hint" :class="{ fail: !copied.ok }">{{ copied.ok ? '已复制' : '复制失败' }}</span>
             </div>
@@ -266,6 +313,7 @@ onMounted(() => {
               <span v-if="!checked" class="faint">未检测</span>
               <span v-else-if="row.local?.ready" class="ok">基础文件已就位</span>
               <span v-else class="miss">缺 {{ row.local?.missing.length ?? 0 }} 个文件</span>
+              <button v-if="isElectron" class="btn btn-ghost" :disabled="downloading" @click="download(row.repo.id)">{{ downloading ? '下载中…' : '直接下载' }}</button>
               <button class="btn btn-ghost" @click="copy(downloadCommand(row.repo.id, commandHost), row.repo.id)">复制下载命令</button>
               <span v-if="copied?.key === row.repo.id" class="copy-hint" :class="{ fail: !copied.ok }">{{ copied.ok ? '已复制' : '复制失败' }}</span>
             </div>
@@ -278,8 +326,8 @@ onMounted(() => {
               </li>
             </ul>
             <p class="card-meta faint">
-              <template v-if="row.local?.ready">权重已落在项目 public/models 下，刷新页面不会重新下载，只需重新加载到内存。</template>
-              <template v-else>浏览器没有文件系统写权限，这些权重必须在终端执行上面的命令下载到 public/models 下（命令会跳过已存在的文件，可重复运行续传）。</template>
+              <template v-if="row.local?.ready">权重已落在仓库根 models/ 下，刷新页面不会重新下载，只需重新加载到内存。</template>
+              <template v-else>浏览器没有文件系统写权限，这些权重必须执行上面的命令下载到 models/ 下（命令会跳过已存在的文件，可重复运行续传）。</template>
               <span v-if="workspace.matte.aiModelHost === 'huggingface.co'" class="net-tip">
                 当前托管源 huggingface.co 国内需代理，建议改选 hf-mirror.com（国内可直连）；下载命令已默认使用 hf-mirror.com。
               </span>
@@ -422,6 +470,14 @@ onMounted(() => {
   height: 100%;
   background: var(--accent);
   transition: width 0.2s ease;
+}
+
+.load-fill.done {
+  background: var(--accent-strong);
+}
+
+.download-error p {
+  color: var(--danger);
 }
 
 .file-list {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { createCancelToken } from '@/core/frame-extract'
 import { loadImage } from '@/core/image'
 import { downloadBlob } from '@/core/media-export'
@@ -10,6 +10,8 @@ import {
   currentApiBase,
   exportLayersZip,
   mapJobToLayers,
+  onServerStatus,
+  requestModelDownload,
   setApiBase,
   startSplit,
   type ServerHealth,
@@ -26,7 +28,7 @@ import TaskProgress from '@/components/TaskProgress.vue'
 /**
  * 图层拆分页。
  * 素材与推理都在本机：浏览器只负责导入、预览与合成，
- * 真正的检测/分割由 `server/` 下的 Python 服务完成，这里只通过 core/layer-split 调它的接口。
+ * 真正的检测/分割由 `backend/` 下的 Python 服务完成，这里只通过 core/layer-split 调它的接口。
  */
 const STATUS_TEXT: Record<string, string> = {
   empty: '未导入',
@@ -36,9 +38,9 @@ const STATUS_TEXT: Record<string, string> = {
   error: '出错',
 }
 
-/** 服务启动命令：与 package.json 的 server:dev 一致，离线时直接给用户复制 */
-const START_COMMAND = 'npm run server:dev'
-const MODELS_COMMAND = 'npm run server:models'
+/** 服务启动命令：与 package.json 的 backend:dev 一致，离线时直接给用户复制 */
+const START_COMMAND = 'npm run backend:dev'
+const MODELS_COMMAND = 'npm run backend:models'
 
 const input = ref<HTMLInputElement>()
 const serverAddr = ref(currentApiBase())
@@ -51,6 +53,12 @@ const errorText = ref('')
 const notice = ref('')
 const exporting = ref(false)
 const progress = ref({ running: false, percent: -1, text: '', cancelling: false })
+/** 应用内下载权重（复用服务端作业系统）：进度与拆分共用同一套轮询 */
+const downloading = ref(false)
+const downloadText = ref('')
+const downloadPercent = ref(-1)
+/** 上次拆分因缺权重失败时的仓库键；非空即展示「下载缺失权重并重试」 */
+const missingRepo = ref('')
 /** 框选编辑模式：null = 不在编辑，UserBox[] = 用户确认的框选 */
 const boxEditing = ref(false)
 /** 用户在框选编辑器中确认的区域 */
@@ -59,6 +67,8 @@ const userBoxes = ref<UserBox[]>([])
 let token: ModeToken = createCancelToken()
 /** 提交代号：重置或重复提交后，迟到的作业结果不再写回 */
 let runToken = 0
+/** Electron 下主进程服务状态的取消订阅函数 */
+let offServerStatus: (() => void) | null = null
 
 const split = computed(() => workspace.layersplit)
 const hasSource = computed(() => Boolean(split.value.sourceUrl))
@@ -67,7 +77,11 @@ const online = computed(() => split.value.serverOnline)
 /** 权重未就绪时服务会回 409，这里提前提示，避免白等一次推理 */
 const modelsMissing = computed(() => Boolean(health.value && !health.value.models_ready))
 const size = computed(() => split.value.image ?? { width: 0, height: 0, scale: 1 })
-const canSplit = computed(() => hasSource.value && online.value && !progress.value.running)
+const canSplit = computed(() => hasSource.value && online.value && !progress.value.running && !downloading.value)
+/** 下载权重的镜像源：与「模型管理」卡片共用抠图页的模型源设置 */
+const downloadHost = computed(() =>
+  workspace.matte.aiModelHost === 'huggingface.co' ? 'https://huggingface.co' : 'https://hf-mirror.com',
+)
 /** 推理长边上限与原始尺寸的差距：提示坐标会映射回原图 */
 const downscaled = computed(() => size.value.scale > 0 && size.value.scale < 0.999)
 
@@ -78,6 +92,8 @@ async function probeServer(): Promise<void> {
   try {
     const result = await checkServer()
     health.value = result
+    // 服务就绪后回填实际地址：Electron 下是主进程挑的动态端口，未必等于输入框里的旧值
+    serverAddr.value = currentApiBase()
     split.value.serverOnline = true
     split.value.serverDevice = result.device
   } catch (error) {
@@ -93,6 +109,38 @@ async function probeServer(): Promise<void> {
 function applyServerAddr(): void {
   serverAddr.value = setApiBase(serverAddr.value)
   void probeServer()
+}
+
+/**
+ * 应用内下载图层拆分权重，走服务端的 `/api/models/download` 作业（与「模型管理」卡片同一入口）。
+ * repo 传 null 等价于下载全部（与 `npm run backend:models` 一致），给出具体仓库时只补缺的那一个。
+ * retrySplit 为真时下载完成后自动重跑上次的拆分，省掉用户再点一次。
+ */
+async function downloadWeights(repo: string | null, retrySplit = false): Promise<void> {
+  if (downloading.value) return
+  downloading.value = true
+  errorText.value = ''
+  downloadText.value = '正在下载权重…'
+  downloadPercent.value = 0
+  try {
+    await requestModelDownload(repo, downloadHost.value, {
+      onProgress: (update) => {
+        downloadText.value = update.text
+        downloadPercent.value = update.percent
+      },
+    })
+    downloadText.value = '权重下载完成'
+    downloadPercent.value = 100
+    missingRepo.value = ''
+    await probeServer()
+    if (retrySplit && hasSource.value) void runSplit()
+  } catch (error) {
+    errorText.value = error instanceof Error ? error.message : '权重下载失败'
+    downloadText.value = ''
+    downloadPercent.value = -1
+  } finally {
+    downloading.value = false
+  }
 }
 
 async function copy(value: string): Promise<void> {
@@ -164,6 +212,7 @@ async function runSplit(overrides?: UserBox[]): Promise<void> {
   progress.value = { running: true, percent: 0, text: '正在提交…', cancelling: false }
   errorText.value = ''
   notice.value = ''
+  missingRepo.value = ''
   split.value.status = 'processing'
   try {
     const blob = await (await fetch(split.value.sourceUrl)).blob()
@@ -200,6 +249,10 @@ async function runSplit(overrides?: UserBox[]): Promise<void> {
       progress.value = { running: false, percent: -1, text: '', cancelling: false }
     } else {
       split.value.status = 'error'
+      // 缺权重是「还没下载」而不是错误：就地给出应用内下载入口，下完自动重跑本次拆分
+      const repoId = failure?.detail.repo_id
+      missingRepo.value =
+        failure?.code === 'MODEL_MISSING' ? (typeof repoId === 'string' && repoId ? repoId : 'all') : ''
       errorText.value = [failure?.message ?? '拆分失败', failure?.hint ?? ''].filter(Boolean).join(' ')
       progress.value = { running: false, percent: -1, text: '', cancelling: false }
     }
@@ -255,6 +308,7 @@ function reset(): void {
   selectedIds.value = []
   errorText.value = ''
   notice.value = ''
+  missingRepo.value = ''
   boxEditing.value = false
   userBoxes.value = []
 }
@@ -286,7 +340,18 @@ function quickSplit(): void {
 // 设置只持久化（与其余处理页共用同一份本地设置），同时作废旧结果
 watch(split.value.settings, () => { persistMediaSettings(); invalidateResult() }, { deep: true })
 
-onMounted(() => { void probeServer() })
+onMounted(() => {
+  void probeServer()
+  // Electron 下 Python 服务晚于页面就绪，就绪事件到达后自动重连，免去手动点「重试连接」
+  offServerStatus = onServerStatus((ready) => {
+    if (ready) void probeServer()
+  })
+})
+
+onUnmounted(() => {
+  offServerStatus?.()
+  offServerStatus = null
+})
 </script>
 
 <template>
@@ -335,14 +400,29 @@ onMounted(() => { void probeServer() })
             <button class="btn" :disabled="checking" @click="probeServer">{{ checking ? '连接中…' : '重试连接' }}</button>
           </div>
           <p class="muted">
-            首次使用需先在 server/ 目录建虚拟环境并安装依赖，再用
+            首次使用需先在 backend/ 目录建虚拟环境并安装依赖，再用
             <span class="mono">{{ MODELS_COMMAND }}</span>
             下载权重（约 1.5GB）。服务只监听 127.0.0.1。
           </p>
         </div>
 
         <div v-else-if="modelsMissing" class="warn">
-          <p><strong>模型权重未就绪</strong>：先执行 <span class="mono">{{ MODELS_COMMAND }}</span> 下载权重，再重试连接。</p>
+          <p>
+            <strong>模型权重未就绪</strong>：可直接在此下载（约 1.5GB），或执行
+            <span class="mono">{{ MODELS_COMMAND }}</span>。
+          </p>
+          <div class="offline-actions">
+            <button class="btn" :disabled="downloading" @click="downloadWeights(null)">
+              {{ downloading ? '下载中…' : '下载权重' }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="downloading || downloadText" class="warn">
+          <p class="faint">{{ downloadText }}</p>
+          <div class="load-track">
+            <div class="load-fill" :style="{ width: (downloadPercent >= 0 ? downloadPercent : 100) + '%' }"></div>
+          </div>
         </div>
 
         <div v-if="!hasSource" class="empty-state">
@@ -439,6 +519,14 @@ onMounted(() => { void probeServer() })
           :cancelling="progress.cancelling"
           @cancel="cancel"
         />
+        <button
+          v-if="missingRepo"
+          class="btn full"
+          :disabled="downloading"
+          @click="downloadWeights(missingRepo, true)"
+        >
+          {{ downloading ? '下载中…' : '下载缺失权重并重试' }}
+        </button>
         <p v-if="notice" class="muted">{{ notice }}</p>
         <template v-if="hasLayers">
           <button class="btn btn-primary full" :disabled="exporting" @click="exportClientZip">
@@ -475,6 +563,9 @@ onMounted(() => { void probeServer() })
 .section .muted + .field-row { margin-top: var(--sp-2); }
 .offline .cmd { margin: var(--sp-2) 0; padding: 6px 8px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-s); user-select: all; }
 .offline-actions { display: flex; gap: var(--sp-2); }
+/* 权重下载进度：与「模型管理」卡片的加载条同构 */
+.load-track { height: 6px; margin-top: var(--sp-2); background: var(--border); border-radius: 3px; overflow: hidden; }
+.load-fill { height: 100%; background: var(--accent); transition: width 0.2s ease; }
 /* 工作区：左侧合成舞台，右侧图层面板 */
 .ls-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--sp-4); align-items: stretch; }
 .ls-source { margin: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-3); background: var(--stage); border: 1px solid var(--border); border-radius: var(--radius-s); overflow: hidden; }

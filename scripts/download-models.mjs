@@ -1,4 +1,4 @@
-// 下载抠图模型到 public/models/，让本地权重可复现
+// 下载抠图模型到 models/，让本地权重可复现
 // 用法：
 //   node scripts/download-models.mjs                  # 下载界面可选的全部精度（约 295MB）
 //   node scripts/download-models.mjs --fp16-only      # 只下默认 FP16（RMBG，约 84MB）
@@ -10,7 +10,7 @@
 //   node scripts/download-models.mjs --force          # 已存在的文件也重新下载
 // 说明：
 // - 模型清单来自 src/core/model-registry.json，与浏览器端「模型管理」弹窗共用同一份数据。
-// - public/models/* 被 .gitignore 忽略，换机器或清空工作区后需要重跑本脚本。
+// - models/* 被 .gitignore 忽略，换机器或清空工作区后需要重跑本脚本。
 // - 代码对 RMBG-1.4 强制 local_files_only，缺文件不会回落远程，必须下全。
 // - 下载中断会保留 .part 文件，下次运行用 Range 请求续传；下载完成后按字节数校验。
 // - --imgly / --source= / --out= 只作用于 ISNet 镜像（镜像目录是扁平两层：resources.json + 分片同名同级），
@@ -22,8 +22,9 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const MODELS_DIR = join(ROOT, 'public', 'models')
-const MANIFEST_PATH = join(ROOT, 'src', 'core', 'model-registry.json')
+// 打包态由 Electron 主进程经环境变量指定可写模型目录与清单位置（清单随 extraResources 落在 Resources/ 下）
+const MODELS_DIR = process.env.ATLAS_MODELS_DIR ?? join(ROOT, 'models')
+const MANIFEST_PATH = process.env.ATLAS_MANIFEST_PATH ?? join(ROOT, 'src', 'core', 'model-registry.json')
 
 /**
  * 各仓库需要落地的文件，统一从共享清单读取。
@@ -38,10 +39,16 @@ const IMGLY_MIRROR_DIR = join(MODELS_DIR, MANIFEST.imgly.mirrorPath)
 /**
  * ISNet 的资源清单 resources.json 里没有版本号，官方 CDN 的版本号等于已安装运行时的版本，
  * 因此从 node_modules 里读，避免脚本里硬编码版本（升级依赖后无需改脚本）。
+ * 打包态（脚本位于 extraResources）读不到 node_modules，回退到锁定版本。
  */
+const IMGLY_PACKAGE_FALLBACK_VERSION = '1.7.0'
+
 function installedVersion(pkg) {
   const path = join(ROOT, 'node_modules', pkg, 'package.json')
-  if (!existsSync(path)) throw new Error(`未找到已安装的 ${pkg}，请先执行 pnpm install`)
+  if (!existsSync(path)) {
+    if (pkg === IMGLY_PACKAGE) return IMGLY_PACKAGE_FALLBACK_VERSION
+    throw new Error(`未找到已安装的 ${pkg}，请先执行 pnpm install`)
+  }
   return JSON.parse(readFileSync(path, 'utf8')).version
 }
 

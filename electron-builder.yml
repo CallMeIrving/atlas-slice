@@ -1,0 +1,45 @@
+# electron-builder 打包配置（仅 macOS Apple Silicon）
+# 目标：产出可分发的 .app / .dmg / .zip。不签名、不公证；模型权重不入包。
+# Python 后端由 `pnpm backend:freeze` 冻结成自包含可执行文件后随包分发（见 extraResources）。
+appId: com.atlasslice.app
+productName: AtlasSlice
+
+directories:
+  output: release
+  buildResources: build
+
+# 运行时不依赖任何 native 模块（前端与主进程都已打包），跳过 @electron/rebuild：
+# 它会在 pnpm 的隔离 node_modules 布局下扫描生产依赖并报 ENOENT。
+npmRebuild: false
+
+# 只打前端产物与主进程编译产物；node_modules 由 esbuild/vite 打进产物，运行时不再需要
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+  - "!node_modules/**"
+
+# 主进程在打包态要从 Resources/ 下取这几份：模型下载脚本 + 它读取的清单 + 冻结后的 Python 后端
+extraResources:
+  - from: scripts/download-models.mjs
+    to: scripts/download-models.mjs
+  - from: src/core/model-registry.json
+    to: src/core/model-registry.json
+  # 由 pnpm backend:freeze 生成（backend/dist/atlas-backend/）；缺失时 electron-builder 会直接报错
+  - from: backend/dist/atlas-backend
+    to: backend/atlas-backend
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  category: public.app-category.graphics-design
+  # 本机 / 内网分发，跳过签名（签名与公证留待后续阶段）
+  identity: null
+
+dmg:
+  title: AtlasSlice

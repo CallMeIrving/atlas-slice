@@ -4,14 +4,14 @@
  * 清单数据放在同目录的 model-registry.json：Node 下载脚本（scripts/download-models.mjs）
  * 与浏览器端「模型管理」弹窗读的是同一份文件，新增模型只改一处。
  *
- * 浏览器没有文件系统写权限，因此这里只做两件事：探测 public/models 下的文件是否就位、
+ * 浏览器没有文件系统写权限，因此这里只做两件事：探测 models/ 下的文件是否就位、
  * 生成需要用户到终端执行的下载命令；真正的落盘仍由 Node 脚本完成。
  */
 
 import registry from '@/core/model-registry.json'
 import type { AiEngine } from '@/core/ai-matting'
 
-/** 本地权重根目录，与 vite 的 public 目录一致 */
+/** 本地权重根目录（仓库根 models/），dev 下由 vite 中间件供给，生产由静态服务器映射 */
 export const LOCAL_MODEL_ROOT = '/models/'
 
 /** 模型文件分级：base 为精简集（配置 + 界面默认精度），extra 只在全量下载时才需要 */
@@ -39,13 +39,13 @@ export interface ModelRepoSpec {
 
 /**
  * ISNet（imgly）的镜像信息。imgly 运行时的资源地址由它自己的 resources.json 决定，
- * 无法像 RMBG 那样在清单里静态列出文件，因此这里只记录镜像在 public/models 下的目录；
+ * 无法像 RMBG 那样在清单里静态列出文件，因此这里只记录镜像在 models/ 下的目录；
  * 目录名要与下载脚本写入的位置一致（脚本同样从这份清单读取）。
  */
 interface ImglyManifest {
   /** 已安装的运行时包名，用于推导官方 CDN 数据包的名称与版本 */
   package: string
-  /** 相对 public/models/ 的镜像目录 */
+  /** 相对 models/ 的镜像目录 */
   mirrorPath: string
 }
 
@@ -127,7 +127,7 @@ export async function inspectLocalRepo(repo: ModelRepoSpec): Promise<LocalRepoSt
 }
 
 /**
- * 生成把模型补到本地 public/models 的命令，供用户粘贴到终端执行。
+ * 生成把模型补到本地 models/ 的命令，供用户粘贴到终端执行。
  * @param repoId 只下载指定仓库；省略时下载清单里的全部模型
  * @param host 模型源，与界面「托管源」设置保持一致
  */

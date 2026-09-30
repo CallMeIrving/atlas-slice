@@ -47,7 +47,7 @@ export interface AiEngineBaseOptions {
 export interface ImglyOptions extends AiEngineBaseOptions {
   model: ImglyModel
   device: 'cpu' | 'gpu'
-  /** 模型资源基础地址；留空时优先用本地镜像（public/models 下），没有镜像才回落官方 CDN（staticimgly.com） */
+  /** 模型资源基础地址；留空时优先用本地镜像（models/ 下），没有镜像才回落官方 CDN（staticimgly.com） */
   publicPath?: string
 }
 
@@ -445,7 +445,7 @@ export function describeMattingError(error: unknown, engine?: string): string {
     return '无法下载 ISNet 模型资源（官方 CDN staticimgly.com，且本地没有镜像）。请检查网络或代理后重试；也可以挂代理执行 node scripts/download-models.mjs --imgly 把权重镜像到本地，或在「资源地址」里填写可访问的镜像地址'
   }
   if (/Can't load|Could not locate|no such file|not found|404|Failed to fetch|Unauthorized|local_files_only/i.test(raw)) {
-    return '本地缺少该精度的模型权重文件，请改用 FP16，或检查 public/models 下的模型文件是否完整'
+    return '本地缺少该精度的模型权重文件，请改用 FP16，或检查本地模型目录（models/）下的模型文件是否完整'
   }
   return raw || '抠图处理失败'
 }
