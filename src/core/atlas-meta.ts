@@ -22,6 +22,8 @@ export interface FrameMeta {
   sourceSize: { w: number; h: number }
   /** 工具私有字段：是否为手动框选创建的帧 */
   manual: boolean
+  /** 锚点（相对原帧的归一化坐标，0-1），未指定时引擎按各自默认处理 */
+  pivot?: { x: number; y: number }
 }
 
 /** plist 矩形字符串 {{x,y},{w,h}} */
@@ -68,18 +70,91 @@ ${entries}
 `
 }
 
+/**
+ * 从帧名聚合命名动画：去掉扩展名后，以「结尾数字（可带 _ - 空格分隔）」归组，
+ * 如 walk_0.png / walk-1.png / walk2.png 都归入 walk 组；组内按数字升序。
+ * 只保留 2 帧及以上的组，单帧不成动画。
+ */
+export function groupAnimations(names: string[]): Record<string, string[]> {
+  const groups: Record<string, string[]> = {}
+  for (const name of names) {
+    const stem = name.replace(/\.[^.]+$/, '')
+    const m = stem.match(/^(.*?)[_\-\s]?(\d+)$/)
+    if (!m || !m[1]) continue
+    ;(groups[m[1]] ??= []).push(name)
+  }
+  const result: Record<string, string[]> = {}
+  for (const [base, list] of Object.entries(groups)) {
+    if (list.length < 2) continue
+    list.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    result[base] = list
+  }
+  return result
+}
+
 /** 生成 TexturePacker 哈希格式的 JSON 元数据；imageName 为纹理文件名（可与图集 PNG 同名） */
 export function buildAtlasJson(
   meta: Record<string, FrameMeta>,
   atlas: { w: number; h: number },
   imageName = 'atlas.png',
+  animations?: Record<string, string[]>,
 ): string {
   return JSON.stringify(
     {
       frames: meta,
+      // 命名动画分组（可选）：引擎或运行时可据此直接取帧序列
+      ...(animations && Object.keys(animations).length ? { animations } : {}),
       meta: { app: 'atlas-slice', format: 'RGBA8888', image: imageName, size: atlas },
     },
     null,
     2,
   )
+}
+
+/**
+ * 生成 TexturePacker 数组格式的 JSON 元数据（frames 为数组，每项附 filename）。
+ * 部分引擎（如 Phaser 旧版、Cocos Creator 部分导入器）只认数组格式。
+ */
+export function buildAtlasJsonArray(
+  meta: Record<string, FrameMeta>,
+  atlas: { w: number; h: number },
+  imageName = 'atlas.png',
+  animations?: Record<string, string[]>,
+): string {
+  const frames = Object.entries(meta).map(([filename, m]) => ({ filename, ...m }))
+  return JSON.stringify(
+    {
+      frames,
+      ...(animations && Object.keys(animations).length ? { animations } : {}),
+      meta: { app: 'atlas-slice', format: 'RGBA8888', image: imageName, size: atlas },
+    },
+    null,
+    2,
+  )
+}
+
+/**
+ * 生成 CSS sprites 样式表：每个帧一条 `.类名 { width/height/background-position }` 规则。
+ * 旋转帧无法用 background 无损表达（transform 会破坏布局），跳过并返回名单由调用方提示。
+ */
+export function buildCssSprites(
+  meta: Record<string, FrameMeta>,
+  imageName = 'atlas.png',
+): { css: string; skipped: string[] } {
+  const skipped: string[] = []
+  const rules: string[] = [
+    `.atlas-slice { background-image: url("${imageName}"); background-repeat: no-repeat; display: inline-block; }`,
+  ]
+  for (const [name, m] of Object.entries(meta)) {
+    if (m.rotated) {
+      skipped.push(name)
+      continue
+    }
+    // 类名：文件名去扩展名，非法 CSS 字符替换为下划线
+    const className = name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
+    rules.push(
+      `.atlas-slice.${className} { width: ${m.frame.w}px; height: ${m.frame.h}px; background-position: -${m.frame.x}px -${m.frame.y}px; }`,
+    )
+  }
+  return { css: rules.join('\n') + '\n', skipped }
 }

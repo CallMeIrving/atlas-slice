@@ -1,33 +1,68 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { buildAtlasJson, buildPlist, type FrameMeta } from '@/core/atlas-meta'
-import { loadImage } from '@/core/image'
-import { downloadZip } from '@/core/media-export'
-import { packItems, renderAtlas, type PackItem, type PackOptions } from '@/core/pack'
+import { buildAtlasJson, buildAtlasJsonArray, buildCssSprites, buildPlist, groupAnimations, type FrameMeta } from '@/core/atlas-meta'
+import { loadImage, releaseCanvas } from '@/core/image'
+import { canvasToBlob, downloadZip } from '@/core/media-export'
+import { drawFrame, packItemsMultiPage, renderAtlas, type PackItem, type PackOptions } from '@/core/pack'
+import { parseJsonAtlas } from '@/core/parsers/json'
+import type { AtlasPackPageResult } from '@/store/workspace'
 import { resetAtlasPack, workspace } from '@/store/workspace'
+import AtlasAnimationPreview from '@/components/AtlasAnimationPreview.vue'
 
 /**
- * 智能图集打包页。
- * 一次导入多张素材 → MaxRects 装箱成一张紧凑图集 → 导出 PNG + TexturePacker 兼容元数据。
+ * 雪碧图（图集打包）页。
+ * 一次导入多张素材 → MaxRects / 网格装箱成一页或多页图集 → 导出 PNG + 多格式元数据。
  */
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 
 const state = computed(() => workspace.atlaspack)
 const input = ref<HTMLInputElement>()
+/** 回读重打包的文件选择器（图集图片 + JSON 元数据） */
+const atlasInput = ref<HTMLInputElement>()
 /** 解码后的素材缓存，key 为素材 id；不放进 store，避免响应式代理大对象 */
 const images = new Map<string, HTMLImageElement>()
-/** 最近一次成功打包产出的帧元数据，导出时直接复用 */
-let packedMeta: Record<string, FrameMeta> | null = null
+/** 最近一次成功打包产出的每页帧元数据，导出时直接复用（与 result 页序一一对应） */
+let packedMetas: Record<string, FrameMeta>[] | null = null
 
 const packing = ref(false)
 const exporting = ref(false)
 /** 预览区悬停高亮的落位 id */
 const hoverId = ref('')
+/** 拖拽进入深度计数：>0 时显示高亮遮罩，解决子元素进出误触发 dragleave 的问题 */
+const dragDepth = ref(0)
+/** 导出时的 CSS 跳过帧提示（旋转帧无法用 background 无损表达） */
+const cssSkipped = ref<string[]>([])
+/** 是否显示右下角动画预览面板（纯界面开关，不参与打包参数） */
+const showAnim = ref(true)
+
+const activePage = computed(() => Math.min(state.value.activePage, Math.max(0, state.value.previewUrls.length - 1)))
+const activeResult = computed(() => state.value.result?.[activePage.value] ?? null)
+/** 全部页的落位总数，供头部徽标展示 */
+const totalPlacements = computed(() => state.value.result?.reduce((sum, page) => sum + page.placements.length, 0) ?? 0)
 
 /** 生成素材唯一 id */
 function nextId(): string {
   return `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
+}
+
+/** 判断拖拽事件是否携带文件 */
+function hasFiles(e: DragEvent): boolean {
+  return Boolean(e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files'))
+}
+
+function onDragEnter(e: DragEvent): void {
+  if (hasFiles(e)) dragDepth.value++
+}
+
+function onDragLeave(): void {
+  dragDepth.value = Math.max(0, dragDepth.value - 1)
+}
+
+/** 松手即导入：复用文件选择器的导入管线 */
+function onDrop(e: DragEvent): void {
+  dragDepth.value = 0
+  void importFiles(e.dataTransfer?.files ?? null)
 }
 
 /** 校验并导入一批素材：逐个解码记录尺寸，任一失败则整批回滚，避免半成品列表 */
@@ -49,6 +84,7 @@ async function importFiles(files: FileList | null): Promise<void> {
     }
     state.value.items.push(...added)
     state.value.status = 'ready'
+    scheduleRepack()
   } catch (error) {
     // 回滚：释放本批已创建的 URL 与缓存，保持与界面列表一致
     createdUrls.forEach((url) => URL.revokeObjectURL(url))
@@ -64,6 +100,58 @@ function onFileChange(e: Event): void {
   void importFiles((e.target as HTMLInputElement).files)
 }
 
+function onAtlasFileChange(e: Event): void {
+  void importAtlasFiles((e.target as HTMLInputElement).files)
+}
+
+/**
+ * 回读重打包：导入已有图集图片 + JSON 元数据（TexturePacker 哈希/数组格式），
+ * 按帧矩形逐帧抠出（旋转帧自动还原）并转成素材，之后走常规打包管线重新装箱。
+ */
+async function importAtlasFiles(files: FileList | null): Promise<void> {
+  if (!files?.length) return
+  state.value.error = ''
+  const list = Array.from(files)
+  const imageFile = list.find((f) => f.type.startsWith('image/'))
+  const jsonFile = list.find((f) => f.type === 'application/json' || /\.json$/i.test(f.name))
+  if (!imageFile || !jsonFile) {
+    state.value.error = '请同时选择图集图片和对应的 JSON 元数据文件'
+    return
+  }
+  const added: typeof state.value.items = []
+  const createdUrls: string[] = []
+  try {
+    const imageUrl = URL.createObjectURL(imageFile)
+    createdUrls.push(imageUrl)
+    const [image, parsed] = await Promise.all([
+      loadImage(imageUrl, '图集图片加载失败'),
+      jsonFile.text().then(parseJsonAtlas),
+    ])
+    if (!parsed.frames.length) throw new Error('JSON 元数据中没有任何帧')
+    for (const frame of parsed.frames) {
+      const canvas = drawFrame(image, { x: frame.rect.x, y: frame.rect.y, w: frame.rect.w, h: frame.rect.h, rotated: frame.rotated })
+      const blob = await canvasToBlob(canvas)
+      releaseCanvas(canvas)
+      const url = URL.createObjectURL(blob)
+      createdUrls.push(url)
+      const id = nextId()
+      const frameImage = await loadImage(url, `「${frame.name}」加载失败`)
+      images.set(id, frameImage)
+      added.push({ id, name: frame.name, url, width: frameImage.naturalWidth, height: frameImage.naturalHeight })
+    }
+    state.value.items.push(...added)
+    state.value.status = 'ready'
+    scheduleRepack()
+  } catch (error) {
+    // 失败回滚：释放本批 URL 与解码缓存
+    createdUrls.forEach((url) => URL.revokeObjectURL(url))
+    added.forEach((item) => images.delete(item.id))
+    state.value.error = error instanceof Error ? error.message : '图集导入失败'
+  } finally {
+    if (atlasInput.value) atlasInput.value.value = ''
+  }
+}
+
 /** 移除单个素材：同时释放 blob 与解码缓存 */
 function removeItem(id: string): void {
   const index = state.value.items.findIndex((item) => item.id === id)
@@ -71,19 +159,32 @@ function removeItem(id: string): void {
   URL.revokeObjectURL(state.value.items[index].url)
   images.delete(id)
   state.value.items.splice(index, 1)
-  if (state.value.status === 'packed') invalidate()
+  scheduleRepack()
 }
 
 /** 参数或素材变化后作废当前打包结果，强制重新打包 */
 function invalidate(): void {
   state.value.status = state.value.items.length ? 'ready' : 'empty'
   state.value.result = null
-  state.value.previewUrl = ''
-  packedMeta = null
+  state.value.previewUrls = []
+  state.value.activePage = 0
+  state.value.warnings = []
+  packedMetas = null
+  cssSkipped.value = []
 }
 
-/** 参数变化即作废结果，避免展示与当前参数不符的旧图集 */
-watch(() => state.value.settings, () => { if (state.value.status === 'packed') invalidate() }, { deep: true })
+/** 自动重打包的防抖定时器 */
+let repackTimer: number | undefined
+
+/** 参数/素材变化后自动重打包（防抖 300ms），仅在已有打包结果时触发，避免导入阶段空跑 */
+function scheduleRepack(): void {
+  if (state.value.status !== 'packed') return
+  window.clearTimeout(repackTimer)
+  repackTimer = window.setTimeout(() => { void pack() }, 300)
+}
+
+/** 参数变化即自动重打包，预览始终与当前参数同步 */
+watch(() => state.value.settings, scheduleRepack, { deep: true })
 
 /** 热更新/切页重挂载后，从 store 里的 blob URL 重新解码素材缓存 */
 watch(() => state.value.items.length, async (count) => {
@@ -102,6 +203,24 @@ function collectPackItems(): PackItem[] {
     .filter((item) => Boolean(item.image))
 }
 
+/** 收敛到 0-1 区间 */
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0.5))
+}
+
+/** 由锚点预设解析出归一化坐标（写入元数据 pivot 字段） */
+function resolvePivot(): { x: number; y: number } {
+  const s = state.value.settings
+  switch (s.pivotMode) {
+    case 'topleft': return { x: 0, y: 0 }
+    case 'topcenter': return { x: 0.5, y: 0 }
+    case 'bottomcenter': return { x: 0.5, y: 1 }
+    case 'bottomleft': return { x: 0, y: 1 }
+    case 'custom': return { x: clamp01(s.pivotX), y: clamp01(s.pivotY) }
+    default: return { x: 0.5, y: 0.5 }
+  }
+}
+
 /** 当前打包参数 */
 function packOptions(): PackOptions {
   const s = state.value.settings
@@ -109,10 +228,13 @@ function packOptions(): PackOptions {
     padding: s.padding, margin: s.margin, maxSize: s.maxSize,
     allowRotate: s.allowRotate, powerOfTwo: s.powerOfTwo,
     trim: s.trim, alphaThreshold: s.alphaThreshold,
+    layout: s.layout, heuristic: s.heuristic,
+    gridColumns: s.gridColumns, gridCell: s.gridCell, extrude: s.extrude,
+    mergeDuplicate: s.mergeDuplicate,
   }
 }
 
-/** 执行打包：装箱 → 渲染图集 → 写入预览与落位结果 */
+/** 执行打包：多页装箱 → 逐页渲染图集 → 写入预览、落位结果与告警 */
 async function pack(): Promise<void> {
   if (!state.value.items.length || packing.value) return
   packing.value = true
@@ -121,19 +243,38 @@ async function pack(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
   try {
     const items = collectPackItems()
-    const result = packItems(items, packOptions())
-    const rendered = renderAtlas(items, result, Math.max(0, Math.round(state.value.settings.padding)))
-    packedMeta = rendered.meta
-    state.value.result = {
-      width: result.width,
-      height: result.height,
-      fillRatio: result.fillRatio,
-      placements: result.placements.map((p) => ({
-        id: p.id, name: p.name, x: p.x, y: p.y, w: p.w, h: p.h,
-        rotated: p.rotated, trimmed: p.trimmed, sourceSize: { ...p.sourceSize },
-      })),
+    const opts = packOptions()
+    const multi = packItemsMultiPage(items, opts)
+    const s = state.value.settings
+    const renderOpts = {
+      padding: Math.max(0, Math.round(opts.padding)),
+      extrude: opts.extrude,
+      format: s.imageFormat,
+      quality: Math.min(100, Math.max(0, s.webpQuality)) / 100,
+      pivot: resolvePivot(),
     }
-    state.value.previewUrl = rendered.url
+    const pages: AtlasPackPageResult[] = []
+    const urls: string[] = []
+    const metas: Record<string, FrameMeta>[] = []
+    for (const page of multi.pages) {
+      const rendered = renderAtlas(items, page, renderOpts)
+      urls.push(rendered.url)
+      metas.push(rendered.meta)
+      pages.push({
+        width: page.width,
+        height: page.height,
+        fillRatio: page.fillRatio,
+        placements: page.placements.map((p) => ({
+          id: p.id, name: p.name, x: p.x, y: p.y, w: p.w, h: p.h,
+          rotated: p.rotated, trimmed: p.trimmed, sourceSize: { ...p.sourceSize },
+        })),
+      })
+    }
+    packedMetas = metas
+    state.value.result = pages
+    state.value.previewUrls = urls
+    state.value.activePage = 0
+    state.value.warnings = [...multi.errors]
     state.value.status = 'packed'
   } catch (error) {
     invalidate()
@@ -144,23 +285,51 @@ async function pack(): Promise<void> {
   }
 }
 
-/** 导出 ZIP：图集 PNG + JSON（可选 plist），元数据不足时提示重新打包 */
+/** 页下标对应的文件名后缀：第一页不带序号，其后为 -2、-3… */
+function pageSuffix(index: number): string {
+  return index === 0 ? '' : `-${index + 1}`
+}
+
+/** 导出 ZIP：每页图集 PNG + 按勾选输出 JSON / plist / CSS / 数组 JSON 元数据 */
 async function exportZip(): Promise<void> {
-  const result = state.value.result
-  if (!result || !packedMeta || !state.value.previewUrl) return
+  const pages = state.value.result
+  const urls = state.value.previewUrls
+  if (!pages?.length || !packedMetas || urls.length !== pages.length) return
   exporting.value = true
   state.value.error = ''
+  cssSkipped.value = []
   try {
     const base = state.value.settings.name.trim() || 'atlas'
-    const pngName = `${base}.png`
-    const entries: Array<{ name: string; blob: Blob | string }> = [{ name: pngName, blob: state.value.previewUrl }]
-    if (state.value.settings.withMetaJson) {
-      entries.push({ name: `${base}.json`, blob: buildAtlasJson(packedMeta, { w: result.width, h: result.height }, pngName) })
-    }
-    if (state.value.settings.withMetaPlist) {
-      entries.push({ name: `${base}.plist`, blob: buildPlist(packedMeta, { w: result.width, h: result.height }, pngName) })
-    }
+    const ext = state.value.settings.imageFormat === 'webp' ? 'webp' : 'png'
+    const entries: Array<{ name: string; blob: Blob | string }> = []
+    pages.forEach((page, index) => {
+      const suffix = pageSuffix(index)
+      const imageName = `${base}${suffix}.${ext}`
+      const meta = packedMetas![index]
+      const size = { w: page.width, h: page.height }
+      const animations = state.value.settings.withAnimations ? groupAnimations(Object.keys(meta)) : undefined
+      entries.push({ name: imageName, blob: urls[index] })
+      if (state.value.settings.withMetaJson) {
+        entries.push({ name: `${base}${suffix}.json`, blob: buildAtlasJson(meta, size, imageName, animations) })
+      }
+      if (state.value.settings.withMetaPlist) {
+        entries.push({ name: `${base}${suffix}.plist`, blob: buildPlist(meta, size, imageName) })
+      }
+      if (state.value.settings.withJsonArray) {
+        entries.push({ name: `${base}${suffix}-array.json`, blob: buildAtlasJsonArray(meta, size, imageName, animations) })
+      }
+      if (state.value.settings.withCss) {
+        const { css, skipped } = buildCssSprites(meta, imageName)
+        entries.push({ name: `${base}${suffix}.css`, blob: css })
+        cssSkipped.value.push(...skipped.map((name) => `第 ${index + 1} 页：旋转帧「${name}」无法写入 CSS，已跳过`))
+      }
+    })
     await downloadZip(entries, `${base}.zip`)
+    state.value.warnings = [
+      // 保留打包阶段的告警（超大素材跳过等），追加本次导出的 CSS 跳过提示
+      ...state.value.warnings.filter((w) => !w.includes('无法写入 CSS')),
+      ...cssSkipped.value,
+    ]
   } catch (error) {
     state.value.error = error instanceof Error ? error.message : '导出失败'
   } finally {
@@ -168,9 +337,9 @@ async function exportZip(): Promise<void> {
   }
 }
 
-/** 窄屏与缩放无关：落位框按图集尺寸换算成百分比定位 */
+/** 窄屏与缩放无关：落位框按当前页尺寸换算成百分比定位 */
 function placementStyle(placement: { x: number; y: number; w: number; h: number }): Record<string, string> {
-  const result = state.value.result
+  const result = activeResult.value
   if (!result) return {}
   return {
     left: `${(placement.x / result.width) * 100}%`,
@@ -182,25 +351,23 @@ function placementStyle(placement: { x: number; y: number; w: number; h: number 
 
 /** 重置整页 */
 function resetAll(): void {
+  window.clearTimeout(repackTimer)
   images.clear()
-  packedMeta = null
+  packedMetas = null
   hoverId.value = ''
+  dragDepth.value = 0
+  cssSkipped.value = []
   resetAtlasPack()
 }
 </script>
 
 <template>
-  <div class="tool-page">
+  <div class="tool-page" @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
+    <!-- 左栏：仅展示图集素材列表 -->
     <section class="tool-sidebar panel">
       <div class="section">
-        <h2 class="section-title">智能图集打包</h2>
-        <p class="muted">MaxRects 装箱，本地处理不上传</p>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">素材来源</h2>
-        <button class="btn btn-primary full" @click="input?.click()">导入图片（可多选）</button>
-        <input ref="input" hidden multiple type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
+        <h2 class="section-title">图集列表</h2>
+        <p class="muted hint">素材按导入顺序参与打包，可单独移除</p>
         <ul v-if="state.items.length" class="pack-list">
           <li v-for="item in state.items" :key="item.id" class="pack-row">
             <img class="pack-thumb" :src="item.url" :alt="item.name" draggable="false" />
@@ -211,16 +378,136 @@ function resetAll(): void {
         </ul>
         <p v-else class="muted">尚未导入素材</p>
       </div>
+    </section>
+
+    <main class="tool-main">
+      <div class="tool-header">
+        <div>
+          <h2>雪碧图工作区</h2>
+          <p>
+            <template v-if="state.result">
+              {{ state.items.length }} 张素材 → {{ state.result.length }} 页图集 · 共 {{ totalPlacements }} 处落位
+            </template>
+            <template v-else>导入多张素材后点击「开始打包」</template>
+          </p>
+        </div>
+        <span v-if="state.status === 'packed'" class="badge badge-accent">
+          {{ activeResult ? `${activeResult.width}×${activeResult.height} · 填充率 ${(activeResult.fillRatio * 100).toFixed(1)}%` : '' }}
+        </span>
+      </div>
+
+      <div class="tool-body">
+        <div v-if="!state.previewUrls.length" class="empty-state">
+          <span class="big">▤</span>
+          <strong>还没有可打包的素材</strong>
+          <span>一次导入多张角色帧 / 道具 / 图标（PNG / JPG / WebP，单张 ≤ 20MB），或直接拖拽到此处</span>
+        </div>
+
+        <template v-else>
+          <div v-if="state.previewUrls.length > 1" class="page-tabs">
+            <button
+              v-for="(url, index) in state.previewUrls"
+              :key="url"
+              class="page-tab"
+              :class="{ active: index === activePage }"
+              @click="state.activePage = index"
+            >
+              第 {{ index + 1 }} 页
+            </button>
+          </div>
+
+          <div class="pack-preview-wrap">
+            <div class="pack-preview">
+              <img class="pack-image" :src="state.previewUrls[activePage]" alt="打包结果" draggable="false" />
+              <div class="pack-overlay">
+                <div
+                  v-for="placement in activeResult?.placements ?? []"
+                  :key="placement.id"
+                  class="pack-cell"
+                  :class="{ active: hoverId === placement.id }"
+                  :style="placementStyle(placement)"
+                  :title="`${placement.name} · ${placement.sourceSize.w}×${placement.sourceSize.h}${placement.rotated ? ' · 已旋转' : ''}`"
+                  @mouseenter="hoverId = placement.id"
+                  @mouseleave="hoverId = ''"
+                ></div>
+              </div>
+            </div>
+            <p v-if="hoverId" class="muted mono">
+              {{ activeResult?.placements.find((p) => p.id === hoverId)?.name }}
+            </p>
+          </div>
+
+          <AtlasAnimationPreview
+            v-if="showAnim && activeResult"
+            :result="activeResult"
+            :preview-url="state.previewUrls[activePage]"
+          />
+        </template>
+
+        <transition name="fade">
+          <div v-if="dragDepth > 0" class="drag-mask">
+            <span>松开以导入图片</span>
+          </div>
+        </transition>
+      </div>
+    </main>
+
+    <!-- 右栏：导入、布局参数与导出配置 -->
+    <section class="tool-sidepanel panel">
+      <div class="section">
+        <h2 class="section-title">雪碧图打包</h2>
+        <p class="muted">MaxRects / 网格装箱，放不下自动分页，本地处理不上传</p>
+        <label class="check-row"><input v-model="showAnim" type="checkbox" /> 动画预览（右下角悬浮）</label>
+        <button class="btn btn-primary full" @click="input?.click()">导入图片（可多选）</button>
+        <input ref="input" hidden multiple type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
+        <button class="btn full" @click="atlasInput?.click()">导入已有图集（图片 + JSON）</button>
+        <input ref="atlasInput" hidden multiple type="file" accept="image/png,image/jpeg,image/webp,.json,application/json" @change="onAtlasFileChange" />
+        <p class="muted hint">也可直接把图片拖进中间工作区；回读导入需同时选择图集图片与 JSON 元数据</p>
+      </div>
 
       <div class="section">
-        <h2 class="section-title">打包参数</h2>
+        <h2 class="section-title">布局参数</h2>
         <label class="field">
-          <span class="field-label">最大边长</span>
-          <select v-model.number="state.settings.maxSize" class="select">
-            <option :value="512">512 px</option>
-            <option :value="1024">1024 px</option>
-            <option :value="2048">2048 px</option>
-            <option :value="4096">4096 px</option>
+          <span class="field-label">布局方式</span>
+          <select v-model="state.settings.layout" class="select">
+            <option value="compact">紧凑装箱（MaxRects）</option>
+            <option value="grid">固定网格</option>
+            <option value="strip-h">横向条带（单行）</option>
+            <option value="strip-v">纵向条带（单列）</option>
+          </select>
+        </label>
+        <template v-if="state.settings.layout === 'compact'">
+          <label class="field">
+            <span class="field-label">装箱启发式</span>
+            <select v-model="state.settings.heuristic" class="select">
+              <option value="bssf">残留最小边（BSSF）</option>
+              <option value="bl">底左（BL）</option>
+              <option value="contact">接触周长（Contact）</option>
+            </select>
+          </label>
+          <label class="check-row"><input v-model="state.settings.allowRotate" type="checkbox" /> 允许 90° 旋转以提升紧凑度</label>
+        </template>
+        <template v-else-if="state.settings.layout === 'grid'">
+          <div class="field-row">
+            <label class="field">
+              <span class="field-label">列数（0 自动）</span>
+              <input v-model.number="state.settings.gridColumns" class="input" type="number" min="0" />
+            </label>
+            <label class="field">
+              <span class="field-label">格尺寸（0 自动）</span>
+              <input v-model.number="state.settings.gridCell" class="input" type="number" min="0" />
+            </label>
+          </div>
+          <p class="muted hint">网格模式按固定单元格排布，不旋转，适合帧动画序列。</p>
+        </template>
+        <p v-else class="muted hint">条带模式按导入顺序单行/单列排布，不旋转，放不下自动分页。</p>
+        <label class="check-row"><input v-model="state.settings.mergeDuplicate" type="checkbox" /> 合并相同帧（Alias 去重）</label>
+        <label class="field">
+          <span class="field-label">边缘外扩（extrude）</span>
+          <select v-model.number="state.settings.extrude" class="select">
+            <option :value="0">不外扩</option>
+            <option :value="1">1 px</option>
+            <option :value="2">2 px</option>
           </select>
         </label>
         <div class="field-row">
@@ -233,24 +520,66 @@ function resetAll(): void {
             <input v-model.number="state.settings.margin" class="input" type="number" min="0" />
           </label>
         </div>
+        <label class="field">
+          <span class="field-label">最大边长</span>
+          <select v-model.number="state.settings.maxSize" class="select">
+            <option :value="512">512 px</option>
+            <option :value="1024">1024 px</option>
+            <option :value="2048">2048 px</option>
+            <option :value="4096">4096 px</option>
+          </select>
+        </label>
         <label class="check-row"><input v-model="state.settings.trim" type="checkbox" /> 裁掉透明边（trim）</label>
         <label v-if="state.settings.trim" class="field">
           <span class="field-label">裁剪 alpha 阈值 {{ state.settings.alphaThreshold }}</span>
           <input v-model.number="state.settings.alphaThreshold" class="range" type="range" min="1" max="64" />
         </label>
-        <label class="check-row"><input v-model="state.settings.allowRotate" type="checkbox" /> 允许 90° 旋转以提升紧凑度</label>
         <label class="check-row"><input v-model="state.settings.powerOfTwo" type="checkbox" /> 宽高取 2 的幂</label>
-        <p class="muted hint">自动从面积下界起搜索最紧凑的图集尺寸，命中即停。</p>
       </div>
 
       <div class="section">
         <h2 class="section-title">导出</h2>
         <label class="field">
+          <span class="field-label">图片格式</span>
+          <select v-model="state.settings.imageFormat" class="select">
+            <option value="png">PNG</option>
+            <option value="webp">WebP</option>
+          </select>
+        </label>
+        <label v-if="state.settings.imageFormat === 'webp'" class="field">
+          <span class="field-label">WebP 质量 {{ state.settings.webpQuality }}</span>
+          <input v-model.number="state.settings.webpQuality" class="range" type="range" min="10" max="100" />
+        </label>
+        <label class="field">
+          <span class="field-label">锚点（Pivot，写入元数据）</span>
+          <select v-model="state.settings.pivotMode" class="select">
+            <option value="center">中心</option>
+            <option value="topleft">左上</option>
+            <option value="topcenter">上中</option>
+            <option value="bottomcenter">下中</option>
+            <option value="bottomleft">左下</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
+        <div v-if="state.settings.pivotMode === 'custom'" class="field-row">
+          <label class="field">
+            <span class="field-label">X (0-1)</span>
+            <input v-model.number="state.settings.pivotX" class="input" type="number" min="0" max="1" step="0.05" />
+          </label>
+          <label class="field">
+            <span class="field-label">Y (0-1)</span>
+            <input v-model.number="state.settings.pivotY" class="input" type="number" min="0" max="1" step="0.05" />
+          </label>
+        </div>
+        <label class="field">
           <span class="field-label">图集文件名</span>
           <input v-model="state.settings.name" class="input" type="text" spellcheck="false" placeholder="atlas" />
         </label>
-        <label class="check-row"><input v-model="state.settings.withMetaJson" type="checkbox" /> 附带 JSON 元数据</label>
+        <label class="check-row"><input v-model="state.settings.withMetaJson" type="checkbox" /> 附带 JSON 元数据（哈希格式）</label>
+        <label class="check-row"><input v-model="state.settings.withJsonArray" type="checkbox" /> 附带 JSON 元数据（数组格式）</label>
+        <label class="check-row"><input v-model="state.settings.withAnimations" type="checkbox" /> JSON 附带命名动画分组</label>
         <label class="check-row"><input v-model="state.settings.withMetaPlist" type="checkbox" /> 附带 plist 元数据</label>
+        <label class="check-row"><input v-model="state.settings.withCss" type="checkbox" /> 附带 CSS sprites 样式表</label>
       </div>
 
       <div class="section actions">
@@ -260,66 +589,24 @@ function resetAll(): void {
         <button class="btn full" :disabled="state.status !== 'packed' || exporting" @click="exportZip">
           {{ exporting ? '导出中…' : '导出 ZIP' }}
         </button>
-        <button class="btn btn-ghost full" :disabled="!state.items.length && !state.previewUrl" @click="resetAll">重置</button>
+        <button class="btn btn-ghost full" :disabled="!state.items.length && !state.previewUrls.length" @click="resetAll">重置</button>
         <p v-if="state.error" class="error-text">{{ state.error }}</p>
+        <p v-for="(warning, index) in state.warnings" :key="index" class="warning-text">{{ warning }}</p>
       </div>
     </section>
-
-    <main class="tool-main">
-      <div class="tool-header">
-        <div>
-          <h2>图集工作区</h2>
-          <p>
-            <template v-if="state.result">
-              {{ state.items.length }} 张 → {{ state.result.width }}×{{ state.result.height }} px · 填充率 {{ (state.result.fillRatio * 100).toFixed(1) }}%
-            </template>
-            <template v-else>导入多张素材后点击「开始打包」</template>
-          </p>
-        </div>
-        <span v-if="state.status === 'packed'" class="badge badge-accent">{{ state.result?.placements.length }} 处落位</span>
-      </div>
-
-      <div class="tool-body">
-        <div v-if="!state.previewUrl" class="empty-state">
-          <span class="big">▤</span>
-          <strong>还没有可打包的素材</strong>
-          <span>一次导入多张角色帧 / 道具 / 图标（PNG / JPG / WebP，单张 ≤ 20MB），自动装箱成一张图集</span>
-        </div>
-
-        <div v-else class="pack-preview-wrap">
-          <div class="pack-preview">
-            <img class="pack-image" :src="state.previewUrl" alt="打包结果" draggable="false" />
-            <div class="pack-overlay">
-              <div
-                v-for="placement in state.result?.placements ?? []"
-                :key="placement.id"
-                class="pack-cell"
-                :class="{ active: hoverId === placement.id }"
-                :style="placementStyle(placement)"
-                :title="`${placement.name} · ${placement.sourceSize.w}×${placement.sourceSize.h}${placement.rotated ? ' · 已旋转' : ''}`"
-                @mouseenter="hoverId = placement.id"
-                @mouseleave="hoverId = ''"
-              ></div>
-            </div>
-          </div>
-          <p v-if="hoverId" class="muted mono">
-            {{ state.result?.placements.find((p) => p.id === hoverId)?.name }}
-          </p>
-        </div>
-      </div>
-    </main>
   </div>
 </template>
 
 <style scoped>
-/* 页面骨架与九宫格页同构：侧栏 + 主工作区 */
-.tool-page { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; min-height: 0; }
+/* 页面骨架：左栏图集列表 + 中间工作区 + 右栏参数配置（与精灵图页同构的三栏布局） */
+.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; position: relative; }
 .tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
+.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
 .tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
 .tool-header h2 { margin: 0; font-size: var(--fs-head); }
 .tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 24px; }
+.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); padding: 24px; position: relative; }
 .full { width: 100%; justify-content: center; }
 .actions { display: flex; flex-direction: column; gap: var(--sp-2); }
 .hint { margin: var(--sp-1) 0 0; font-size: var(--fs-caption); }
@@ -332,22 +619,33 @@ function resetAll(): void {
 .range { width: 100%; accent-color: var(--accent); }
 .select { width: 100%; }
 .error-text { color: var(--danger); font-size: var(--fs-caption); }
+.warning-text { color: var(--text-faint); font-size: var(--fs-caption); }
 
-/* 素材列表 */
-.pack-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); max-height: 240px; overflow: auto; }
+/* 素材列表（左栏整列展示，滚动交给侧栏容器） */
+.pack-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
 .pack-row { display: flex; align-items: center; gap: var(--sp-2); }
 .pack-thumb { width: 26px; height: 26px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
 .pack-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
 
+/* 多页切换标签 */
+.page-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: center; }
+.page-tab { padding: 4px 14px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text); cursor: pointer; }
+.page-tab.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
 /* 结果预览：img 与 overlay 共用同一盒模型，落位按百分比定位 */
 .pack-preview-wrap { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
 .pack-preview { position: relative; display: inline-block; line-height: 0; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.pack-image { display: block; max-width: 100%; max-height: 62vh; object-fit: contain; }
+.pack-image { display: block; max-width: 100%; max-height: 56vh; object-fit: contain; }
 .pack-overlay { position: absolute; inset: 0; }
 .pack-cell { position: absolute; border: 1px solid transparent; transition: background 0.1s, border-color 0.1s; }
 .pack-cell:hover, .pack-cell.active { border-color: var(--accent); background: var(--accent-dim); }
 
+/* 拖拽高亮遮罩 */
+.drag-mask { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: var(--radius-s); background: var(--accent-dim); color: var(--accent); font-size: var(--fs-head); pointer-events: none; }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.15s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
 @media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 260px minmax(0, 1fr); }
+  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
 }
 </style>

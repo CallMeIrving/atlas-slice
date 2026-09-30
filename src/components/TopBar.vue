@@ -7,7 +7,7 @@ import { modelManager } from '@/store/model-status'
 /** 2D 工具下拉框条目：page 为 null 表示本期未实现（禁用展示） */
 const TOOL_ENTRIES: { page: WorkspacePage | null; label: string }[] = [
   { page: 'nineslice', label: '九宫格切图' },
-  { page: 'atlaspack', label: '智能图集打包' },
+  { page: 'atlaspack', label: '雪碧图' },
   { page: 'palette', label: '调色板换色' },
   { page: 'tilemap', label: 'Tilemap 切片' },
   { page: null, label: '洋葱皮预览' },
@@ -53,13 +53,15 @@ const pageStatus = computed(() => {
     return `${workspace.palette.slots.length} 色槽 · ${workspace.palette.variants.length} 套变体`
   }
   if (workspace.page === 'atlaspack') {
-    return workspace.atlaspack.status === 'packed'
-      ? `${workspace.atlaspack.result?.placements.length ?? 0} 处落位`
-      : `${workspace.atlaspack.items.length} 张素材`
+    if (workspace.atlaspack.status !== 'packed') return `${workspace.atlaspack.items.length} 张素材`
+    const pages = workspace.atlaspack.result?.length ?? 0
+    const total = workspace.atlaspack.result?.reduce((sum, page) => sum + page.placements.length, 0) ?? 0
+    return pages > 1 ? `${total} 处落位 · ${pages} 页` : `${total} 处落位`
   }
   if (workspace.page === 'directionsprite') {
-    if (!workspace.directionsprite.frames.length) return '未导入'
-    return `${workspace.directionsprite.frames.length} 帧 · ${workspace.directionsprite.slots.filter((slot) => slot.source).length} 方向`
+    const frames = workspace.directionsprite.groups.reduce((sum, group) => sum + group.frames.length, 0)
+    if (!frames) return '未导入'
+    return `${workspace.directionsprite.groups.length} 组 ${frames} 帧 · ${workspace.directionsprite.slots.filter((slot) => slot.source).length} 方向`
   }
   if (workspace.page === 'tilemap') {
     return workspace.tilemap.image ? `${workspace.tilemap.tiles} 块` : '未导入'
