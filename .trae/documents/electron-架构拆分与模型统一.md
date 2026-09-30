@@ -141,9 +141,12 @@ atlas-slice/
 待完成 / 后续可选：
 
 - **代码签名与公证**：当前 `mac.identity: null`，仅本机与内网分发（分发前需 `xattr -dr com.apple.quarantine`）。
-- **自定义应用图标**：仓库内 `logo.png` 仅 256×256，低于生成 `.icns` 所需的 512，暂沿用 Electron 默认图标。
 - **单点模型清单**：浏览器 `src/core/model-registry.json` 与 Python `backend/app/models/registry.py` 仍各自保留（集合互不相交），如需单点可把后者改为读共享 JSON。
 - **自定义协议供给模型**：已评估并跳过（理由见上）。
+
+已完成（追加）：
+
+- **应用图标**：`public/assets/logo.png` 换成 1024×1024 带透明边的图标版，`mac.icon` 指向它，electron-builder 生成 `icon.icns`。
 
 ## 需修改/新增的关键文件清单
 

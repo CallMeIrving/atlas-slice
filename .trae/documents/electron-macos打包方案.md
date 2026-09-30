@@ -57,7 +57,7 @@ Python 子进程经 env 注入 `LAYER_SPLIT_MODELS_DIR` / `LAYER_SPLIT_TMP_DIR`�
 - `files` 白名单：`dist/**`、`dist-electron/**`、`package.json`（**排除** `src/`、`backend/`、`models/`、`test-fixtures/`、`public/test-assets/`）。
 - `extraResources`：`scripts/download-models.mjs`、`src/core/model-registry.json`（下载脚本的清单）、`backend/dist/atlas-backend` → `backend/atlas-backend`（冻结后端；缺失时 electron-builder 会直接报错）。
 - `mac`：`target: [{target: dmg, arch: [arm64]}, {target: zip, arch: [arm64]}]`、`category: public.app-category.graphics-design`。
-- 暂不写 `icon`（`public/assets/logo.png` 仅 256×256，低于 512 会被回退为默认图标）；后续加 `build/icon.png`（≥1024）即可。
+- `icon: public/assets/logo.png`：1024×1024、且**圆角矩形外为透明**的图标版，electron-builder 据此生成 `icon.icns`（要求 ≥512，推荐 1024）。注意 macOS 不像 iOS 会自动裁圆角，源图必须自己做好「圆角底衬 + 圆角外透明」，否则 Dock 里会显示成一个实心方块。
 
 ### 3. 主进程改造（[electron/main.ts](file:///Users/oubuwen/Documents/trae_projects/atlas-slice/electron/main.ts)）
 - `root` 拆成 `appRoot = isDev ? join(__dirname,'..') : app.getAppPath()` 与 `resources = isDev ? appRoot : process.resourcesPath`。
@@ -100,7 +100,6 @@ Python 子进程经 env 注入 `LAYER_SPLIT_MODELS_DIR` / `LAYER_SPLIT_TMP_DIR`�
 
 ## 已知限制
 
-- 无自定义图标（默认 Electron 图标）。
 - 未签名/公证，仅本机与内网分发。
 - 随包后端不携带模型权重，图层拆分首次使用仍需把权重下到 `userData/models`。
 - 包体较大（冻结后端约 400MB，含 torch）。

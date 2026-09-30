@@ -38,6 +38,9 @@ mac:
       arch:
         - arm64
   category: public.app-category.graphics-design
+  # 应用图标：logo.png 为 1024×1024 图标版（圆角矩形底衬 + 圆角外透明），
+  # electron-builder 据此生成 icon.icns（要求 ≥512；macOS 不会自动裁圆角，源图需自带透明边）
+  icon: public/assets/logo.png
   # 本机 / 内网分发，跳过签名（签名与公证留待后续阶段）
   identity: null
 

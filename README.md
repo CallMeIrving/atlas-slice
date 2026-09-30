@@ -314,7 +314,7 @@ export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-b
 - **模型落到用户数据目录**：`~/Library/Application Support/AtlasSlice/models`，首次使用时经「模型管理」应用内下载，不随包分发（权重数 GB）。
 - **Python 后端随包分发**：`backend:freeze` 的产物打进 `Contents/Resources/backend/atlas-backend/`，主进程直接 spawn 它，自带 Python 运行时，**不再依赖外部 `.venv`**。若设置了 `ATLAS_BACKEND_ROOT`，则优先使用该外部 backend（便于开发调试）。
 - **未签名 / 未公证**：本机或内网分发时如遇 Gatekeeper 拦截，执行 `xattr -dr com.apple.quarantine /Applications/AtlasSlice.app`。
-- 应用图标沿用 Electron 默认图标（仓库内 logo 尺寸不足以生成 `.icns`）。
+- **应用图标**：由 `public/assets/logo.png`（1024×1024，圆角外透明）生成，配置见 `electron-builder.yml` 的 `mac.icon`。
 
 ## 技术栈
 
