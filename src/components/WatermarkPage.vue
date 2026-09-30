@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { clampCropRect, type ImageCropRect } from '@/core/crop'
+import { clampCropRect, drawCropToCanvas, type ImageCropRect } from '@/core/crop'
+import { useRoiSelection } from '@/composables/useRoiSelection'
 import { createCancelToken, type CancelToken } from '@/core/frame-extract'
 import { rgbToHex } from '@/core/frame-matte'
 import { imageToImageData, loadImage } from '@/core/image'
@@ -18,13 +19,14 @@ import {
   workspace,
   type WatermarkMode,
 } from '@/store/workspace'
-import FrameCropEditor from '@/components/FrameCropEditor.vue'
+import ImageCompareViewer from '@/components/ImageCompareViewer.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
 
 /**
  * 去水印页。
  * 数据来源既可以是导入的单张图片，也可以是视频帧列表（用样板帧调参、再批量应用）；
  * 算法全部走 core/watermark 的零模型本地实现，与抠图链路通过 frame.watermarkUrl 打通。
+ * 工作区为单舞台融合：框选态在原图上编辑 ROI，处理完成后自动切换为前后对比（分割线 + 缩放 + 平移）。
  */
 
 const MODE_OPTIONS: { value: WatermarkMode; label: string; hint: string }[] = [
@@ -58,12 +60,17 @@ const QUALITY_OPTIONS: { value: number; label: string }[] = [
 ]
 
 const input = ref<HTMLInputElement>()
+const viewer = ref<InstanceType<typeof ImageCompareViewer> | null>(null)
 /** 自动采样到的底色，展示用 */
 const sampledBase = ref('')
 /** alpha 模式退化提示 */
 const degraded = ref(false)
-/** ROI 是否已为当前来源准备好（准备好后才挂载编辑器，避免编辑器先按整帧兜底覆盖初始 ROI） */
+/** ROI 是否已为当前来源准备好（准备好后才挂载框选覆盖层，避免先按整帧兜底覆盖初始 ROI） */
 const roiReady = ref(false)
+/** 对比分割线位置（0–100） */
+const divider = ref(50)
+/** 用户意图：是否处于框选态（处理成功后自动退出，「重新框选区域」按钮找回） */
+const roiEditMode = ref(true)
 const batch = ref({ running: false, done: 0, total: 0 })
 const statusText = ref('')
 const errorText = ref('')
@@ -78,6 +85,14 @@ let runToken = 0
 /** 来源图像的像素数据与图像元素各缓存一条，避免重复解码 */
 let sampleCache: { url: string; data: ImageData } | null = null
 let sourceImageCache: { url: string; image: HTMLImageElement } | null = null
+let resultImageCache: { url: string; image: HTMLImageElement } | null = null
+
+/** 框选交互状态机：图像元素从对比组件取（getBoundingClientRect 天然包含缩放平移），更新写回 store */
+const roi = useRoiSelection({
+  getImage: () => viewer.value?.getImageEl() ?? null,
+  onUpdate: (rect) => { workspace.watermark.roi = rect },
+})
+const { box, tool, natural, handles, setBox, onStageDown, onBoxDown, onHandleDown } = roi
 
 const frames = computed(() => workspace.video.frames)
 const isFrames = computed(() => workspace.watermark.source === 'frames')
@@ -90,7 +105,8 @@ const usesThreshold = computed(() => plan.value?.mode === 'patch')
 /** 精细度只作用于 texture 模式（PatchMatch 的金字塔层数与迭代次数），其余模式不看这个值 */
 const isTextureMode = computed(() => workspace.watermark.settings.mode === 'texture')
 const activeModeHint = computed(() => MODE_OPTIONS.find((item) => item.value === workspace.watermark.settings.mode)?.hint ?? '')
-const editorCaption = computed(() => `点击水印所在位置框选 · 当前 ROI ${roiLabel.value}`)
+/** 框选态：用户意图框选，或还没有可对比的结果 */
+const editingRoi = computed(() => roiEditMode.value || !resultUrl.value)
 const roiLabel = computed(() => {
   const rect = workspace.watermark.roi
   return rect ? `${Math.round(rect.x)},${Math.round(rect.y)} · ${Math.round(rect.width)}×${Math.round(rect.height)} px` : '未设置'
@@ -102,11 +118,45 @@ const sampleFrame = computed(() => {
   return list.find((frame) => frame.id === workspace.watermark.frameId) ?? list[0] ?? null
 })
 
-/** ROI 双向绑定：编辑器只在本组件确认 ROI 就绪后挂载，因此这里始终有值 */
-const roiModel = computed<ImageCropRect>({
-  get: () => workspace.watermark.roi ?? { x: 0, y: 0, width: 0, height: 0 },
-  set: (value) => { workspace.watermark.roi = value },
+/** ROI 框在覆盖层内的百分比定位：覆盖层与图像显示盒重合，天然跟随缩放平移 */
+const roiBoxStyle = computed(() => {
+  const size = natural.value
+  if (!size.width || !size.height) return { display: 'none' }
+  return {
+    left: `${(box.value.x / size.width) * 100}%`,
+    top: `${(box.value.y / size.height) * 100}%`,
+    width: `${(box.value.width / size.width) * 100}%`,
+    height: `${(box.value.height / size.height) * 100}%`,
+  }
 })
+
+/** 框外四块压暗区域的百分比定位 */
+const dimStyles = computed(() => {
+  const size = natural.value
+  const b = box.value
+  if (!size.width || !size.height) return { top: {}, bottom: {}, left: {}, right: {} }
+  const x = (b.x / size.width) * 100
+  const y = (b.y / size.height) * 100
+  const w = (b.width / size.width) * 100
+  const h = (b.height / size.height) * 100
+  return {
+    top: { left: '0%', top: '0%', width: '100%', height: `${y}%` },
+    bottom: { left: '0%', top: `${y + h}%`, width: '100%', height: `${100 - y - h}%` },
+    left: { left: '0%', top: `${y}%`, width: `${x}%`, height: `${h}%` },
+    right: { left: `${x + w}%`, top: `${y}%`, width: `${100 - x - w}%`, height: `${h}%` },
+  }
+})
+
+/** 控制点定位：handle 是 .roi-box 的子元素，百分比相对框自身取 0/50/100 八个锚点；scale(1/zoom) 抵消舞台缩放保持恒定屏幕尺寸 */
+function handleStyle(handle: string, zoom: number): Record<string, string> {
+  const left = handle.includes('w') ? '0%' : handle.includes('e') ? '100%' : '50%'
+  const top = handle.includes('n') ? '0%' : handle.includes('s') ? '100%' : '50%'
+  return {
+    left,
+    top,
+    transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+  }
+}
 
 /** 取来源图像的像素数据（单条缓存，调参时避免重复解码） */
 async function sourceData(url: string): Promise<ImageData> {
@@ -129,13 +179,15 @@ function defaultCornerRect(width: number, height: number): ImageCropRect {
 }
 
 /**
- * 来源变化后的准备：清缓存 → 给一个初始 ROI → 允许挂载编辑器。
+ * 来源变化后的准备：清缓存 → 给一个初始 ROI → 回到框选态并允许挂载覆盖层。
  * ROI 已存在（例如用户切回同一来源）时只做范围收敛，保留用户手工框选的结果。
  */
 async function prepareSource(): Promise<void> {
   roiReady.value = false
   sampleCache = null
   sourceImageCache = null
+  resultImageCache = null
+  roiEditMode.value = true
   const url = sourceUrl.value
   if (!url) { workspace.watermark.roi = null; return }
   try {
@@ -143,6 +195,8 @@ async function prepareSource(): Promise<void> {
     workspace.watermark.roi = workspace.watermark.roi
       ? clampCropRect(workspace.watermark.roi, image.naturalWidth, image.naturalHeight)
       : defaultCornerRect(image.naturalWidth, image.naturalHeight)
+    natural.value = { width: image.naturalWidth, height: image.naturalHeight }
+    setBox(workspace.watermark.roi)
   } catch (error) {
     errorText.value = error instanceof Error ? error.message : '图像加载失败'
     return
@@ -150,10 +204,8 @@ async function prepareSource(): Promise<void> {
   roiReady.value = true
 }
 
-/**
- * 手动处理：按当前框选区域与参数生成结果图。
- * 修复方式是零模型本地运算，但精细档的纹理合成耗时明显，因此统一改为点「去水印」才执行。
- */
+/** 手动处理：按当前框选区域与参数生成结果图。
+ * 修复方式是零模型本地运算，但精细档的纹理合成耗时明显，因此统一改为点「去水印」才执行。 */
 async function runWatermark(): Promise<void> {
   const url = sourceUrl.value
   const area = workspace.watermark.roi
@@ -170,6 +222,8 @@ async function runWatermark(): Promise<void> {
     sampledBase.value = rgbToHex(result.plan.base.r, result.plan.base.g, result.plan.base.b)
     workspace.watermark.resultUrl = result.url
     workspace.watermark.status = 'done'
+    // 处理成功：退出框选态，舞台自动切换为前后对比
+    roiEditMode.value = false
   } catch (error) {
     if (stamp !== runToken) return
     workspace.watermark.status = 'error'
@@ -254,17 +308,65 @@ function resetAll(): void {
   errorText.value = ''
 }
 
+/** 手动输入 ROI 数值后把矩形收敛到图像范围内 */
+function normalizeRoiBox(): void {
+  const size = natural.value
+  if (!size.width || !size.height) return
+  setBox(clampCropRect(box.value, size.width, size.height))
+}
+
+/** 对比组件原图加载完成：同步像素尺寸并刷新预览条 */
+function onViewerLoad(size: { width: number; height: number }): void {
+  natural.value = size
+  scheduleRoiPreview()
+}
+
+const sourceCanvas = ref<HTMLCanvasElement>()
+const resultCanvas = ref<HTMLCanvasElement>()
+/** 预览重绘的 rAF 句柄，合并拖动时的高频变更 */
+let roiPreviewFrame = 0
+
+/** 用 rAF 合并框选拖动过程中的预览重绘 */
+function scheduleRoiPreview(): void {
+  if (roiPreviewFrame) return
+  roiPreviewFrame = window.requestAnimationFrame(() => {
+    roiPreviewFrame = 0
+    void renderRoiPreview()
+  })
+}
+
+/** 绘制底部 ROI 实时预览：原图裁切恒显，有结果时并列结果同区域裁切 */
+async function renderRoiPreview(): Promise<void> {
+  const area = workspace.watermark.roi
+  const url = sourceUrl.value
+  if (!area || !url) return
+  try {
+    const image = await sourceImage(url)
+    if (sourceCanvas.value) drawCropToCanvas(image, area, sourceCanvas.value)
+    if (!editingRoi.value && resultUrl.value) {
+      if (resultImageCache?.url !== resultUrl.value) resultImageCache = { url: resultUrl.value, image: await loadImage(resultUrl.value) }
+      if (resultCanvas.value) drawCropToCanvas(resultImageCache.image, area, resultCanvas.value)
+    }
+  } catch {
+    // 图像尚未就绪时跳过本轮，下一次变更会重新调度
+  }
+}
+
 // 来源变化：作废旧结果后重新准备 ROI；结果一律由「去水印」按钮触发，不自动重算
 watch(sourceUrl, () => {
   statusText.value = ''
   invalidateResult()
   void prepareSource()
 })
-// 框选区域或参数变化后作废旧结果：旧 plan 与当前画面已不对应，
-// 既避免右侧结果误导，也避免「应用到全部帧」按过期参数批量处理
+// 框选区域变化后作废旧结果：旧 plan 与当前画面已不对应，
+// 既避免对比视图误导，也避免「应用到全部帧」按过期参数批量处理
 watch(() => workspace.watermark.roi, () => invalidateResult())
 // 参数变化只持久化（与抠图页共用同一份本地设置），并作废旧结果
 watch(workspace.watermark.settings, () => { persistMediaSettings(); invalidateResult() }, { deep: true })
+// 框选区域（拖拽 / 输入）与结果变化后重绘预览条
+watch(box, scheduleRoiPreview, { deep: true })
+watch(resultUrl, scheduleRoiPreview)
+watch(editingRoi, scheduleRoiPreview)
 
 // 首次进入页面：已有来源时补齐 ROI
 void prepareSource()
@@ -272,24 +374,113 @@ void prepareSource()
 onBeforeUnmount(() => {
   // 离开页面时中断尚未结束的批量处理，保留已完成的帧
   token.cancelled = true
+  roi.dispose()
+  if (roiPreviewFrame) window.cancelAnimationFrame(roiPreviewFrame)
 })
 </script>
 
 <template>
-  <div class="tool-page">
-    <section class="tool-sidebar panel">
+  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+    <!-- 左栏：当前来源列表（单图为导入图，帧模式为样板帧画面），无来源时整栏不显示 -->
+    <section v-if="hasSource" class="tool-sidebar panel">
       <div class="section">
-        <h2 class="section-title">去水印</h2>
-        <p class="muted">本地处理，不上传素材</p>
+        <h2 class="section-title">图集列表</h2>
+        <ul class="asset-list">
+          <li class="asset-row">
+            <img class="asset-thumb" :src="sourceUrl" :alt="workspace.watermark.fileName" draggable="false" />
+            <span class="asset-name" :title="workspace.watermark.fileName">{{ workspace.watermark.fileName }}</span>
+            <!-- 帧模式尺寸取视频帧尺寸；单图模式 store 未记录尺寸，不显示 -->
+            <span v-if="isFrames && workspace.video.width" class="mono faint">{{ workspace.video.width }}×{{ workspace.video.height }}</span>
+            <button class="btn btn-icon btn-danger" title="移除" @click="resetAll">×</button>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <main class="tool-main">
+      <div class="tool-header">
+        <div>
+          <h2>去水印工作区</h2>
+          <p>{{ isFrames ? `样板帧 #${frames.findIndex((frame) => frame.id === sampleFrame?.id) + 1} · ${frames.length} 帧待处理` : (workspace.watermark.fileName || '导入一张图片开始处理') }}</p>
+        </div>
+        <div class="header-actions">
+          <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="load(($event.target as HTMLInputElement).files?.[0])" />
+          <button class="btn btn-primary" @click="input?.click()">导入图片</button>
+          <button class="btn" :disabled="!frames.length" @click="startWatermarkFromFrame(workspace.watermark.frameId)">使用视频帧列表（{{ frames.length }} 帧）</button>
+          <span v-if="watermarkedCount" class="badge badge-accent">{{ watermarkedCount }} 帧已去水印</span>
+        </div>
       </div>
 
+      <div class="tool-body">
+        <div v-if="!hasSource" class="empty-state">
+          <span class="big">▨</span>
+          <strong>还没有可处理的画面</strong>
+          <span>导入一张图片，或先在「视频帧」页抽帧后回到这里</span>
+        </div>
+
+        <template v-else>
+          <!-- 单舞台：框选态编辑 ROI，处理完成后自动切换为前后对比（缩放/平移/分割线） -->
+          <div class="wm-stage">
+            <ImageCompareViewer
+              ref="viewer"
+              :before-url="sourceUrl"
+              :after-url="editingRoi ? '' : resultUrl"
+              :divider="divider"
+              :selection-mode="editingRoi"
+              @update:divider="divider = $event"
+              @background-down="onStageDown($event)"
+              @load="onViewerLoad"
+            >
+              <template #overlay="{ zoom }">
+                <template v-if="editingRoi && roiReady && natural.width">
+                  <div class="roi-dim" :style="dimStyles.top"></div>
+                  <div class="roi-dim" :style="dimStyles.bottom"></div>
+                  <div class="roi-dim" :style="dimStyles.left"></div>
+                  <div class="roi-dim" :style="dimStyles.right"></div>
+                  <div class="roi-box" :style="[roiBoxStyle, { borderWidth: `${1 / zoom}px` }]" @pointerdown.stop="onBoxDown($event)">
+                    <span
+                      v-for="handle in handles"
+                      :key="handle"
+                      class="roi-handle"
+                      :class="`rh-${handle}`"
+                      :style="handleStyle(handle, zoom)"
+                      @pointerdown.stop="onHandleDown(handle, $event)"
+                    ></span>
+                  </div>
+                </template>
+              </template>
+            </ImageCompareViewer>
+          </div>
+
+          <!-- 底部 ROI 实时预览：框选区域原图裁切 + 结果同区域裁切并列 -->
+          <div v-if="roiReady" class="roi-preview">
+            <figure class="roi-preview-pane">
+              <figcaption class="faint">框选区域 · {{ roiLabel }}</figcaption>
+              <div class="roi-preview-stage checker"><canvas ref="sourceCanvas" aria-label="框选区域预览"></canvas></div>
+            </figure>
+            <figure v-if="!editingRoi && resultUrl" class="roi-preview-pane">
+              <figcaption class="faint">结果同区域</figcaption>
+              <div class="roi-preview-stage checker"><canvas ref="resultCanvas" aria-label="结果同区域预览"></canvas></div>
+            </figure>
+          </div>
+        </template>
+
+        <TaskProgress
+          v-if="batch.running || statusText || errorText"
+          :running="batch.running"
+          :done="batch.done"
+          :total="batch.total"
+          :text="statusText"
+          :error="errorText"
+          @cancel="token.cancelled = true"
+        />
+      </div>
+    </main>
+
+    <!-- 右栏：框选区域、修复方式与参数配置 -->
+    <section class="tool-sidepanel panel">
       <div class="section">
-        <h2 class="section-title">数据来源</h2>
-        <button class="btn btn-primary full" @click="input?.click()">导入图片</button>
-        <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="load(($event.target as HTMLInputElement).files?.[0])" />
-        <button class="btn full" :disabled="!frames.length" @click="startWatermarkFromFrame(workspace.watermark.frameId)">
-          使用视频帧列表（{{ frames.length }} 帧）
-        </button>
+        <h2 class="section-title">去水印</h2>
         <label v-if="isFrames && frames.length" class="field">
           <span class="field-label">样板帧</span>
           <select v-model="workspace.watermark.frameId" class="select">
@@ -298,7 +489,36 @@ onBeforeUnmount(() => {
             </option>
           </select>
         </label>
-        <p class="muted file-name">{{ workspace.watermark.fileName || '未选择来源' }}</p>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">框选区域（ROI）</h2>
+        <div class="roi-grid">
+          <label class="field">
+            <span class="field-label">X</span>
+            <input v-model.number="box.x" class="input" type="number" min="0" step="1" :max="natural.width" @change="normalizeRoiBox" />
+          </label>
+          <label class="field">
+            <span class="field-label">Y</span>
+            <input v-model.number="box.y" class="input" type="number" min="0" step="1" :max="natural.height" @change="normalizeRoiBox" />
+          </label>
+          <label class="field">
+            <span class="field-label">宽度</span>
+            <input v-model.number="box.width" class="input" type="number" min="1" step="1" :max="natural.width" @change="normalizeRoiBox" />
+          </label>
+          <label class="field">
+            <span class="field-label">高度</span>
+            <input v-model.number="box.height" class="input" type="number" min="1" step="1" :max="natural.height" @change="normalizeRoiBox" />
+          </label>
+        </div>
+        <div class="field">
+          <span class="field-label">拖拽工具</span>
+          <div class="seg">
+            <button class="seg-item" :class="{ active: tool === 'move' }" @click="tool = 'move'">调整框选</button>
+            <button class="seg-item" :class="{ active: tool === 'draw' }" @click="tool = 'draw'">重新框选</button>
+          </div>
+        </div>
+        <button class="btn full" :disabled="!roiReady || editingRoi" @click="roiEditMode = true">重新框选区域</button>
       </div>
 
       <div class="section">
@@ -346,7 +566,6 @@ onBeforeUnmount(() => {
         <label v-if="usesThreshold" class="check-row">
           <input v-model="workspace.watermark.settings.keepNoise" type="checkbox" /> 保留底色噪点
         </label>
-        <p v-if="usesThreshold" class="muted">底色本身带噪点时，平填会出现一块过于平滑的补丁；噪点用坐标哈希生成，逐帧完全一致。</p>
 
         <label v-if="isTextureMode" class="field">
           <span class="field-label">重建精细度</span>
@@ -354,9 +573,6 @@ onBeforeUnmount(() => {
             <option v-for="item in QUALITY_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
           </select>
         </label>
-        <p v-if="isTextureMode" class="muted">
-          精细度决定纹理合成的金字塔层数与迭代次数：层数越多，粗层越能约束整块结构，细层只需局部修正，结果越贴合原图纹理，代价是耗时成倍增加。
-        </p>
 
         <div v-if="degraded" class="warn">水印色与底色过于接近，投影无意义，已自动退化为「按蒙版替换水印像素」。</div>
       </div>
@@ -373,65 +589,15 @@ onBeforeUnmount(() => {
         <button class="btn btn-ghost full" :disabled="batch.running" @click="resetAll">重置去水印</button>
       </div>
     </section>
-
-    <main class="tool-main">
-      <div class="tool-header">
-        <div>
-          <h2>去水印工作区</h2>
-          <p>{{ isFrames ? `样板帧 #${frames.findIndex((frame) => frame.id === sampleFrame?.id) + 1} · ${frames.length} 帧待处理` : (workspace.watermark.fileName || '导入一张图片开始处理') }}</p>
-        </div>
-        <span v-if="watermarkedCount" class="badge badge-accent">{{ watermarkedCount }} 帧已去水印</span>
-      </div>
-
-      <div class="tool-body">
-        <div v-if="!hasSource" class="empty-state">
-          <span class="big">▨</span>
-          <strong>还没有可处理的画面</strong>
-          <span>导入一张图片，或先在「视频帧」页抽帧后回到这里</span>
-        </div>
-
-        <div v-else class="wm-workspace">
-          <section class="wm-column">
-            <FrameCropEditor
-              v-if="roiReady"
-              v-model="roiModel"
-              :source-url="sourceUrl"
-              :caption="editorCaption"
-              :show-ratio="false"
-              :show-preview="false"
-              :show-full-frame="false"
-            >
-              <!-- 显式传空插槽：覆盖编辑器自带的裁切说明文案 -->
-              <template #help></template>
-            </FrameCropEditor>
-          </section>
-
-          <figure class="wm-column wm-result">
-            <figcaption class="faint">结果图</figcaption>
-            <div class="wm-stage">
-              <img v-if="resultUrl" :src="resultUrl" alt="去水印结果" />
-              <span v-else class="faint">{{ processing ? '处理中…' : '尚未处理' }}</span>
-            </div>
-          </figure>
-        </div>
-
-        <TaskProgress
-          v-if="batch.running || statusText || errorText"
-          :running="batch.running"
-          :done="batch.done"
-          :total="batch.total"
-          :text="statusText"
-          :error="errorText"
-          @cancel="token.cancelled = true"
-        />
-      </div>
-    </main>
   </div>
 </template>
 
 <style scoped>
-.tool-page { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; min-height: 0; }
+/* 页面骨架：左栏来源列表 + 中间工作区 + 右栏参数配置（与九宫格页同构的三栏布局）；无来源时左栏隐藏 */
+.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
+.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
 .tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
+.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
 .tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
 .tool-header h2 { margin: 0; font-size: var(--fs-head); }
@@ -439,18 +605,46 @@ onBeforeUnmount(() => {
 .tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 24px; }
 .full { width: 100%; justify-content: center; }
 .actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-.file-name { margin: var(--sp-2) 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .section .field + .field, .section .field + .check-row { margin-top: var(--sp-3); }
 .section p + .field { margin-top: var(--sp-3); }
 .range { width: 100%; accent-color: var(--accent); }
 .color-input { width: 42px; height: 28px; flex: none; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised); }
 .field-row .btn { height: 26px; padding: 0 var(--sp-2); font-size: var(--fs-caption); }
 .field-row .faint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 工作区：左侧原图框选 + 处理按钮，右侧结果图对照 */
-.wm-workspace { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
-.wm-column { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
-.wm-result { margin: 0; }
-.wm-result figcaption { font-size: var(--fs-caption); }
-.wm-stage { height: 320px; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: var(--sp-2); background: var(--stage); border: 1px solid var(--border); border-radius: var(--radius-s); }
-.wm-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+/* 单舞台：对比组件占满剩余高度 */
+.wm-stage { flex: 1; min-height: 360px; display: flex; }
+.wm-stage > :deep(.cmp-stage) { flex: 1; }
+/* ROI 框选覆盖层：百分比定位跟随图像，压暗 + 强调框 + 控制点 */
+.roi-dim { position: absolute; background: rgba(8, 10, 14, 0.55); pointer-events: none; }
+.roi-box { position: absolute; border: 1px solid var(--accent); cursor: move; pointer-events: auto; }
+.roi-handle { position: absolute; width: 10px; height: 10px; background: var(--accent); border: 1px solid #1a140a; border-radius: 2px; pointer-events: auto; }
+.rh-nw { cursor: nwse-resize; }
+.rh-n { cursor: ns-resize; }
+.rh-ne { cursor: nesw-resize; }
+.rh-e { cursor: ew-resize; }
+.rh-se { cursor: nwse-resize; }
+.rh-s { cursor: ns-resize; }
+.rh-sw { cursor: nesw-resize; }
+.rh-w { cursor: ew-resize; }
+/* 底部 ROI 实时预览条 */
+.roi-preview { flex: none; display: flex; gap: var(--sp-4); }
+.roi-preview-pane { margin: 0; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.roi-preview-pane figcaption { font-size: var(--fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roi-preview-stage { height: 110px; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: var(--sp-2); background-color: var(--checker-b); background-image: linear-gradient(45deg, var(--checker-a) 25%, transparent 25%), linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--checker-a) 75%), linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; border: 1px solid var(--border); border-radius: var(--radius-s); }
+.roi-preview-stage canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; }
+/* 右栏 ROI 数值输入：2×2 网格，grid 项必须 min-width:0 防横向溢出 */
+.roi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.roi-grid .field { min-width: 0; }
+.roi-grid .input { width: 100%; }
+.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
+/* 左栏来源列表条目：缩略图 + 名称 + 尺寸 + 移除 */
+.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
+.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
+.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
+/* 窄屏适配：三栏收窄 */
+@media (max-width: 1100px) {
+  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
+}
 </style>

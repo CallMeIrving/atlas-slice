@@ -20,6 +20,23 @@ export function clampCropRect(rect: ImageCropRect, imageWidth: number, imageHeig
   return { x, y, width, height }
 }
 
+/** 在给定面积内取符合宽高比（宽 ÷ 高 = target）的最大内接尺寸 */
+export function inscribedRect(area: { width: number; height: number }, target: number): { width: number; height: number } {
+  return area.width / area.height > target
+    ? { width: area.height * target, height: area.height }
+    : { width: area.width, height: area.width / target }
+}
+
+/** 把图像矩形按 1:1 最近邻绘制进 canvas（canvas 尺寸 = 区域尺寸），供 ROI 实时预览复用 */
+export function drawCropToCanvas(image: HTMLImageElement, rect: ImageCropRect, canvas: HTMLCanvasElement): void {
+  const area = clampCropRect(rect, image.naturalWidth, image.naturalHeight)
+  canvas.width = area.width
+  canvas.height = area.height
+  const ctx = canvas.getContext('2d')!
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(image, area.x, area.y, area.width, area.height, 0, 0, area.width, area.height)
+}
+
 /** 从已加载的图像按矩形裁出 PNG dataURL，供帧裁切预览与结果保存使用 */
 export function cropImageToDataUrl(image: HTMLImageElement, rect: ImageCropRect): string {
   const area = clampCropRect(rect, image.naturalWidth, image.naturalHeight)
