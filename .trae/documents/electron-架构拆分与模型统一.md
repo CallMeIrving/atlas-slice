@@ -115,7 +115,7 @@ atlas-slice/
 3. **首次使用自触发**（按需语义）：
    - 抠图/视频一键处理：`inspectLocalRepo` 判 `!ready` 时，Electron 下自动经 IPC 触发下载后再加载；Web 下抛出现有可读错误 + 命令提示。
    - 图层拆分：Python 已返回 `MODEL_MISSING` + 下载 hint；Electron 下可弹出建议触发 `/api/models/download`。
-4. **manifest 处置**：浏览器 `src/core/model-registry.json` 与 Python `backend/app/models/registry.py` 描述的是**互不相交的模型集合**（无重复无漂移风险），为最小改动先各自保留；「统一」落在「同一目录 + 同一界面 + 同一按需下载入口」。若后续要单点清单，可再把 Python 的 `registry.py` 改为读共享 JSON（列为后续可选，不在本轮）。
+4. **manifest 处置**：浏览器 `src/core/model-registry.json` 与 Python `backend/app/models/registry.py` 描述的是**互不相交的模型集合**（无重复无漂移风险），为最小改动先各自保留；「统一」落在「同一目录 + 同一界面 + 同一按需下载入口」。**已决定不做合并**（真合并要把服务端数据搬进 JSON，并给冻结后端补数据文件与路径解析，改动力度与收益不成比例），改为用测试守护「同一个 HF 仓库不得同时登记在两边」。
 
 ## 交付范围边界
 
@@ -141,7 +141,7 @@ atlas-slice/
 待完成 / 后续可选：
 
 - **代码签名与公证**：当前 `mac.identity: null`，仅本机与内网分发（分发前需 `xattr -dr com.apple.quarantine`）。
-- **单点模型清单**：浏览器 `src/core/model-registry.json` 与 Python `backend/app/models/registry.py` 仍各自保留（集合互不相交），如需单点可把后者改为读共享 JSON。
+- **单点模型清单**（已决：不合并，只防漂移）：两份清单各自保留，新增 [backend/tests/test_model_registry.py](file:///Users/oubuwen/Documents/trae_projects/atlas-slice/backend/tests/test_model_registry.py) 断言两边登记的 HF 仓库不重叠，并在 README 写明「新增模型改对应那一份」的规则。
 - **自定义协议供给模型**：已评估并跳过（理由见上）。
 
 已完成（追加）：

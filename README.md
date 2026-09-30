@@ -207,6 +207,8 @@ pnpm run backend:dev          # 等价于 uvicorn app.main:app --host 127.0.0.1 
 
 权重默认从 `hf-mirror.com` 下载，可用 `--host=` 或 `MODEL_HOST` 换成 `https://huggingface.co`。权重缺失时服务会返回 `409 MODEL_MISSING` 并给出下载命令，**不会静默降级**成半成品。推理设备按 `cuda > mps > cpu` 自动探测（Apple Silicon 走 MPS，一律 fp32），可用 `--device` 或环境变量 `LAYER_SPLIT_DEVICE` 覆盖。检测器与分割器分阶段互斥驻留，峰值内存约 3-4GB；推理长边默认 1536，坐标会映射回原图。
 
+上表来自 [backend/app/models/registry.py](file:///Users/oubuwen/Documents/trae_projects/atlas-slice/backend/app/models/registry.py)；浏览器抠图模型另有一份 [src/core/model-registry.json](file:///Users/oubuwen/Documents/trae_projects/atlas-slice/src/core/model-registry.json)。两份清单**不得登记同一个 HF 仓库**（`backend/tests/test_model_registry.py` 有断言守护），新增模型时只改对应的那一份即可。
+
 ### 两条导出路径
 
 - **客户端 ZIP**（主按钮）：尊重列表里的改名、隐藏、层序与合并结果，命名走统一的命名模板；
