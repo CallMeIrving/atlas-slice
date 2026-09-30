@@ -322,7 +322,8 @@ async function downloadModel(args: {
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 1280,
+    // 与前端布局下限对齐：body / .app 的 min-width 都是 1400（src/styles/tokens.css、base.css）
+    width: 1400,
     height: 800,
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),

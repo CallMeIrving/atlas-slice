@@ -356,8 +356,8 @@ pnpm run backend:freeze   # 约 490MB 产物，含 torch
 ```
 release/
 ├── mac-arm64/AtlasSlice.app         799M   可直接 open
-├── AtlasSlice-0.1.0-arm64.dmg       117M
-└── AtlasSlice-0.1.0-arm64-mac.zip   114M
+├── AtlasSlice-1.0.0-arm64.dmg       117M
+└── AtlasSlice-1.0.0-arm64-mac.zip   114M
 ```
 
 ### 三个容易踩的坑

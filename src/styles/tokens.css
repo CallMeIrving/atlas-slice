@@ -62,7 +62,7 @@ body,
 }
 
 body {
-  min-width: 1440px;
+  min-width: 1400px;
   font-family: var(--font-sans);
   font-size: var(--fs-body);
   line-height: 1.5;
