@@ -391,9 +391,15 @@ function resetAll(): void {
             <template v-else>导入多张素材后点击「开始打包」</template>
           </p>
         </div>
-        <span v-if="state.status === 'packed'" class="badge badge-accent">
-          {{ activeResult ? `${activeResult.width}×${activeResult.height} · 填充率 ${(activeResult.fillRatio * 100).toFixed(1)}%` : '' }}
-        </span>
+        <div class="header-actions">
+          <input ref="input" hidden multiple type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
+          <input ref="atlasInput" hidden multiple type="file" accept="image/png,image/jpeg,image/webp,.json,application/json" @change="onAtlasFileChange" />
+          <button class="btn btn-primary" @click="input?.click()">导入图片</button>
+          <button class="btn" @click="atlasInput?.click()">导入图片+JSON</button>
+          <span v-if="state.status === 'packed'" class="badge badge-accent">
+            {{ activeResult ? `${activeResult.width}×${activeResult.height} · 填充率 ${(activeResult.fillRatio * 100).toFixed(1)}%` : '' }}
+          </span>
+        </div>
       </div>
 
       <div class="tool-body">
@@ -458,11 +464,6 @@ function resetAll(): void {
         <h2 class="section-title">雪碧图打包</h2>
         <p class="muted">MaxRects / 网格装箱，放不下自动分页，本地处理不上传</p>
         <label class="check-row"><input v-model="showAnim" type="checkbox" /> 动画预览（右下角悬浮）</label>
-        <button class="btn btn-primary full" @click="input?.click()">导入图片（可多选）</button>
-        <input ref="input" hidden multiple type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
-        <button class="btn full" @click="atlasInput?.click()">导入已有图集（图片 + JSON）</button>
-        <input ref="atlasInput" hidden multiple type="file" accept="image/png,image/jpeg,image/webp,.json,application/json" @change="onAtlasFileChange" />
-        <p class="muted hint">也可直接把图片拖进中间工作区；回读导入需同时选择图集图片与 JSON 元数据</p>
       </div>
 
       <div class="section">
@@ -610,6 +611,7 @@ function resetAll(): void {
 .full { width: 100%; justify-content: center; }
 .actions { display: flex; flex-direction: column; gap: var(--sp-2); }
 .hint { margin: var(--sp-1) 0 0; font-size: var(--fs-caption); }
+.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
 /* 只给直接堆叠在 section 下的字段加间距，网格/行内布局由 gap 控制，避免误加 margin 造成错位 */
 .section > .field + .field, .section > .check-row + .check-row, .section > .check-row + .field { margin-top: var(--sp-3); }
 .section > p + .field, .section > p + .check-row { margin-top: var(--sp-3); }

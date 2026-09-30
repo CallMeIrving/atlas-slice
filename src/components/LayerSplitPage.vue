@@ -290,18 +290,106 @@ onMounted(() => { void probeServer() })
 </script>
 
 <template>
-  <div class="tool-page">
-    <section class="tool-sidebar panel">
+  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+    <!-- 左栏：已导入源图列表，未导入时整栏不显示 -->
+    <section v-if="hasSource" class="tool-sidebar panel">
+      <div class="section">
+        <h2 class="section-title">图集列表</h2>
+        <ul class="asset-list">
+          <li class="asset-row">
+            <img class="asset-thumb" :src="split.sourceUrl" :alt="split.fileName" draggable="false" />
+            <span class="asset-name" :title="split.fileName">{{ split.fileName }}</span>
+            <span v-if="size.width" class="mono faint">{{ size.width }}×{{ size.height }}</span>
+            <button class="btn btn-icon btn-danger" title="移除" @click="reset">×</button>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <main class="tool-main">
+      <div class="tool-header">
+        <div>
+          <h2>图层拆分工作区</h2>
+          <p>{{ split.fileName || '导入一张游戏 UI 截图，拆成可独立复用的图层' }}</p>
+        </div>
+        <div class="header-actions">
+          <input
+            ref="input"
+            hidden
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            @change="onFileChange"
+          />
+          <button class="btn btn-primary" @click="input?.click()">导入图片</button>
+          <span v-if="hasLayers" class="badge badge-accent">{{ split.layers.length }} 个图层</span>
+          <span v-else class="badge">{{ STATUS_TEXT[split.status] }}</span>
+        </div>
+      </div>
+
+      <div class="tool-body">
+        <div v-if="!online" class="warn offline">
+          <p><strong>本地 Python 服务未连接</strong>：拆分必须由它执行推理。</p>
+          <p class="mono cmd">{{ START_COMMAND }}</p>
+          <div class="offline-actions">
+            <button class="btn" @click="copy(START_COMMAND)">{{ copied ? '已复制' : '复制命令' }}</button>
+            <button class="btn" :disabled="checking" @click="probeServer">{{ checking ? '连接中…' : '重试连接' }}</button>
+          </div>
+          <p class="muted">
+            首次使用需先在 server/ 目录建虚拟环境并安装依赖，再用
+            <span class="mono">{{ MODELS_COMMAND }}</span>
+            下载权重（约 1.5GB）。服务只监听 127.0.0.1。
+          </p>
+        </div>
+
+        <div v-else-if="modelsMissing" class="warn">
+          <p><strong>模型权重未就绪</strong>：先执行 <span class="mono">{{ MODELS_COMMAND }}</span> 下载权重，再重试连接。</p>
+        </div>
+
+        <div v-if="!hasSource" class="empty-state">
+          <span class="big">▤</span>
+          <strong>还没有可拆分的素材</strong>
+          <span>导入一张游戏 UI 截图（商店面板 / 背包 / HUD 等），或在左侧填好类别提示词</span>
+        </div>
+
+        <div v-else class="ls-workspace">
+          <LayerBoxEditor
+            v-if="boxEditing"
+            @confirm="confirmBoxEdit"
+            @cancel="cancelBoxEdit"
+          />
+          <figure v-else-if="!hasLayers" class="ls-source">
+            <img :src="split.sourceUrl" alt="待拆分素材" />
+            <figcaption class="faint">
+              {{ progress.running ? '正在拆分…' : '尚未拆分' }}
+              <span v-if="downscaled" class="mono"> · 推理按 1/{{ (1 / size.scale).toFixed(2) }} 缩放，坐标已映射回原图</span>
+            </figcaption>
+          </figure>
+          <LayerSplitStage
+            v-else
+            :layers="split.layers"
+            :background="split.background"
+            :selected="selectedIds"
+            :width="size.width"
+            :height="size.height"
+            @select="selectedIds = [$event]"
+          />
+          <LayerSplitList
+            v-if="hasLayers"
+            v-model:selected="selectedIds"
+            @reset="reset"
+          />
+        </div>
+
+        <p v-if="split.warnings.length" class="warn">
+          {{ split.warnings.join('；') }}
+        </p>
+      </div>
+    </main>
+
+    <!-- 右栏：素材信息、本地服务、拆分设置与导出 -->
+    <section class="tool-sidepanel panel">
       <div class="section">
         <h2 class="section-title">素材</h2>
-        <button class="btn btn-primary full" @click="input?.click()">导入图片</button>
-        <input
-          ref="input"
-          hidden
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          @change="onFileChange"
-        />
         <p class="muted file-name">
           {{ split.fileName || '未选择素材' }}
           <span v-if="size.width" class="mono"> · {{ size.width }}×{{ size.height }}</span>
@@ -364,82 +452,15 @@ onMounted(() => { void probeServer() })
         <button class="btn btn-ghost full" :disabled="!hasSource" @click="reset">重置</button>
       </div>
     </section>
-
-    <main class="tool-main">
-      <div class="tool-header">
-        <div>
-          <h2>图层拆分工作区</h2>
-          <p>{{ split.fileName || '导入一张游戏 UI 截图，拆成可独立复用的图层' }}</p>
-        </div>
-        <span v-if="hasLayers" class="badge badge-accent">{{ split.layers.length }} 个图层</span>
-        <span v-else class="badge">{{ STATUS_TEXT[split.status] }}</span>
-      </div>
-
-      <div class="tool-body">
-        <div v-if="!online" class="warn offline">
-          <p><strong>本地 Python 服务未连接</strong>：拆分必须由它执行推理。</p>
-          <p class="mono cmd">{{ START_COMMAND }}</p>
-          <div class="offline-actions">
-            <button class="btn" @click="copy(START_COMMAND)">{{ copied ? '已复制' : '复制命令' }}</button>
-            <button class="btn" :disabled="checking" @click="probeServer">{{ checking ? '连接中…' : '重试连接' }}</button>
-          </div>
-          <p class="muted">
-            首次使用需先在 server/ 目录建虚拟环境并安装依赖，再用
-            <span class="mono">{{ MODELS_COMMAND }}</span>
-            下载权重（约 1.5GB）。服务只监听 127.0.0.1。
-          </p>
-        </div>
-
-        <div v-else-if="modelsMissing" class="warn">
-          <p><strong>模型权重未就绪</strong>：先执行 <span class="mono">{{ MODELS_COMMAND }}</span> 下载权重，再重试连接。</p>
-        </div>
-
-        <div v-if="!hasSource" class="empty-state">
-          <span class="big">▤</span>
-          <strong>还没有可拆分的素材</strong>
-          <span>导入一张游戏 UI 截图（商店面板 / 背包 / HUD 等），或在左侧填好类别提示词</span>
-        </div>
-
-        <div v-else class="ls-workspace">
-          <LayerBoxEditor
-            v-if="boxEditing"
-            @confirm="confirmBoxEdit"
-            @cancel="cancelBoxEdit"
-          />
-          <figure v-else-if="!hasLayers" class="ls-source">
-            <img :src="split.sourceUrl" alt="待拆分素材" />
-            <figcaption class="faint">
-              {{ progress.running ? '正在拆分…' : '尚未拆分' }}
-              <span v-if="downscaled" class="mono"> · 推理按 1/{{ (1 / size.scale).toFixed(2) }} 缩放，坐标已映射回原图</span>
-            </figcaption>
-          </figure>
-          <LayerSplitStage
-            v-else
-            :layers="split.layers"
-            :background="split.background"
-            :selected="selectedIds"
-            :width="size.width"
-            :height="size.height"
-            @select="selectedIds = [$event]"
-          />
-          <LayerSplitList
-            v-if="hasLayers"
-            v-model:selected="selectedIds"
-            @reset="reset"
-          />
-        </div>
-
-        <p v-if="split.warnings.length" class="warn">
-          {{ split.warnings.join('；') }}
-        </p>
-      </div>
-    </main>
   </div>
 </template>
 
 <style scoped>
-.tool-page { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; min-height: 0; }
+/* 页面骨架：左栏源图列表 + 中间工作区 + 右栏参数配置（与九宫格页同构的三栏布局）；未导入时左栏隐藏 */
+.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
+.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
 .tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
+.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
 .tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
 .tool-header h2 { margin: 0; font-size: var(--fs-head); }
@@ -459,4 +480,15 @@ onMounted(() => { void probeServer() })
 .ls-source { margin: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-3); background: var(--stage); border: 1px solid var(--border); border-radius: var(--radius-s); overflow: hidden; }
 .ls-source img { max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; }
 .ls-source figcaption { flex: none; font-size: var(--fs-caption); }
+.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
+/* 左栏源图列表条目：缩略图 + 名称 + 尺寸 + 移除 */
+.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
+.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
+.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
+/* 窄屏适配：三栏收窄 */
+@media (max-width: 1100px) {
+  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
+}
 </style>

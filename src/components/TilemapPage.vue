@@ -257,18 +257,82 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
 </script>
 
 <template>
-  <div class="tool-page">
-    <section class="tool-sidebar panel">
+  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+    <!-- 左栏：已导入 tileset 列表，未导入时整栏不显示 -->
+    <section v-if="hasSource" class="tool-sidebar panel">
+      <div class="section">
+        <h2 class="section-title">图集列表</h2>
+        <ul class="asset-list">
+          <li class="asset-row">
+            <img class="asset-thumb" :src="state.sourceUrl" :alt="state.fileName" draggable="false" />
+            <span class="asset-name" :title="state.fileName">{{ state.fileName }}</span>
+            <span class="mono faint">{{ state.image?.width }}×{{ state.image?.height }}</span>
+            <button class="btn btn-icon btn-danger" title="移除" @click="resetAll">×</button>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <main class="tool-main">
+      <div class="tool-header">
+        <div>
+          <h2>Tilemap 工作区</h2>
+          <p>
+            <template v-if="state.image">
+              {{ state.image.width }}×{{ state.image.height }} px · {{ columns }} 列 × {{ rows }} 行
+            </template>
+            <template v-else>导入一张 tileset 图开始切分</template>
+          </p>
+        </div>
+        <div class="header-actions">
+          <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
+          <button class="btn btn-primary" @click="input?.click()">导入 tileset</button>
+          <span v-if="keptTiles.length" class="badge badge-accent">{{ keptTiles.length }} 块已切出</span>
+        </div>
+      </div>
+
+      <div class="tool-body">
+        <div v-if="!hasSource" class="empty-state">
+          <span class="big">▦</span>
+          <strong>还没有可切分的 tileset</strong>
+          <span>导入一张规则排布的 tileset 图（PNG / JPG / WebP，≤ 30MB），设置单块尺寸与间距后导出切片与 Tiled JSON</span>
+        </div>
+
+        <template v-else>
+          <section class="tm-block">
+            <h3 class="tm-block-title">网格预览</h3>
+            <div class="tm-stage-wrap">
+              <div class="tm-stage">
+                <img class="tm-img" :src="state.sourceUrl" alt="tileset 源图" draggable="false" />
+                <canvas ref="gridCanvas" class="tm-grid"></canvas>
+              </div>
+            </div>
+            <p v-if="!tiles.length" class="muted">当前参数无法排出完整的整块网格，请调小单块尺寸或外边距。</p>
+          </section>
+
+          <section v-if="previews.length" class="tm-block">
+            <h3 class="tm-block-title">
+              切片预览（前 {{ previews.length }} / {{ keptTiles.length }}）
+            </h3>
+            <div class="tm-tiles">
+              <figure v-for="tile in previews" :key="tile.name" class="tm-tile">
+                <img :src="tile.url" :alt="tile.name" draggable="false" />
+                <figcaption class="mono">{{ tile.name }}</figcaption>
+              </figure>
+            </div>
+            <p v-if="keptTiles.length > previews.length" class="muted">
+              仅预览前 {{ previews.length }} 块，导出仍包含全部 {{ keptTiles.length }} 块。
+            </p>
+          </section>
+        </template>
+      </div>
+    </main>
+
+    <!-- 右栏：配置、参数与导出 -->
+    <section class="tool-sidepanel panel">
       <div class="section">
         <h2 class="section-title">Tilemap 切片</h2>
         <p class="muted">本地处理，不上传素材</p>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">图片来源</h2>
-        <button class="btn btn-primary full" @click="input?.click()">导入 tileset</button>
-        <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
-        <p class="muted file-name">{{ state.fileName || '未选择图片' }}</p>
       </div>
 
       <div class="section">
@@ -327,63 +391,15 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
-        <div>
-          <h2>Tilemap 工作区</h2>
-          <p>
-            <template v-if="state.image">
-              {{ state.image.width }}×{{ state.image.height }} px · {{ columns }} 列 × {{ rows }} 行
-            </template>
-            <template v-else>导入一张 tileset 图开始切分</template>
-          </p>
-        </div>
-        <span v-if="keptTiles.length" class="badge badge-accent">{{ keptTiles.length }} 块已切出</span>
-      </div>
-
-      <div class="tool-body">
-        <div v-if="!hasSource" class="empty-state">
-          <span class="big">▦</span>
-          <strong>还没有可切分的 tileset</strong>
-          <span>导入一张规则排布的 tileset 图（PNG / JPG / WebP，≤ 30MB），设置单块尺寸与间距后导出切片与 Tiled JSON</span>
-        </div>
-
-        <template v-else>
-          <section class="tm-block">
-            <h3 class="tm-block-title">网格预览</h3>
-            <div class="tm-stage-wrap">
-              <div class="tm-stage">
-                <img class="tm-img" :src="state.sourceUrl" alt="tileset 源图" draggable="false" />
-                <canvas ref="gridCanvas" class="tm-grid"></canvas>
-              </div>
-            </div>
-            <p v-if="!tiles.length" class="muted">当前参数无法排出完整的整块网格，请调小单块尺寸或外边距。</p>
-          </section>
-
-          <section v-if="previews.length" class="tm-block">
-            <h3 class="tm-block-title">
-              切片预览（前 {{ previews.length }} / {{ keptTiles.length }}）
-            </h3>
-            <div class="tm-tiles">
-              <figure v-for="tile in previews" :key="tile.name" class="tm-tile">
-                <img :src="tile.url" :alt="tile.name" draggable="false" />
-                <figcaption class="mono">{{ tile.name }}</figcaption>
-              </figure>
-            </div>
-            <p v-if="keptTiles.length > previews.length" class="muted">
-              仅预览前 {{ previews.length }} 块，导出仍包含全部 {{ keptTiles.length }} 块。
-            </p>
-          </section>
-        </template>
-      </div>
-    </main>
   </div>
 </template>
 
 <style scoped>
-/* 页面骨架与九宫格页同构：侧栏 + 主工作区 */
-.tool-page { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; min-height: 0; }
+/* 页面骨架与雪碧图页同构：左栏图集列表 + 中间工作区 + 右栏参数配置；未导入时左栏隐藏 */
+.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
+.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
 .tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
+.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
 .tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
 .tool-header h2 { margin: 0; font-size: var(--fs-head); }
@@ -392,7 +408,6 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
 .full { width: 100%; justify-content: center; }
 .actions { display: flex; flex-direction: column; gap: var(--sp-2); }
 .hint { margin: var(--sp-3) 0 0; font-size: var(--fs-caption); }
-.file-name { margin: var(--sp-2) 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 只给直接堆叠在 section 下的字段加间距；网格与行内布局由 gap 控制，避免误加 margin 造成错位 */
 .section > .field + .field, .section > .check-row + .field { margin-top: var(--sp-3); }
 .section > p + .field { margin-top: var(--sp-3); }
@@ -468,6 +483,13 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
 }
 
 @media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 260px minmax(0, 1fr); }
+  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
 }
+.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
+/* 左栏图集列表条目：缩略图 + 名称 + 尺寸 + 移除 */
+.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
+.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
+.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
 </style>

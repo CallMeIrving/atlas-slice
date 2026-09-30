@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { persistMediaSettings, workspace, type MatteMode } from '@/store/workspace'
+import { persistMediaSettings, resetMatte as clearMatteSource, workspace, type MatteMode } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
 import { applyColorKey, solidColorKey } from '@/core/color-key'
 import { removeWithImgly, removeWithTransformers, AI_ENGINES, AI_MAX_SIDE_OPTIONS, describeMattingError, deviceOptions, dtypeOptions, imglyDtypeForModel, resolveDevice, resolveDtype, type AiEngine, type MatteDtype, type MatteProgress } from '@/core/ai-matting'
@@ -392,6 +392,12 @@ function resetMatte(): void {
   workspace.matte.status = workspace.matte.sourceUrl ? 'ready' : 'empty'
 }
 
+/** 左栏列表「移除」：复用 store 的清空来源与页面的重置逻辑，移除后左栏自动隐藏 */
+function removeSource(): void {
+  clearMatteSource()
+  resetMatte()
+}
+
 async function exportPackage(): Promise<void> {
   const base = workspace.matte.fileName.replace(/\.[^.]+$/, '') || 'cutout'
   const mode = workspace.matte.mode
@@ -441,13 +447,51 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tool-page">
-    <section class="tool-sidebar panel">
-      <div class="section"><h2 class="section-title">抠图工具</h2><p class="muted">本地处理，不上传素材</p></div>
+  <div class="tool-page" :class="{ 'no-list': !workspace.matte.sourceUrl }">
+    <!-- 左栏：已导入源图列表，未导入时整栏不显示 -->
+    <section v-if="workspace.matte.sourceUrl" class="tool-sidebar panel">
       <div class="section">
-        <button class="btn btn-primary full" @click="openFile">导入图片</button>
-        <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="load(($event.target as HTMLInputElement).files?.[0])" />
+        <h2 class="section-title">图集列表</h2>
+        <ul class="asset-list">
+          <li class="asset-row">
+            <img class="asset-thumb" :src="workspace.matte.sourceUrl" :alt="workspace.matte.fileName" draggable="false" />
+            <span class="asset-name" :title="workspace.matte.fileName">{{ workspace.matte.fileName }}</span>
+            <!-- 尺寸取工作区预览 img 元素的自然尺寸 -->
+            <span v-if="image?.naturalWidth" class="mono faint">{{ image?.naturalWidth }}×{{ image?.naturalHeight }}</span>
+            <button class="btn btn-icon btn-danger" title="移除" @click="removeSource">×</button>
+          </li>
+        </ul>
       </div>
+    </section>
+
+    <main class="tool-main">
+      <div class="tool-header">
+        <div><h2>抠图工作区</h2><p>{{ workspace.matte.fileName || '导入一张图片开始处理' }}</p></div>
+        <div class="header-actions">
+          <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="load(($event.target as HTMLInputElement).files?.[0])" />
+          <button class="btn btn-primary" @click="openFile">导入图片</button>
+          <div class="canvas-header-actions">
+            <div v-if="workspace.matte.sourceUrl" class="zoom-controls" aria-label="画布缩放控制">
+              <button class="zoom-button" type="button" title="缩小" aria-label="缩小" :disabled="zoomLevel <= 0.2" @click="zoomOut">−</button>
+              <output class="zoom-value" aria-live="polite">{{ zoomPercent }}</output>
+              <button class="zoom-button" type="button" title="放大" aria-label="放大" :disabled="zoomLevel >= 8" @click="zoomIn">+</button>
+              <button class="fit-button" type="button" title="完整适配画布" @click="resetView">适应画布</button>
+            </div>
+            <div class="seg"><button v-for="item in backgroundOptions" :key="item.value" class="seg-item" :class="{ active: workspace.matte.background === item.value }" @click="setBackground(item.value)">{{ item.label }}</button></div>
+          </div>
+        </div>
+      </div>
+      <div ref="canvasRef" class="matte-canvas" :class="{ dragging: isDragging, 'can-pan': canPanImage, 'is-panning': !!panPointer }" :style="backgroundStyle" @dragover.prevent="isDragging = true" @dragleave="isDragging = false" @drop="handleDrop" @click="sampleColor" @wheel.prevent="zoomAtPointer" @pointerdown="onPanStart" @pointermove="onPanMove" @pointerup="onPanEnd" @pointercancel="onPanEnd">
+        <div v-if="!workspace.matte.sourceUrl" class="drop-hint" @click="openFile"><span class="big">＋</span><strong>拖入图片</strong><span>PNG / JPG / WebP</span></div>
+        <template v-else>
+          <img ref="image" :class="{ sampling }" :style="imageViewStyle" :src="workspace.matte.resultUrl || workspace.matte.sourceUrl" alt="预览" draggable="false" @load="fitImageToCanvas(true)" />
+        </template>
+      </div>
+    </main>
+
+    <!-- 右栏：处理方式、模型状态与导出配置 -->
+    <section class="tool-sidepanel panel">
+      <div class="section"><h2 class="section-title">抠图工具</h2><p class="muted">本地处理，不上传素材</p></div>
       <div class="section">
         <div class="method-title-row">
           <h2 class="section-title">处理方式</h2>
@@ -524,26 +568,6 @@ onBeforeUnmount(() => {
         <button class="btn btn-ghost full" :disabled="!workspace.matte.sourceUrl || workspace.matte.status === 'processing'" @click="resetMatte">重置抠图</button>
       </div>
     </section>
-    <main class="tool-main">
-      <div class="tool-header">
-        <div><h2>抠图工作区</h2><p>{{ workspace.matte.fileName || '导入一张图片开始处理' }}</p></div>
-        <div class="canvas-header-actions">
-          <div v-if="workspace.matte.sourceUrl" class="zoom-controls" aria-label="画布缩放控制">
-            <button class="zoom-button" type="button" title="缩小" aria-label="缩小" :disabled="zoomLevel <= 0.2" @click="zoomOut">−</button>
-            <output class="zoom-value" aria-live="polite">{{ zoomPercent }}</output>
-            <button class="zoom-button" type="button" title="放大" aria-label="放大" :disabled="zoomLevel >= 8" @click="zoomIn">+</button>
-            <button class="fit-button" type="button" title="完整适配画布" @click="resetView">适应画布</button>
-          </div>
-          <div class="seg"><button v-for="item in backgroundOptions" :key="item.value" class="seg-item" :class="{ active: workspace.matte.background === item.value }" @click="setBackground(item.value)">{{ item.label }}</button></div>
-        </div>
-      </div>
-      <div ref="canvasRef" class="matte-canvas" :class="{ dragging: isDragging, 'can-pan': canPanImage, 'is-panning': !!panPointer }" :style="backgroundStyle" @dragover.prevent="isDragging = true" @dragleave="isDragging = false" @drop="handleDrop" @click="sampleColor" @wheel.prevent="zoomAtPointer" @pointerdown="onPanStart" @pointermove="onPanMove" @pointerup="onPanEnd" @pointercancel="onPanEnd">
-        <div v-if="!workspace.matte.sourceUrl" class="drop-hint" @click="openFile"><span class="big">＋</span><strong>拖入图片</strong><span>PNG / JPG / WebP</span></div>
-        <template v-else>
-          <img ref="image" :class="{ sampling }" :style="imageViewStyle" :src="workspace.matte.resultUrl || workspace.matte.sourceUrl" alt="预览" draggable="false" @load="fitImageToCanvas(true)" />
-        </template>
-      </div>
-    </main>
     <div v-if="helpOpen" class="help-backdrop" @click.self="closeHelp">
       <section class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="matte-help-title" aria-describedby="matte-help-intro">
         <header class="help-head">
@@ -571,8 +595,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100%; min-height: 0; }
+/* 页面骨架：左栏源图列表 + 中间工作区 + 右栏参数配置（与九宫格页同构的三栏布局）；未导入时左栏隐藏 */
+.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
+.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
 .tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
+.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
 .method-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .method-title-row .section-title { margin-bottom: var(--sp-2); }
 .help-button { display: grid; place-items: center; width: 21px; height: 21px; flex: none; margin-top: -3px; border: 1px solid var(--border-strong); border-radius: 50%; background: transparent; color: var(--text-muted); font: 600 12px/1 var(--font-sans); cursor: pointer; }
@@ -597,7 +624,13 @@ onBeforeUnmount(() => {
 .tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
 .tool-header h2 { margin: 0; font-size: 16px; }.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
+.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
 .canvas-header-actions { display: flex; align-items: center; gap: 16px; }
+/* 左栏源图列表条目：缩略图 + 名称 + 尺寸 + 移除 */
+.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
+.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
+.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
 .zoom-controls { display: flex; align-items: center; gap: 6px; padding-right: 14px; border-right: 1px solid var(--border); }
 .zoom-button, .fit-button { height: 30px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised); color: var(--text); cursor: pointer; }
 .zoom-button { width: 30px; font-size: 17px; line-height: 1; }.zoom-button:disabled { opacity: .4; cursor: default; }
@@ -613,4 +646,9 @@ onBeforeUnmount(() => {
 .select { width: 100%; }
 .ai-status { margin-top: 8px; }.ai-status p { margin: 0 0 4px; font-size: 12px; word-break: break-all; }
 .progress-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }.progress-fill { height: 100%; background: var(--accent); transition: width 0.2s ease; }
+/* 窄屏适配：三栏收窄 */
+@media (max-width: 1100px) {
+  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
+}
 </style>

@@ -371,76 +371,19 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tool-page">
-    <section class="tool-sidebar panel">
+  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+    <!-- 左栏：已导入图片列表，未导入时整栏不显示 -->
+    <section v-if="hasSource" class="tool-sidebar panel">
       <div class="section">
-        <h2 class="section-title">调色板换色</h2>
-        <p class="muted">Team Color / 皮肤变体，本地处理不上传</p>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">图片来源</h2>
-        <button class="btn btn-primary full" @click="input?.click()">导入图片</button>
-        <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
-        <p class="muted file-name">{{ state.fileName || '未选择图片' }}</p>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">主色板提取</h2>
-        <label class="field">
-          <span class="field-label">色槽数量 {{ state.maxSlots }}</span>
-          <input v-model.number="state.maxSlots" class="range" type="range" min="3" max="12" :disabled="!hasSource" />
-        </label>
-        <label class="field">
-          <span class="field-label">颜色容差 {{ state.tolerance }}</span>
-          <input v-model.number="state.tolerance" class="range" type="range" min="4" max="60" />
-        </label>
-        <p class="muted hint">{{ windowHint }}（沿用抠图页的色相/饱和度判据）</p>
-        <label class="check-row">
-          <input v-model="state.includeNeutrals" type="checkbox" />
-          <span>黑/灰/白单独列为色槽</span>
-        </label>
-        <button class="btn full" :disabled="!hasSource || state.status === 'processing'" @click="extract">
-          {{ state.status === 'processing' ? '处理中…' : '重新提取主色板' }}
-        </button>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">阵营色预设</h2>
-        <div class="preset-grid">
-          <button
-            v-for="preset in TEAM_COLOR_PRESETS"
-            :key="preset.key"
-            class="preset-chip"
-            :disabled="!activeVariant"
-            :title="`把 ${preset.label} 应用到当前变体`"
-            @click="applyPreset(preset)"
-          >
-            <span class="preset-dots">
-              <i v-for="color in preset.colors" :key="color" :style="{ background: color }"></i>
-            </span>
-            <span>{{ preset.label }}</span>
-          </button>
-        </div>
-        <p v-if="hasSource" class="muted hint">
-          <template v-if="teamSlotCount">当前 {{ teamSlotCount }} 个色槽标记为阵营色，预设只换这些区域</template>
-          <template v-else>还没有阵营色槽：请在色槽卡片勾选「阵营色」，预设才有可写入的目标</template>
-        </p>
-        <button class="btn full" :disabled="!slots.length" @click="generateTeamVariants">一次生成 7 套阵营变体</button>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">导出</h2>
-        <label class="field">
-          <span class="field-label">命名模板</span>
-          <input v-model="state.nameTemplate" class="input" type="text" placeholder="{base}_{variant}.png" />
-        </label>
-        <p class="muted hint">占位符：{base} 源图名 · {variant} 变体名 · {index} 序号</p>
-        <button class="btn btn-primary full" :disabled="!variants.length || exporting || !hasSource" @click="exportZip">
-          {{ exporting ? '导出中…' : `导出 ZIP（${variants.length} 套 PNG + 元数据）` }}
-        </button>
-        <button class="btn btn-ghost full" :disabled="!hasSource" @click="resetAll">重置</button>
-        <p v-if="state.error" class="error-text">{{ state.error }}</p>
+        <h2 class="section-title">图集列表</h2>
+        <ul class="asset-list">
+          <li class="asset-row">
+            <img class="asset-thumb" :src="state.sourceUrl" :alt="state.fileName" draggable="false" />
+            <span class="asset-name" :title="state.fileName">{{ state.fileName }}</span>
+            <span class="mono faint">{{ state.image?.width }}×{{ state.image?.height }}</span>
+            <button class="btn btn-icon btn-danger" title="移除" @click="resetAll">×</button>
+          </li>
+        </ul>
       </div>
     </section>
 
@@ -451,6 +394,8 @@ onBeforeUnmount(() => {
           <p>{{ state.image ? `${state.image.width}×${state.image.height} px · ${slots.length} 个色槽 · ${variants.length} 套变体` : '导入一张精灵图开始提取色板' }}</p>
         </div>
         <div class="header-actions">
+          <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
+          <button class="btn btn-primary" @click="input?.click()">导入图片</button>
           <label class="check-row">
             <input v-model="state.checkerBg" type="checkbox" />
             <span>棋盘底</span>
@@ -566,20 +511,88 @@ onBeforeUnmount(() => {
         </template>
       </div>
     </main>
+
+    <!-- 右栏：配置、参数与导出 -->
+    <section class="tool-sidepanel panel">
+      <div class="section">
+        <h2 class="section-title">调色板换色</h2>
+        <p class="muted">Team Color / 皮肤变体，本地处理不上传</p>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">主色板提取</h2>
+        <label class="field">
+          <span class="field-label">色槽数量 {{ state.maxSlots }}</span>
+          <input v-model.number="state.maxSlots" class="range" type="range" min="3" max="12" :disabled="!hasSource" />
+        </label>
+        <label class="field">
+          <span class="field-label">颜色容差 {{ state.tolerance }}</span>
+          <input v-model.number="state.tolerance" class="range" type="range" min="4" max="60" />
+        </label>
+        <p class="muted hint">{{ windowHint }}（沿用抠图页的色相/饱和度判据）</p>
+        <label class="check-row">
+          <input v-model="state.includeNeutrals" type="checkbox" />
+          <span>黑/灰/白单独列为色槽</span>
+        </label>
+        <button class="btn full" :disabled="!hasSource || state.status === 'processing'" @click="extract">
+          {{ state.status === 'processing' ? '处理中…' : '重新提取主色板' }}
+        </button>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">阵营色预设</h2>
+        <div class="preset-grid">
+          <button
+            v-for="preset in TEAM_COLOR_PRESETS"
+            :key="preset.key"
+            class="preset-chip"
+            :disabled="!activeVariant"
+            :title="`把 ${preset.label} 应用到当前变体`"
+            @click="applyPreset(preset)"
+          >
+            <span class="preset-dots">
+              <i v-for="color in preset.colors" :key="color" :style="{ background: color }"></i>
+            </span>
+            <span>{{ preset.label }}</span>
+          </button>
+        </div>
+        <p v-if="hasSource" class="muted hint">
+          <template v-if="teamSlotCount">当前 {{ teamSlotCount }} 个色槽标记为阵营色，预设只换这些区域</template>
+          <template v-else>还没有阵营色槽：请在色槽卡片勾选「阵营色」，预设才有可写入的目标</template>
+        </p>
+        <button class="btn full" :disabled="!slots.length" @click="generateTeamVariants">一次生成 7 套阵营变体</button>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">导出</h2>
+        <label class="field">
+          <span class="field-label">命名模板</span>
+          <input v-model="state.nameTemplate" class="input" type="text" placeholder="{base}_{variant}.png" />
+        </label>
+        <p class="muted hint">占位符：{base} 源图名 · {variant} 变体名 · {index} 序号</p>
+        <button class="btn btn-primary full" :disabled="!variants.length || exporting || !hasSource" @click="exportZip">
+          {{ exporting ? '导出中…' : `导出 ZIP（${variants.length} 套 PNG + 元数据）` }}
+        </button>
+        <button class="btn btn-ghost full" :disabled="!hasSource" @click="resetAll">重置</button>
+        <p v-if="state.error" class="error-text">{{ state.error }}</p>
+      </div>
+    </section>
+
   </div>
 </template>
 
 <style scoped>
-/* 页面骨架与九宫格页同构：侧栏 + 主工作区 */
-.tool-page { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; min-height: 0; }
+/* 页面骨架与雪碧图页同构：左栏图集列表 + 中间工作区 + 右栏参数配置；未导入时左栏隐藏 */
+.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
+.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
 .tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
+.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
 .tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
 .tool-header h2 { margin: 0; font-size: var(--fs-head); }
 .tool-header p { margin: 2px 0 0; color: var(--text-faint); }
 .tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-5); padding: 24px; }
 .full { width: 100%; justify-content: center; }
-.file-name { margin: var(--sp-2) 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hint { margin: var(--sp-1) 0 0; font-size: var(--fs-caption); }
 .section .field + .field, .section .field + .check-row, .section .check-row + .btn { margin-top: var(--sp-3); }
 .section p + .field, .section p + .btn { margin-top: var(--sp-3); }
@@ -641,7 +654,13 @@ onBeforeUnmount(() => {
 .error-text { color: var(--danger); font-size: var(--fs-caption); }
 
 @media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 260px minmax(0, 1fr); }
+  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
   .pa-compare { grid-template-columns: minmax(0, 1fr); }
 }
+/* 左栏图集列表条目：缩略图 + 名称 + 尺寸 + 移除 */
+.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
+.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
+.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
 </style>

@@ -297,18 +297,13 @@ function resetAll(): void {
 </script>
 
 <template>
-  <div class="tool-page">
-    <section class="tool-sidebar panel">
-      <div class="section">
-        <h2 class="section-title">多方向精灵</h2>
-        <p class="muted">多组单方向帧 → 镜像/旋转派生多方向</p>
-      </div>
-
+  <div class="tool-page" :class="{ 'no-list': !state.groups.length }">
+    <!-- 左栏：基准帧组列表，没有帧组时整栏不显示 -->
+    <section v-if="state.groups.length" class="tool-sidebar panel">
       <div class="section">
         <h2 class="section-title">基准帧组</h2>
-        <button class="btn btn-primary full" @click="addGroup">添加帧组</button>
-        <input ref="input" hidden multiple type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
         <p class="muted hint">每组导入同一方向、同一动作的逐帧序列；如正面组派生左/下，背面组派生上。建议命名 walk_00.png。</p>
+        <input ref="input" hidden multiple type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
         <div v-for="(group, gi) in state.groups" :key="group.id" class="group-card">
           <div class="group-head">
             <span class="mono faint">{{ gi + 1 }}</span>
@@ -327,7 +322,87 @@ function resetAll(): void {
           </ul>
           <p v-else class="muted">尚未导入帧</p>
         </div>
-        <p v-if="!state.groups.length" class="muted">尚未添加帧组</p>
+      </div>
+    </section>
+
+    <main class="tool-main">
+      <div class="tool-header">
+        <div>
+          <h2>方向工作区</h2>
+          <p>
+            <template v-if="state.groups.length">
+              {{ state.groups.length }} 个帧组 · {{ activeCount }} 个方向 · {{ activeColumns }} 帧
+              <span v-if="activeCount < state.slots.length"> · {{ state.slots.length - activeCount }} 个方向未生成</span>
+            </template>
+            <template v-else>添加帧组并导入单方向帧开始合成</template>
+          </p>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-primary" @click="addGroup">添加帧组</button>
+          <span v-if="previewUrl" class="badge badge-accent">已合成</span>
+        </div>
+      </div>
+
+      <div class="tool-body">
+        <div v-if="!state.groups.length" class="empty-state">
+          <span class="big">⊹</span>
+          <strong>还没有可合成的帧</strong>
+          <span>添加帧组并导入同一动作、同一方向的逐帧序列（PNG / JPG / WebP，单张 ≤ 20MB），再为各方向指定来源帧组与镜像或旋转</span>
+        </div>
+
+        <template v-else>
+          <section class="ds-block">
+            <h3 class="ds-block-title">方向 × 帧 预览</h3>
+            <div class="ds-table-wrap">
+              <table class="ds-table">
+                <thead>
+                  <tr>
+                    <th class="ds-corner">方向</th>
+                    <th v-for="index in activeColumns" :key="index" class="mono">{{ String(index - 1).padStart(2, '0') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="slot in state.slots" :key="slot.key" :class="{ off: !slot.source }">
+                    <th class="ds-dir">{{ slot.label }}<span v-if="!slot.source" class="ds-tag">未生成</span></th>
+                    <template v-if="slot.source">
+                      <td v-for="index in activeColumns" :key="index" class="ds-cell">
+                        <img
+                          v-if="slotFrames(slot)[index - 1]"
+                          :src="slotFrames(slot)[index - 1].url"
+                          :alt="slotFrames(slot)[index - 1].name"
+                          :style="{ transform: CSS_TRANSFORM[slot.transform] }"
+                          draggable="false"
+                        />
+                        <span v-else class="ds-empty">—</span>
+                      </td>
+                    </template>
+                    <template v-else>
+                      <td v-for="index in activeColumns" :key="index" class="ds-cell">
+                        <span class="ds-empty">—</span>
+                      </td>
+                    </template>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="ds-block">
+            <h3 class="ds-block-title">合成结果</h3>
+            <div class="ds-atlas">
+              <img v-if="previewUrl" :src="previewUrl" alt="方向图集预览" draggable="false" />
+              <p v-else class="muted">至少为一个方向指定来源帧组后即可预览</p>
+            </div>
+          </section>
+        </template>
+      </div>
+    </main>
+
+    <!-- 右栏：配置、参数与导出 -->
+    <section class="tool-sidepanel panel">
+      <div class="section">
+        <h2 class="section-title">多方向精灵</h2>
+        <p class="muted">多组单方向帧 → 镜像/旋转派生多方向</p>
       </div>
 
       <div class="section">
@@ -388,82 +463,15 @@ function resetAll(): void {
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
-        <div>
-          <h2>方向工作区</h2>
-          <p>
-            <template v-if="state.groups.length">
-              {{ state.groups.length }} 个帧组 · {{ activeCount }} 个方向 · {{ activeColumns }} 帧
-              <span v-if="activeCount < state.slots.length"> · {{ state.slots.length - activeCount }} 个方向未生成</span>
-            </template>
-            <template v-else>添加帧组并导入单方向帧开始合成</template>
-          </p>
-        </div>
-        <span v-if="previewUrl" class="badge badge-accent">已合成</span>
-      </div>
-
-      <div class="tool-body">
-        <div v-if="!state.groups.length" class="empty-state">
-          <span class="big">⊹</span>
-          <strong>还没有可合成的帧</strong>
-          <span>添加帧组并导入同一动作、同一方向的逐帧序列（PNG / JPG / WebP，单张 ≤ 20MB），再为各方向指定来源帧组与镜像或旋转</span>
-        </div>
-
-        <template v-else>
-          <section class="ds-block">
-            <h3 class="ds-block-title">方向 × 帧 预览</h3>
-            <div class="ds-table-wrap">
-              <table class="ds-table">
-                <thead>
-                  <tr>
-                    <th class="ds-corner">方向</th>
-                    <th v-for="index in activeColumns" :key="index" class="mono">{{ String(index - 1).padStart(2, '0') }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="slot in state.slots" :key="slot.key" :class="{ off: !slot.source }">
-                    <th class="ds-dir">{{ slot.label }}<span v-if="!slot.source" class="ds-tag">未生成</span></th>
-                    <template v-if="slot.source">
-                      <td v-for="index in activeColumns" :key="index" class="ds-cell">
-                        <img
-                          v-if="slotFrames(slot)[index - 1]"
-                          :src="slotFrames(slot)[index - 1].url"
-                          :alt="slotFrames(slot)[index - 1].name"
-                          :style="{ transform: CSS_TRANSFORM[slot.transform] }"
-                          draggable="false"
-                        />
-                        <span v-else class="ds-empty">—</span>
-                      </td>
-                    </template>
-                    <template v-else>
-                      <td v-for="index in activeColumns" :key="index" class="ds-cell">
-                        <span class="ds-empty">—</span>
-                      </td>
-                    </template>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="ds-block">
-            <h3 class="ds-block-title">合成结果</h3>
-            <div class="ds-atlas">
-              <img v-if="previewUrl" :src="previewUrl" alt="方向图集预览" draggable="false" />
-              <p v-else class="muted">至少为一个方向指定来源帧组后即可预览</p>
-            </div>
-          </section>
-        </template>
-      </div>
-    </main>
   </div>
 </template>
 
 <style scoped>
-/* 页面骨架与九宫格页同构：侧栏 + 主工作区 */
-.tool-page { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; min-height: 0; }
+/* 页面骨架与雪碧图页同构：左栏帧组列表 + 中间工作区 + 右栏参数配置；没有帧组时左栏隐藏 */
+.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
+.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
 .tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
+.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
 .tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
 .tool-header h2 { margin: 0; font-size: var(--fs-head); }
@@ -517,6 +525,8 @@ function resetAll(): void {
 .ds-atlas img { max-width: 100%; max-height: 56vh; object-fit: contain; image-rendering: pixelated; }
 
 @media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 260px minmax(0, 1fr); }
+  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
 }
+.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
 </style>

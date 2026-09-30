@@ -345,73 +345,19 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tool-page">
-    <section class="tool-sidebar panel">
+  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+    <!-- 左栏：已导入图片列表，未导入时整栏不显示 -->
+    <section v-if="hasSource" class="tool-sidebar panel">
       <div class="section">
-        <h2 class="section-title">九宫格切图</h2>
-        <p class="muted">本地处理，不上传素材</p>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">图片来源</h2>
-        <button class="btn btn-primary full" @click="input?.click()">导入图片</button>
-        <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
-        <p class="muted file-name">{{ state.fileName || '未选择图片' }}</p>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">四边距离（px）</h2>
-        <div class="border-grid">
-          <label v-for="line in BORDER_LINES" :key="line" class="field">
-            <span class="field-label">{{ GUIDE_LABELS[line] }}</span>
-            <input
-              class="input"
-              type="number"
-              min="0"
-              :value="border ? border[line] : 0"
-              :disabled="!hasSource"
-              @change="onLineInput(line, $event)"
-              @focus="selected = line"
-            />
-          </label>
-        </div>
-        <p class="muted">拖动画布上的分割线，或点选数值框后用方向键微调（Shift 为 10px）。</p>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">拉伸预览尺寸</h2>
-        <div class="field-row">
-          <label class="field">
-            <span class="field-label">宽</span>
-            <input v-model.number="state.previewSize.width" class="input" type="number" min="1" :disabled="!hasSource" />
-          </label>
-          <label class="field">
-            <span class="field-label">高</span>
-            <input v-model.number="state.previewSize.height" class="input" type="number" min="1" :disabled="!hasSource" />
-          </label>
-        </div>
-      </div>
-
-      <div class="section">
-        <h2 class="section-title">导出选项</h2>
-        <label class="check-row"><input v-model="export2x" type="checkbox" :disabled="!hasSource" /> @2x 多倍率切块</label>
-        <label class="check-row"><input v-model="export3x" type="checkbox" :disabled="!hasSource" /> @3x 多倍率切块</label>
-        <label class="check-row"><input v-model="exportNinePatch" type="checkbox" :disabled="!hasSource" /> Android .9.png</label>
-        <p class="muted">倍率切块按整图放大后重新切分，并附带缩放后的 border 元数据；.9.png 以上下左右黑线标记拉伸区与内容区。</p>
-        <label class="field">
-          <span class="field-label">切块命名模板</span>
-          <input v-model="nameTemplate" class="input template-input" type="text" spellcheck="false" placeholder="{name}{scale}_{part}.png" />
-        </label>
-        <p v-if="!templateValid" class="error-text">模板需同时包含 {name} 与 {part}，否则文件会互相覆盖（导出时按默认模板处理）。</p>
-        <p v-else class="muted">占位符：{name} 基础名 · {part} 块名 · {scale} 倍率（1x 为空）。预览：{{ templatePreview }}</p>
-      </div>
-
-      <div class="section actions">
-        <button class="btn btn-primary full" :disabled="!slices || exporting" @click="exportZip">
-          {{ exporting ? '打包中…' : '导出 ZIP（9 PNG + 元数据）' }}
-        </button>
-        <button class="btn btn-ghost full" :disabled="!hasSource" @click="resetAll">重置</button>
-        <p v-if="errorText" class="error-text">{{ errorText }}</p>
+        <h2 class="section-title">图集列表</h2>
+        <ul class="asset-list">
+          <li class="asset-row">
+            <img class="asset-thumb" :src="state.sourceUrl" :alt="state.fileName" draggable="false" />
+            <span class="asset-name" :title="state.fileName">{{ state.fileName }}</span>
+            <span class="mono faint">{{ state.image?.width }}×{{ state.image?.height }}</span>
+            <button class="btn btn-icon btn-danger" title="移除" @click="resetAll">×</button>
+          </li>
+        </ul>
       </div>
     </section>
 
@@ -421,7 +367,11 @@ onBeforeUnmount(() => {
           <h2>九宫格工作区</h2>
           <p>{{ state.image ? `${state.image.width}×${state.image.height} px · 分割线可拖动` : '导入一张 UI 图开始切分' }}</p>
         </div>
-        <span v-if="slices" class="badge badge-accent">{{ NINE_SLICE_KEYS.filter((k) => slices?.[k]).length }} 块已切出</span>
+        <div class="header-actions">
+          <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
+          <button class="btn btn-primary" @click="input?.click()">导入图片</button>
+          <span v-if="slices" class="badge badge-accent">{{ NINE_SLICE_KEYS.filter((k) => slices?.[k]).length }} 块已切出</span>
+        </div>
       </div>
 
       <div class="tool-body">
@@ -480,13 +430,79 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </main>
+
+    <!-- 右栏：配置、参数与导出 -->
+    <section class="tool-sidepanel panel">
+      <div class="section">
+        <h2 class="section-title">九宫格切图</h2>
+        <p class="muted">本地处理，不上传素材</p>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">四边距离（px）</h2>
+        <div class="border-grid">
+          <label v-for="line in BORDER_LINES" :key="line" class="field">
+            <span class="field-label">{{ GUIDE_LABELS[line] }}</span>
+            <input
+              class="input"
+              type="number"
+              min="0"
+              :value="border ? border[line] : 0"
+              :disabled="!hasSource"
+              @change="onLineInput(line, $event)"
+              @focus="selected = line"
+            />
+          </label>
+        </div>
+        <p class="muted">拖动画布上的分割线，或点选数值框后用方向键微调（Shift 为 10px）。</p>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">拉伸预览尺寸</h2>
+        <div class="field-row">
+          <label class="field">
+            <span class="field-label">宽</span>
+            <input v-model.number="state.previewSize.width" class="input" type="number" min="1" :disabled="!hasSource" />
+          </label>
+          <label class="field">
+            <span class="field-label">高</span>
+            <input v-model.number="state.previewSize.height" class="input" type="number" min="1" :disabled="!hasSource" />
+          </label>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2 class="section-title">导出选项</h2>
+        <label class="check-row"><input v-model="export2x" type="checkbox" :disabled="!hasSource" /> @2x 多倍率切块</label>
+        <label class="check-row"><input v-model="export3x" type="checkbox" :disabled="!hasSource" /> @3x 多倍率切块</label>
+        <label class="check-row"><input v-model="exportNinePatch" type="checkbox" :disabled="!hasSource" /> Android .9.png</label>
+        <p class="muted">倍率切块按整图放大后重新切分，并附带缩放后的 border 元数据；.9.png 以上下左右黑线标记拉伸区与内容区。</p>
+        <label class="field">
+          <span class="field-label">切块命名模板</span>
+          <input v-model="nameTemplate" class="input template-input" type="text" spellcheck="false" placeholder="{name}{scale}_{part}.png" />
+        </label>
+        <p v-if="!templateValid" class="error-text">模板需同时包含 {name} 与 {part}，否则文件会互相覆盖（导出时按默认模板处理）。</p>
+        <p v-else class="muted">占位符：{name} 基础名 · {part} 块名 · {scale} 倍率（1x 为空）。预览：{{ templatePreview }}</p>
+      </div>
+
+      <div class="section actions">
+        <button class="btn btn-primary full" :disabled="!slices || exporting" @click="exportZip">
+          {{ exporting ? '打包中…' : '导出 ZIP（9 PNG + 元数据）' }}
+        </button>
+        <button class="btn btn-ghost full" :disabled="!hasSource" @click="resetAll">重置</button>
+        <p v-if="errorText" class="error-text">{{ errorText }}</p>
+      </div>
+    </section>
+
   </div>
 </template>
 
 <style scoped>
-/* 页面级布局：与去水印页同构（侧栏 + 主工作区），类定义在各页 scoped 内，这里补齐本页所需 */
-.tool-page { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; min-height: 0; }
+/* 页面骨架：左栏图集列表 + 中间工作区 + 右栏参数配置（与雪碧图页同构的三栏布局）；未导入时左栏隐藏 */
+.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
+.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
 .tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
+.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
 .tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
 .tool-header h2 { margin: 0; font-size: var(--fs-head); }
@@ -494,7 +510,6 @@ onBeforeUnmount(() => {
 .tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 24px; }
 .full { width: 100%; justify-content: center; }
 .actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-.file-name { margin: var(--sp-2) 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 只给直接堆叠在 section 下的 field 加间距；border-grid / field-row 内的字段由 gap 控制，避免误加 margin 造成错位 */
 .section > .field + .field, .section > .field + .check-row { margin-top: var(--sp-3); }
 .section > p + .field { margin-top: var(--sp-3); }
@@ -609,9 +624,16 @@ onBeforeUnmount(() => {
 }
 /* 窄屏适配：工作区两列堆叠为单列，侧栏收窄 */
 @media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 260px minmax(0, 1fr); }
+  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
   .ns-workspace { grid-template-columns: minmax(0, 1fr); }
 }
+.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
+/* 左栏图集列表条目：缩略图 + 名称 + 尺寸 + 移除 */
+.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
+.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
+.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
 .error-text {
   color: var(--danger, #e8463a);
   font-size: var(--fs-caption);
