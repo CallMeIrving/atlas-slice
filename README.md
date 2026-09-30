@@ -288,6 +288,45 @@ test-fixtures/           生成的测试图集产物
 release/                 electron-builder 打包产物（被 .gitignore 忽略）
 ```
 
+## 本地测试
+
+分四层，从快到慢。前三层随时可跑，后两层会真正构建产物。
+
+```bash
+# 1. 后端单元测试：秒级，不需要权重、不加载 torch
+cd backend && .venv/bin/python -m pytest -q
+
+# 2. 真权重冒烟（默认被 skip 的那条）：先下权重，再只跑标记用例
+pnpm run backend:models
+cd backend && LAYER_SPLIT_TEST_MODELS=1 .venv/bin/python -m pytest -m slow -q
+
+# 3. 前端类型检查 + 产物构建（唯一做类型检查的地方）
+pnpm run build
+
+# 4. 主进程编译（esbuild，仅转译，不做类型检查）
+pnpm run electron:build
+
+# 5. 端到端：Electron 开发态，主进程自己拉起 Python
+pnpm run dev:electron
+DEBUG_PYTHON=1 pnpm run dev:electron   # 需要看后端 stderr 时
+
+# 6. 打包态
+pnpm run pack:dir
+```
+
+| 层 | 覆盖 | 说明 |
+|---|---|---|
+| `pytest -q` | 管线、API、导出、模型清单约束 | 全走 Fake 后端；权重缺失只会 skip，不会失败 |
+| `pytest -m slow` | 完整 detect → segment → refine → zorder → background | 需权重，未就绪时自动 skip |
+| `pnpm run build` | `src/**` 全量类型检查 | vue-tsc |
+| `pnpm run electron:build` | 主进程 | **仅转译，类型错误拦不住**，只有真跑起来才暴露 |
+| `pnpm run dev:electron` | IPC、子进程拉起、静态服务 | 手工验证 |
+| `pnpm run pack:dir` | 冻结后端 + 随包后端启动 | 见下节 |
+
+纯 Web 下测图层拆分要**开两个终端**：`pnpm run dev` + `pnpm run backend:dev`。Electron 开发态则**不要**再跑 `backend:dev`——主进程会自己起一个动态端口的实例，手动起的那个不会被使用。
+
+> `arch -arm64` 前缀仅在终端跑在 Rosetta（x86_64）下才需要。`uname -m` 输出 `arm64` 时直接用 `.venv/bin/python` 即可。
+
 ## 打包（macOS）
 
 仅面向 macOS Apple Silicon（arm64），产出 `.app` / `.dmg` / `.zip`：
@@ -297,13 +336,64 @@ pnpm run pack:dir   # 快速冒烟：只出 release/mac-arm64/AtlasSlice.app，�
 pnpm run dist:mac   # 正式产物：release/ 下的 dmg 与 zip
 ```
 
-两条命令都会先执行 `pnpm run backend:freeze`（PyInstaller 把 `backend/` 冻结成自包含可执行文件，落到 `backend/dist/atlas-backend/`），再交给 electron-builder 随包分发。因此打包前需先按 [backend/README.md](backend/README.md) 准备好 `backend/.venv`（需含 `pyinstaller`，见 `requirements-dev.txt`）：
+两条命令依次执行四步，**不可跳步**：
 
-```bash
-pnpm run backend:freeze   # 单独重跑冻结（约 400MB 产物，含 torch）
+```
+pnpm run build          →  dist/                        前端产物
+pnpm run electron:build →  dist-electron/               主进程 CJS
+pnpm run backend:freeze →  backend/dist/atlas-backend/  PyInstaller 冻结后端
+electron-builder        →  release/                     .app / .dmg / .zip
 ```
 
-首次打包需下载 Electron 预编译包；国内网络直连 GitHub 会超时，可先设置镜像：
+其中 `backend:freeze` 把 `backend/` 打成自包含可执行文件后随包分发，因此打包前需先按 [backend/README.md](backend/README.md) 准备好 `backend/.venv`（需含 `pyinstaller`，见 `requirements-dev.txt`）。单独重跑冻结：
+
+```bash
+pnpm run backend:freeze   # 约 490MB 产物，含 torch
+```
+
+产物（实测体积）：
+
+```
+release/
+├── mac-arm64/AtlasSlice.app         799M   可直接 open
+├── AtlasSlice-0.1.0-arm64.dmg       117M
+└── AtlasSlice-0.1.0-arm64-mac.zip   114M
+```
+
+### 三个容易踩的坑
+
+1. **`backend:freeze` 不能省**。`electron-builder.yml` 的 `extraResources` 引用了 `backend/dist/atlas-backend`，该目录不存在时 electron-builder 会直接报错退出——所以别单独跑 `npx electron-builder`。
+2. **改过 `backend/app/**` 必须重跑 freeze**。`pack:dir` / `dist:mac` 每次都会跑，正常流程无碍；手动跳步时会打出旧后端。
+3. **freeze 是 `--clean` 全量重打，耗时数分钟且不吃缓存**，只改前端也得等。只验前端时可走快路径（前提是 `backend/dist/atlas-backend` 已存在）：
+
+```bash
+pnpm run build && pnpm run electron:build && npx electron-builder --mac --arm64 --dir --publish never
+```
+
+磁盘占用别忽略：`backend/dist` 约 487M、`backend/build`（PyInstaller 中间产物）约 491M、`release` 约 800M，合计近 1.8G。清理：
+
+```bash
+rm -rf release backend/dist backend/build
+```
+
+### 打包后验证
+
+```bash
+open release/mac-arm64/AtlasSlice.app
+ps aux | grep atlas-backend     # 确认随包后端已被拉起
+```
+
+图层拆分页应显示「已连接」，且**不需要外部 venv**；首次抠图 / 拆分触发权重下载到 `~/Library/Application Support/AtlasSlice/models`。
+
+### 环境问题
+
+| 现象 | 处理 |
+|---|---|
+| 首次打包卡在下载 Electron 预编译包 | 按下方镜像设置后重试 |
+| freeze 报 `PermissionError` 写缓存目录 | 脚本已把 `PYINSTALLER_CONFIG_DIR` 指到 `backend/build/pyinstaller`；手动跑 PyInstaller 时需自行带上 |
+| freeze 中途失败 | `rm -rf backend/build backend/dist` 后重跑 |
+
+国内网络直连 GitHub 会超时，可先设置镜像：
 
 ```bash
 export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
