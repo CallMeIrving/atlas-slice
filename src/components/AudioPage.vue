@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AudioBatchModal from '@/components/AudioBatchModal.vue'
 import AudioResultModal from '@/components/AudioResultModal.vue'
+import AudioSynthModal from '@/components/AudioSynthModal.vue'
 import AudioWaveform from '@/components/AudioWaveform.vue'
 import MultiTrackEditor from '@/components/MultiTrackEditor.vue'
 import { claimAudition, releaseAudition } from '@/core/audio/audition'
@@ -187,6 +188,12 @@ function openBatchModal(): void {
   audioState.batchModalOpen = true
 }
 
+/** 音效生成：没有素材也能用，所以与导入按钮一样始终可见 */
+function openSynthModal(): void {
+  audioState.error = ''
+  audioState.synthModalOpen = true
+}
+
 /** 处理完成：关掉配置弹窗，改开结果弹窗 */
 function onBatchFinished(): void {
   audioState.batchModalOpen = false
@@ -316,6 +323,9 @@ watch(
             @change="onImport"
           />
           <button class="btn" :disabled="busy" @click="input?.click()">导入</button>
+          <button class="btn" :disabled="busy" title="程序化合成 UI 音 / 8-bit / 科幻 / 打击类音效" @click="openSynthModal()">
+            音效生成
+          </button>
           <button v-if="hasOutputs" class="btn" @click="audioState.resultModalOpen = true">
             查看结果（{{ audioState.outputs.length }}）
           </button>
@@ -335,7 +345,10 @@ watch(
           <span class="big">♪</span>
           <strong>还没有素材</strong>
           <span>音频 WAV/MP3/OGG/FLAC/M4A，视频 MP4/MOV/WebM 自动提取音轨</span>
-          <button class="btn btn-primary" @click="input?.click()">选择文件或拖到此处</button>
+          <div class="empty-actions">
+            <button class="btn btn-primary" @click="input?.click()">选择文件或拖到此处</button>
+            <button class="btn" @click="openSynthModal()">或生成一个音效</button>
+          </div>
         </div>
         <MultiTrackEditor v-else />
       </div>
@@ -407,6 +420,7 @@ watch(
       @finished="onBatchFinished"
     />
     <AudioResultModal v-if="audioState.resultModalOpen" @close="audioState.resultModalOpen = false" />
+    <AudioSynthModal v-if="audioState.synthModalOpen" @close="audioState.synthModalOpen = false" />
 
     <!-- 素材列表共用的试听播放器：整页共用一条，天然保证同时只响一个 -->
     <audio
@@ -451,6 +465,7 @@ watch(
 .tool-header p { margin: 2px 0 0; color: var(--text-faint); }
 .tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 16px 24px 24px; }
 .header-actions { display: flex; align-items: center; gap: var(--sp-3); }
+.empty-actions { display: flex; align-items: center; gap: var(--sp-3); }
 .full { width: 100%; justify-content: center; }
 .small { font-size: var(--fs-caption); }
 .actions { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }

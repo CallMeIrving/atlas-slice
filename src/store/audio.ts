@@ -171,9 +171,10 @@ export const audioState = reactive({
   batch: { running: false, cancelling: false, done: 0, total: 0, text: '', error: '' } as BatchState,
   outputs: [] as AudioOutput[],
   reportRows: [] as ReportRow[],
-  /** 批量编辑与结果弹窗开关 */
+  /** 批量编辑 / 结果 / 音效生成三个弹窗开关 */
   batchModalOpen: false,
   resultModalOpen: false,
+  synthModalOpen: false,
   error: '',
   notice: '',
 })
@@ -654,17 +655,36 @@ function uniqueAssetStem(stem: string): string {
   return `${stem}_${seq}`
 }
 
-/** 把处理结果写成 WAV 再走一遍导入流程，从而复用分析 / 波形 / 指纹 / 试听等既有逻辑 */
-function registerGeneratedPcm(pcm: AudioPcm, stem: string): AudioAsset {
+/** 把生成结果写成 WAV 再走一遍导入流程，从而复用分析 / 波形 / 指纹 / 试听等既有逻辑 */
+function writeGeneratedAsset(pcm: AudioPcm, stem: string): AudioAsset {
   const fileName = `${uniqueAssetStem(stem)}.wav`
   const bytes = encodeWav(pcm, 'float32')
   const file = new File([bytes as BlobPart], fileName, { type: 'audio/wav' })
-  const asset = addPcmAsset(file, pcm, 'wav')
+  return addPcmAsset(file, pcm, 'wav')
+}
+
+/** 时间轴混音结果：设为唯一勾选项，避免紧接着的批量编辑把参与混音的原始素材又处理一遍 */
+function registerGeneratedPcm(pcm: AudioPcm, stem: string): AudioAsset {
+  const asset = writeGeneratedAsset(pcm, stem)
   audioState.activeAssetId = asset.id
-  // 合成结果设为唯一勾选项：接下来的「批量编辑」默认就是导出这一条合成音频，
-  // 不会把参与混音的原始素材一起再处理一遍
   audioState.selectedAssetIds = [asset.id]
   return asset
+}
+
+/**
+ * 把音效合成器产出的音效登记为素材。
+ * 一次可能加入多条，因此不走「唯一勾选」：把勾选重置为这批新素材，
+ * 既保证它们默认可直接进批量编辑，又不会把上一轮的旧勾选一并带进来。
+ */
+export function addGeneratedAssets(entries: { pcm: AudioPcm; stem: string }[]): number {
+  const usable = entries.filter((item) => item.pcm.length > 0)
+  if (usable.length === 0) return 0
+  audioState.error = ''
+  const ids = usable.map((item) => writeGeneratedAsset(item.pcm, item.stem).id)
+  audioState.selectedAssetIds = ids
+  audioState.activeAssetId = ids[0]
+  notify(`已加入 ${ids.length} 个音效素材，可直接批量编辑`)
+  return ids.length
 }
 
 /**
