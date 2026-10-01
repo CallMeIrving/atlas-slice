@@ -9,6 +9,7 @@ import { buildInterpolationKernel, kernelPhaseOffset } from './kernel'
 import {
   createPcm,
   dbToGain,
+  gainPcm,
   gainToDb,
   slicePcm,
   slicePcmByIndex,
@@ -184,6 +185,75 @@ export async function concatPcm(segments: AudioPcm[], options: ConcatOptions = {
     for (let c = 0; c < targetChannels; c++) out.channels[c].set(item.channels[c], cursor)
     cursor += item.length + (i < prepared.length - 1 ? gapSamples : 0)
     ctx?.onProgress?.((i + 1) / prepared.length)
+    await checkpoint(ctx)
+  }
+  return out
+}
+
+export interface MixClip {
+  /** 源音频（已解码的完整素材） */
+  pcm: AudioPcm
+  /** 片段在时间轴上的起点（秒） */
+  startSec: number
+  /** 源素材内的裁剪区间（秒） */
+  trimStartSec: number
+  trimEndSec: number
+  /** 片段增益（dB），0 表示不增减 */
+  gainDb: number
+  fadeInSec: number
+  fadeOutSec: number
+}
+
+export interface MixOptions {
+  /** 输出采样率，缺省沿用首个片段 */
+  sampleRate?: number
+  /** 输出声道数，缺省取各片段的最大值（单声道素材不会被无谓升成双声道） */
+  channelCount?: 1 | 2
+  ctx?: ProcessContext
+}
+
+/**
+ * 多轨叠加混音：各片段按时间轴偏移同时发声，重叠区间按样本相加。
+ *
+ * 与 concatPcm 的区别是「并行 vs 串行」——这里是真正的混音，
+ * 同一时刻可以有多条片段叠加；每条片段只加自己的样本，不覆盖已有内容。
+ *
+ * 不做限幅：叠加后可能超过 ±1，交由下游的响度标准化与限幅步骤处理，
+ * 这样也保留了浮点中间值的动态余量，避免在混音阶段就产生削波失真。
+ */
+export async function mixPcm(clips: MixClip[], options: MixOptions = {}): Promise<AudioPcm> {
+  const ctx = options.ctx
+  const usable = clips.filter((clip) => clip.trimEndSec - clip.trimStartSec > 0 && clip.pcm.length > 0)
+  if (usable.length === 0) return createPcm(44100, 1, 0)
+
+  const rate = options.sampleRate ?? usable[0].pcm.sampleRate
+  const targetChannels: 1 | 2 =
+    options.channelCount ?? (usable.some((clip) => clip.pcm.channels.length >= 2) ? 2 : 1)
+
+  const prepared: { pcm: AudioPcm; offset: number }[] = []
+  for (const clip of usable) {
+    let current = clip.pcm
+    if (current.sampleRate !== rate) current = await resamplePcm(current, rate, ctx)
+    if (current.channels.length !== targetChannels) current = convertChannels(current, targetChannels)
+    current = cropPcm(current, clip.trimStartSec, clip.trimEndSec)
+    if (current.length === 0) continue
+    if (clip.fadeInSec > 0 || clip.fadeOutSec > 0) current = fadePcm(current, clip.fadeInSec, clip.fadeOutSec)
+    if (clip.gainDb !== 0) current = gainPcm(current, dbToGain(clip.gainDb))
+    prepared.push({ pcm: current, offset: Math.max(0, Math.round(clip.startSec * rate)) })
+    await checkpoint(ctx)
+  }
+  if (prepared.length === 0) return createPcm(rate, targetChannels, 0)
+
+  const total = prepared.reduce((longest, item) => Math.max(longest, item.offset + item.pcm.length), 0)
+  const out = createPcm(rate, targetChannels, total)
+  for (let index = 0; index < prepared.length; index++) {
+    const { pcm, offset } = prepared[index]
+    for (let c = 0; c < targetChannels; c++) {
+      const src = pcm.channels[c]
+      const dst = out.channels[c]
+      for (let i = 0; i < src.length; i++) dst[offset + i] += src[i]
+    }
+    ctx?.onProgress?.((index + 1) / prepared.length)
     await checkpoint(ctx)
   }
   return out

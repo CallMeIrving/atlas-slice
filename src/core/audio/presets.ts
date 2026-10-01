@@ -39,6 +39,17 @@ export interface ExportSettings {
   ensureUnique: boolean
 }
 
+/** 只影响编码的参数：批量的命名模板对单文件导出没有意义，故单独拆出来 */
+export type EncodeSettings = Pick<ExportSettings, 'format' | 'wavEncoding' | 'mp3Bitrate' | 'oggQuality'>
+
+/** 合成导出的默认编码参数 */
+export const DEFAULT_MIX_EXPORT: EncodeSettings = {
+  format: 'wav',
+  wavEncoding: 'pcm16',
+  mp3Bitrate: 192,
+  oggQuality: 5,
+}
+
 /** 处理链执行顺序，界面按此顺序展示步骤 */
 export const CHAIN_ORDER: { key: keyof AudioChain; label: string }[] = [
   { key: 'crop', label: '精确裁剪' },

@@ -28,6 +28,8 @@ export async function decodeAudioFile(file: File | Blob, fileName = ''): Promise
   const bytes = new Uint8Array(await file.arrayBuffer())
   if (bytes.byteLength === 0) throw new Error('音频文件为空')
 
+  // 视频判定用完整字节：moov 可能在文件尾部，只看探测窗口会漏判（文件已全量读入，遍历盒头开销可忽略）
+  assertAudioOnly(bytes, file, fileName)
   const probe = bytes.subarray(0, Math.min(PROBE_BYTES, bytes.byteLength))
   const probeResult = detectFormat(probe)
   const container = probeResult?.container ?? guessContainer(fileName)
@@ -69,8 +71,9 @@ async function decodeWithBrowser(bytes: Uint8Array, rate: number): Promise<Audio
   for (let i = 0; i < contexts.length; i++) {
     const ctx = contexts[i]
     try {
-      // 每个上下文只能消费一次 ArrayBuffer，后续尝试需要新的副本
-      const copy = i === 0 ? payload : payload.slice(0)
+      // decodeAudioData 会转移（detach）传入的 ArrayBuffer，每次尝试都必须给一份全新副本，
+      // 否则首个上下文解码失败后，后续重试会在 slice 时抛「detached ArrayBuffer」
+      const copy = payload.slice(0)
       const audioBuffer = await ctx.decodeAudioData(copy)
       return fromAudioBuffer(audioBuffer)
     } catch (error) {
@@ -93,6 +96,99 @@ function fromAudioBuffer(buffer: AudioBuffer): AudioPcm {
 interface FormatProbe {
   container: string
   sampleRate: number
+}
+
+/**
+ * 视频文件一律拒收。
+ *
+ * 为什么必须显式拦截：`decodeAudioData` 会自动解出容器里的音轨，MP4 / MOV 视频
+ * 也能成功解出声音，于是「导入视频」会静默成功，素材库里多出一条以视频文件命名的音频。
+ * 另外 macOS 的 `.m4a` 与 `.mp4` 共用同一个 UTI（public.mpeg-4），文件选择器
+ * 无法靠 accept 过滤掉视频，所以只能在读文件头时判断。
+ */
+function assertAudioOnly(probe: Uint8Array, file: File | Blob, fileName: string): void {
+  const container = detectVideoContainer(probe)
+  if (container) throw videoRejected(container, fileName)
+  if (!matchAscii(probe, 4, 'ftyp')) return
+  // MP4 家族：只有 moov 里存在 vide 轨才是视频；moov 超出探测窗口时按 MIME 兜底
+  const video = mp4VideoTrack(probe)
+  if (video === true || (video === null && file.type.startsWith('video/'))) {
+    throw videoRejected('MP4 / MOV', fileName)
+  }
+}
+
+function videoRejected(container: string, fileName: string): Error {
+  return new Error(
+    `「${fileName || '所选文件'}」是视频文件（${container}），音频工具只接受音频素材；请先抽出音轨再导入`,
+  )
+}
+
+/** 头部魔数就能断定的视频容器 */
+function detectVideoContainer(bytes: Uint8Array): string {
+  if (matchAscii(bytes, 0, 'RIFF') && matchAscii(bytes, 8, 'AVI ')) return 'AVI'
+  if (matchAscii(bytes, 0, 'FLV')) return 'FLV'
+  if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
+    return 'Matroska / WebM'
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x30 && bytes[1] === 0x26 && bytes[2] === 0xb2 && bytes[3] === 0x75) {
+    return 'ASF / WMV'
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0x01 && bytes[3] === 0xba) {
+    return 'MPEG 视频'
+  }
+  // 传输流：每 188 字节一个同步字节
+  if (bytes.length >= 189 && bytes[0] === 0x47 && bytes[188] === 0x47) return 'MPEG-TS'
+  return ''
+}
+
+/** 可继续向下递归的 MP4 容器盒 */
+const MP4_CONTAINERS = new Set(['moov', 'trak', 'mdia'])
+
+/**
+ * MP4 / MOV 是否含视频轨。
+ * 返回 null 表示整份字节里都没有 moov（分片 mp4），无法判断。
+ */
+function mp4VideoTrack(bytes: Uint8Array): boolean | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let offset = 0
+  while (offset + 8 <= bytes.length) {
+    const size = view.getUint32(offset, false)
+    const bodyEnd = size === 0 ? bytes.length : Math.min(bytes.length, offset + size)
+    if (bodyEnd <= offset + 8) break
+    if (ascii4(view, offset + 4) === 'moov') {
+      const handlers: string[] = []
+      collectMp4Handlers(bytes, offset + 8, bodyEnd, handlers)
+      return handlers.includes('vide')
+    }
+    offset = bodyEnd
+  }
+  return null
+}
+
+/** 收集容器盒内所有 hdlr 的 handler_type（audio / vide / …） */
+function collectMp4Handlers(bytes: Uint8Array, start: number, end: number, out: string[]): void {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let offset = start
+  while (offset + 8 <= end) {
+    const size = view.getUint32(offset, false)
+    const type = ascii4(view, offset + 4)
+    const bodyStart = offset + 8
+    const bodyEnd = size === 0 ? end : Math.min(end, offset + size)
+    if (bodyEnd <= bodyStart) return
+    if (type === 'hdlr') {
+      // version+flags(4) + pre_defined(4) 之后是 handler_type
+      if (bodyStart + 12 <= bodyEnd) out.push(ascii4(view, bodyStart + 8))
+    } else if (MP4_CONTAINERS.has(type)) {
+      collectMp4Handlers(bytes, bodyStart, bodyEnd, out)
+    }
+    offset = bodyEnd
+  }
+}
+
+function ascii4(view: DataView, offset: number): string {
+  return String.fromCharCode(
+    view.getUint8(offset), view.getUint8(offset + 1), view.getUint8(offset + 2), view.getUint8(offset + 3),
+  )
 }
 
 /** 按文件头字节识别容器并尽量取出原始采样率 */
@@ -201,7 +297,8 @@ function readExtendedFloat(view: DataView, offset: number): number {
 }
 
 function readMp4Rate(bytes: Uint8Array): number {
-  return findMp4Box(bytes, 0, bytes.length, 'moov') ?? 0
+  // mdhd 只可能在 moov/trak/mdia 容器里，从根递归找即可
+  return findMp4Box(bytes, 0, bytes.length, 'mdhd') ?? 0
 }
 
 /** 在 [start,end) 内递归查找目标 box，命中 mdhd 时取 timescale 作为采样率 */
@@ -209,14 +306,22 @@ function findMp4Box(bytes: Uint8Array, start: number, end: number, target: strin
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   let offset = start
   while (offset + 8 <= end) {
-    const size = view.getUint32(offset, false)
+    let size = view.getUint32(offset, false)
+    let headerSize = 8
     const type = String.fromCharCode(
       view.getUint8(offset + 4), view.getUint8(offset + 5), view.getUint8(offset + 6), view.getUint8(offset + 7),
     )
-    const bodyStart = offset + 8
+    // size===1 表示实际长度在 64 位 largesize 里；size===0 表示 box 一直延伸到文件尾
+    if (size === 1 && offset + 16 <= end) {
+      const high = view.getUint32(offset + 8, false)
+      const low = view.getUint32(offset + 12, false)
+      size = high * 2 ** 32 + low
+      headerSize = 16
+    }
+    const bodyStart = offset + headerSize
     const bodyEnd = size === 0 ? end : Math.min(end, offset + size)
     if (!Number.isFinite(size) || bodyEnd <= bodyStart) return null
-    if (type === target && target === 'mdhd') {
+    if (type === target) {
       const version = view.getUint8(bodyStart)
       // version 0：creation(4)+modification(4)+timescale(4)；version 1 各为 8 字节
       return version === 1 ? view.getUint32(bodyStart + 4 + 8 + 8, false) : view.getUint32(bodyStart + 4 + 4 + 4, false)

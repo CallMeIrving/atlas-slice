@@ -16,13 +16,15 @@ import { applyChain, applyNameTemplate } from '@/core/audio/pipeline'
 import {
   DEFAULT_CHAIN,
   DEFAULT_EXPORT,
+  DEFAULT_MIX_EXPORT,
   PLATFORM_PRESETS,
   cloneChain,
   cloneExport,
   type AudioChain,
+  type EncodeSettings,
   type ExportSettings,
 } from '@/core/audio/presets'
-import { CancelledError, concatPcm, cropPcm } from '@/core/audio/dsp'
+import { CancelledError, mixPcm, type MixClip } from '@/core/audio/dsp'
 import { inspectPcm, reportToCsv, reportToJson, type QcFinding, type ReportRow } from '@/core/audio/qc'
 import {
   DEFAULT_VARIANTS,
@@ -98,6 +100,38 @@ export interface BatchState {
   error: string
 }
 
+/** 资源加载态：导入 / 混音 / 编码导出期间都可观测，用于显示 loading */
+export interface LoadingState {
+  active: boolean
+  text: string
+  done: number
+  total: number
+}
+
+/** 时间轴上的一个音频片段 */
+export interface TrackClip {
+  id: string
+  assetId: string
+  /** 片段在时间轴上的起点（秒） */
+  startSec: number
+  /** 源素材内的裁剪区间（秒） */
+  trimStartSec: number
+  trimEndSec: number
+  /** 片段增益（dB） */
+  gainDb: number
+  fadeInSec: number
+  fadeOutSec: number
+}
+
+/** 一条音轨，可容纳多个片段 */
+export interface AudioTrack {
+  id: string
+  name: string
+  muted: boolean
+  solo: boolean
+  clips: TrackClip[]
+}
+
 /** 源文件不放进响应式对象：Proxy 包裹 File 会让 arrayBuffer() 抛非法调用 */
 const sourceFiles = new Map<string, File>()
 
@@ -113,33 +147,33 @@ const DUPLICATE_THRESHOLD = 0.999
 const VARIANT_DUPLICATE_THRESHOLD = 0.998
 const VARIANT_RETRY = 6
 
-export interface MergeSettings {
-  /** 段与段之间的静音间隔（秒） */
-  gapSec: number
-  /** 每段首尾淡入淡出（秒） */
-  fadeSec: number
-}
-
 export const audioState = reactive({
   assets: [] as AudioAsset[],
   activeAssetId: '',
+  /** 勾选参与批量编辑的素材 id；批量队列只跑这些 */
+  selectedAssetIds: [] as string[],
+  /** 多音轨时间轴 */
+  tracks: [] as AudioTrack[],
+  activeClipId: '',
   chain: cloneChain(DEFAULT_CHAIN),
+  /** 批量编辑的导出设置（格式 / 命名模板等），在批量编辑弹窗中配置 */
   exportSettings: cloneExport(DEFAULT_EXPORT),
+  /** 合成导出的编码参数，与批量导出设置相互独立 */
+  mixExport: { ...DEFAULT_MIX_EXPORT } as EncodeSettings,
+  /** 合成导出的文件名（不含扩展名） */
+  mixFileName: 'mix',
   variants: { ...DEFAULT_VARIANTS },
   platformPresetId: '',
   userPresets: [] as ChainPreset[],
   namingPattern: '^[a-z0-9_\\-]+$',
   maxDurationSec: 300,
-  /** 合成顺序（素材 id），未列出的素材按素材库顺序追加在后面 */
-  mergeOrder: [] as string[],
-  mergeSettings: { gapSec: 0.05, fadeSec: 0.005 } as MergeSettings,
-  importing: false,
-  importDone: 0,
-  importTotal: 0,
-  importText: '',
+  loading: { active: false, text: '', done: 0, total: 0 } as LoadingState,
   batch: { running: false, cancelling: false, done: 0, total: 0, text: '', error: '' } as BatchState,
   outputs: [] as AudioOutput[],
   reportRows: [] as ReportRow[],
+  /** 批量编辑与结果弹窗开关 */
+  batchModalOpen: false,
+  resultModalOpen: false,
   error: '',
   notice: '',
 })
@@ -148,30 +182,230 @@ export const activeAsset = computed<AudioAsset | null>(
   () => audioState.assets.find((item) => item.id === audioState.activeAssetId) ?? audioState.assets[0] ?? null,
 )
 
-/** 合成顺序：显式排序过的素材在前，其余按素材库顺序排在后面 */
-export const mergeSequence = computed<AudioAsset[]>(() => {
-  const byId = new Map(audioState.assets.map((item) => [item.id, item]))
-  const ordered: AudioAsset[] = []
-  for (const id of audioState.mergeOrder) {
-    const asset = byId.get(id)
-    if (asset) {
-      ordered.push(asset)
-      byId.delete(id)
-    }
+// ---------------------------------------------------------------- 多音轨时间轴
+
+/** 从素材库拖拽素材到音轨时使用的 dataTransfer 类型 */
+export const AUDIO_ASSET_MIME = 'application/x-atlas-audio'
+
+/** 片段最短时长（秒），避免裁到 0 长度后再也拖不回来 */
+export const MIN_CLIP_SEC = 0.05
+
+function nextTrackName(): string {
+  const used = new Set(audioState.tracks.map((track) => track.name))
+  let index = audioState.tracks.length + 1
+  while (used.has(`音轨 ${index}`)) index++
+  return `音轨 ${index}`
+}
+
+export function makeTrack(): AudioTrack {
+  return { id: makeId('track'), name: nextTrackName(), muted: false, solo: false, clips: [] }
+}
+
+/** 初始化空时间轴：默认给 3 条空轨，可直接拖素材进来 */
+export function ensureTracks(): void {
+  if (audioState.tracks.length > 0) return
+  for (let i = 0; i < 3; i++) audioState.tracks.push(makeTrack())
+}
+
+export function addTrack(): AudioTrack {
+  const track = makeTrack()
+  audioState.tracks.push(track)
+  return track
+}
+
+/** 删除音轨；至少保留一条，被删轨上的选中片段一并清空选中态 */
+export function removeTrack(trackId: string): void {
+  if (audioState.tracks.length <= 1) return
+  const index = audioState.tracks.findIndex((item) => item.id === trackId)
+  if (index < 0) return
+  const [removed] = audioState.tracks.splice(index, 1)
+  if (removed.clips.some((clip) => clip.id === audioState.activeClipId)) audioState.activeClipId = ''
+}
+
+export function findClip(clipId: string): { track: AudioTrack; clip: TrackClip } | null {
+  for (const track of audioState.tracks) {
+    const clip = track.clips.find((item) => item.id === clipId)
+    if (clip) return { track, clip }
   }
-  return [...ordered, ...audioState.assets.filter((item) => byId.has(item.id))]
+  return null
+}
+
+/** 片段实际时长，等于源素材内的裁剪长度 */
+export function clipDuration(clip: TrackClip): number {
+  return Math.max(0, clip.trimEndSec - clip.trimStartSec)
+}
+
+/** 片段结束时间（时间轴坐标） */
+export function clipEndSec(clip: TrackClip): number {
+  return clip.startSec + clipDuration(clip)
+}
+
+export function assetOf(clip: TrackClip): AudioAsset | null {
+  return audioState.assets.find((item) => item.id === clip.assetId) ?? null
+}
+
+/**
+ * 为片段找一个同轨不重叠的落点。
+ * 期望位置与已有片段冲突时向后顺延到第一个空档，保证同一音轨上片段不叠放。
+ */
+function resolveFreeSlot(track: AudioTrack, startSec: number, durationSec: number, ignoreClipId: string): number {
+  const others = track.clips
+    .filter((item) => item.id !== ignoreClipId)
+    .map((item) => ({ from: item.startSec, to: clipEndSec(item) }))
+    .sort((a, b) => a.from - b.from)
+  let cursor = Math.max(0, startSec)
+  for (const span of others) {
+    if (cursor + durationSec <= span.from) break
+    if (cursor < span.to) cursor = span.to
+  }
+  return cursor
+}
+
+/** 把素材放到指定音轨：整段使用源素材，之后可拖位置或裁边缘 */
+export function addClipFromAsset(trackId: string, assetId: string, startSec = 0): TrackClip | null {
+  const track = audioState.tracks.find((item) => item.id === trackId)
+  const asset = audioState.assets.find((item) => item.id === assetId)
+  if (!track || !asset) return null
+  const clip: TrackClip = {
+    id: makeId('clip'),
+    assetId,
+    startSec: resolveFreeSlot(track, startSec, asset.durationSec, ''),
+    trimStartSec: 0,
+    trimEndSec: asset.durationSec,
+    gainDb: 0,
+    fadeInSec: 0,
+    fadeOutSec: 0,
+  }
+  track.clips.push(clip)
+  audioState.activeClipId = clip.id
+  return clip
+}
+
+/** 拖动片段：可换轨、可改起点；与同轨已有片段重叠时自动顺延 */
+export function moveClip(clipId: string, targetTrackId: string, startSec: number): void {
+  const found = findClip(clipId)
+  const target = audioState.tracks.find((item) => item.id === targetTrackId)
+  if (!found || !target) return
+  const duration = clipDuration(found.clip)
+  found.clip.startSec = resolveFreeSlot(target, Math.max(0, startSec), duration, clipId)
+  if (target.id !== found.track.id) {
+    found.track.clips.splice(found.track.clips.indexOf(found.clip), 1)
+    target.clips.push(found.clip)
+  }
+}
+
+/**
+ * 拖动片段边缘裁剪。
+ * 起点侧同时平移时间轴位置，让「裁掉的部分」真正消失而不是留下空白；
+ * 终点侧只改裁剪终点。
+ */
+export function trimClipEdge(clipId: string, side: 'start' | 'end', timelineSec: number): void {
+  const found = findClip(clipId)
+  if (!found) return
+  const { clip } = found
+  const asset = assetOf(clip)
+  if (!asset) return
+
+  if (side === 'start') {
+    // 时间轴坐标换算回源素材坐标，再夹到 [0, 裁剪终点 - 最短时长]
+    const wanted = clip.trimStartSec + (timelineSec - clip.startSec)
+    const next = Math.min(Math.max(0, wanted), clip.trimEndSec - MIN_CLIP_SEC)
+    clip.startSec = Math.max(0, clip.startSec + (next - clip.trimStartSec))
+    clip.trimStartSec = next
+  } else {
+    const wanted = clip.trimStartSec + (timelineSec - clip.startSec)
+    clip.trimEndSec = Math.max(clip.trimStartSec + MIN_CLIP_SEC, Math.min(asset.durationSec, wanted))
+  }
+  clip.fadeInSec = Math.min(clip.fadeInSec, clipDuration(clip) / 2)
+  clip.fadeOutSec = Math.min(clip.fadeOutSec, clipDuration(clip) / 2)
+}
+
+export function setClipGain(clipId: string, gainDb: number): void {
+  const found = findClip(clipId)
+  if (found) found.clip.gainDb = Math.max(-60, Math.min(24, Number(gainDb) || 0))
+}
+
+export function setClipFade(clipId: string, side: 'in' | 'out', seconds: number): void {
+  const found = findClip(clipId)
+  if (!found) return
+  const value = Math.max(0, Math.min(clipDuration(found.clip) / 2, Number(seconds) || 0))
+  if (side === 'in') found.clip.fadeInSec = value
+  else found.clip.fadeOutSec = value
+}
+
+/** 复制片段到同轨紧随其后 */
+export function duplicateClip(clipId: string): void {
+  const found = findClip(clipId)
+  if (!found) return
+  const copy: TrackClip = {
+    ...found.clip,
+    id: makeId('clip'),
+    startSec: resolveFreeSlot(found.track, clipEndSec(found.clip), clipDuration(found.clip), ''),
+  }
+  found.track.clips.push(copy)
+  audioState.activeClipId = copy.id
+}
+
+export function removeClip(clipId: string): void {
+  const found = findClip(clipId)
+  if (!found) return
+  found.track.clips.splice(found.track.clips.indexOf(found.clip), 1)
+  if (audioState.activeClipId === clipId) audioState.activeClipId = ''
+}
+
+export function setActiveClip(clipId: string): void {
+  audioState.activeClipId = clipId
+}
+
+export const activeClip = computed<TrackClip | null>(() => {
+  const found = audioState.activeClipId ? findClip(audioState.activeClipId) : null
+  return found?.clip ?? null
 })
 
-/** 上移 / 下移一条素材（delta 为 -1 / +1），越界时忽略 */
-export function moveMergeItem(id: string, delta: number): void {
-  const ids = mergeSequence.value.map((item) => item.id)
-  const index = ids.indexOf(id)
-  const target = index + delta
-  if (index < 0 || target < 0 || target >= ids.length) return
-  ids.splice(index, 1)
-  ids.splice(target, 0, id)
-  audioState.mergeOrder = ids
+export function toggleTrackMute(trackId: string): void {
+  const track = audioState.tracks.find((item) => item.id === trackId)
+  if (track) track.muted = !track.muted
 }
+
+export function toggleTrackSolo(trackId: string): void {
+  const track = audioState.tracks.find((item) => item.id === trackId)
+  if (track) track.solo = !track.solo
+}
+
+export function renameTrack(trackId: string, name: string): void {
+  const track = audioState.tracks.find((item) => item.id === trackId)
+  if (track) track.name = name.trim() || track.name
+}
+
+export const hasSolo = computed(() => audioState.tracks.some((track) => track.solo))
+
+/**
+ * 参与混音的片段。
+ * 静音轨整体跳过；存在独奏轨时只有独奏轨参与。
+ * 预览与合成共用同一份判定，保证「听到的」和「合成出来的」一致。
+ */
+export const audibleClips = computed<{ track: AudioTrack; clip: TrackClip; asset: AudioAsset }[]>(() => {
+  const soloed = hasSolo.value
+  const rows: { track: AudioTrack; clip: TrackClip; asset: AudioAsset }[] = []
+  for (const track of audioState.tracks) {
+    if (track.muted) continue
+    if (soloed && !track.solo) continue
+    for (const clip of track.clips) {
+      const asset = assetOf(clip)
+      if (asset) rows.push({ track, clip, asset })
+    }
+  }
+  return rows
+})
+
+/** 时间轴总长（含被静音轨，避免标尺随静音切换抖动） */
+export const timelineDurationSec = computed(() => {
+  let longest = 0
+  for (const track of audioState.tracks) {
+    for (const clip of track.clips) longest = Math.max(longest, clipEndSec(clip))
+  }
+  return longest
+})
 
 /** 质检与报告使用的约束 */
 export const qcLimits = computed(() => ({
@@ -183,6 +417,31 @@ export const qcLimits = computed(() => ({
 
 export function setActiveAsset(id: string): void {
   audioState.activeAssetId = id
+}
+
+// ---------------------------------------------------------------- 素材勾选
+
+/** 已勾选、将被批量编辑处理的素材 */
+export const selectedAssets = computed(() =>
+  audioState.assets.filter((item) => audioState.selectedAssetIds.includes(item.id)),
+)
+
+export function isAssetSelected(id: string): boolean {
+  return audioState.selectedAssetIds.includes(id)
+}
+
+export function toggleAssetSelected(id: string): void {
+  const index = audioState.selectedAssetIds.indexOf(id)
+  if (index >= 0) audioState.selectedAssetIds.splice(index, 1)
+  else audioState.selectedAssetIds.push(id)
+}
+
+export function selectAllAssets(): void {
+  audioState.selectedAssetIds = audioState.assets.map((item) => item.id)
+}
+
+export function clearAssetSelection(): void {
+  audioState.selectedAssetIds = []
 }
 
 function notify(message: string): void {
@@ -200,29 +459,53 @@ export function dismissAudioError(): void {
   audioState.error = ''
 }
 
+// ---------------------------------------------------------------- 资源加载态
+
+/**
+ * 统一的资源加载态。
+ * 导入、混音、编码导出都走这里，界面只需盯住 loading 就能显示 loading 指示，
+ * 不必为每种耗时操作各写一套状态。
+ */
+export function beginLoading(text: string, total = 0): void {
+  Object.assign(audioState.loading, { active: true, text, done: 0, total })
+}
+
+export function updateLoading(text: string, done?: number): void {
+  if (text) audioState.loading.text = text
+  if (typeof done === 'number') audioState.loading.done = done
+}
+
+export function endLoading(): void {
+  Object.assign(audioState.loading, { active: false, text: '', done: 0, total: 0 })
+}
+
 // ---------------------------------------------------------------- 导入
 
 export async function importFiles(files: File[]): Promise<void> {
   if (!files.length) return
   audioState.error = ''
-  audioState.importing = true
-  audioState.importTotal = files.length
-  audioState.importDone = 0
+  beginLoading(files.length > 1 ? '正在解析音频文件' : `正在解析 ${files[0].name}`, files.length)
+  const failures: string[] = []
+  let imported = 0
   try {
     for (const file of files) {
-      audioState.importText = `正在解析 ${file.name}`
-      await importOne(file)
-      audioState.importDone++
-      // 让出主线程，长批次下进度条仍能刷新
+      updateLoading(`正在解析 ${file.name}`)
+      try {
+        await importOne(file)
+        imported++
+      } catch (error) {
+        // 单个文件失败不牵连其余文件：选中一批时混进视频或损坏文件，其余素材照常导入
+        failures.push(`${file.name}：${error instanceof Error ? error.message : '导入失败'}`)
+      }
+      updateLoading('', audioState.loading.done + 1)
+      // 让出主线程，长批次下进度仍能刷新
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
-    notify(`已导入 ${files.length} 个音频文件`)
-  } catch (error) {
-    fail(error instanceof Error ? error.message : '音频导入失败')
   } finally {
-    audioState.importing = false
-    audioState.importText = ''
+    endLoading()
   }
+  if (imported > 0) notify(`已导入 ${imported} 个音频文件`)
+  if (failures.length > 0) fail(failures.join('；'))
 }
 
 async function importOne(file: File): Promise<void> {
@@ -265,6 +548,8 @@ function addPcmAsset(file: File, pcm: AudioPcm, containerKey: string): AudioAsse
   }
   sourceFiles.set(asset.id, file)
   audioState.assets.push(asset)
+  // 新导入 / 新合成的素材默认勾选，省一次手动勾
+  audioState.selectedAssetIds.push(asset.id)
   if (!audioState.activeAssetId) audioState.activeAssetId = asset.id
   return asset
 }
@@ -292,7 +577,18 @@ export function removeAsset(id: string): void {
   URL.revokeObjectURL(audioState.assets[index].previewUrl)
   sourceFiles.delete(id)
   audioState.assets.splice(index, 1)
-  audioState.mergeOrder = audioState.mergeOrder.filter((item) => item !== id)
+  audioState.selectedAssetIds = audioState.selectedAssetIds.filter((item) => item !== id)
+  // 素材被删后时间轴上引用它的片段一并清掉，避免留下放不出声的空片段
+  let droppedActive = false
+  for (const track of audioState.tracks) {
+    const kept = track.clips.filter((clip) => {
+      if (clip.assetId !== id) return true
+      if (clip.id === audioState.activeClipId) droppedActive = true
+      return false
+    })
+    if (kept.length !== track.clips.length) track.clips = kept
+  }
+  if (droppedActive) audioState.activeClipId = ''
   if (audioState.activeAssetId === id) audioState.activeAssetId = audioState.assets[0]?.id ?? ''
 }
 
@@ -300,8 +596,14 @@ export function clearAssets(): void {
   clearOutputs()
   audioState.assets.forEach((item) => URL.revokeObjectURL(item.previewUrl))
   audioState.assets = []
+  audioState.selectedAssetIds = []
   sourceFiles.clear()
-  audioState.mergeOrder = []
+  audioState.tracks.forEach((track) => {
+    track.clips = []
+    track.muted = false
+    track.solo = false
+  })
+  audioState.activeClipId = ''
   audioState.activeAssetId = ''
 }
 
@@ -318,12 +620,7 @@ export function removeOutput(id: string): void {
   audioState.outputs.splice(index, 1)
 }
 
-// ---------------------------------------------------------------- 剪辑与合成
-
-/** 生成素材名统一用小写字母/数字/下划线，避免触发默认命名规范告警 */
-function sanitizeStem(stem: string): string {
-  return stem.toLowerCase().replace(/[^a-z0-9_\-]+/g, '_').replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '') || 'audio'
-}
+// ---------------------------------------------------------------- 多音轨混音
 
 /** 已存在的素材名后追加序号，避免同名素材并排出现 */
 function uniqueAssetStem(stem: string): string {
@@ -341,81 +638,111 @@ function registerGeneratedPcm(pcm: AudioPcm, stem: string): AudioAsset {
   const file = new File([bytes as BlobPart], fileName, { type: 'audio/wav' })
   const asset = addPcmAsset(file, pcm, 'wav')
   audioState.activeAssetId = asset.id
+  // 合成结果设为唯一勾选项：接下来的「批量编辑」默认就是导出这一条合成音频，
+  // 不会把参与混音的原始素材一起再处理一遍
+  audioState.selectedAssetIds = [asset.id]
   return asset
 }
 
 /**
- * 按选区生成新素材（非破坏性）。
- * mode='keep' 保留选区、丢弃两侧；mode='remove' 丢弃选区、把前后两段拼回一条。
+ * 解码参与混音的片段。
+ * 同一素材被多个片段引用时只解码一次——长音频重复解码是最容易拖垮内存的地方。
  */
-export async function createTrimmedAsset(
-  assetId: string,
-  startSec: number,
-  endSec: number,
-  mode: 'keep' | 'remove',
-): Promise<void> {
-  const asset = audioState.assets.find((item) => item.id === assetId)
-  if (!asset) return
-  audioState.error = ''
-  audioState.importing = true
-  audioState.importText = '正在生成裁剪素材'
-  try {
-    const pcm = await decodeAsset(asset)
-    const total = pcmDuration(pcm)
-    const start = Math.max(0, Math.min(startSec, total))
-    const end = Math.max(start, Math.min(endSec, total))
+export async function loadAudibleClips(): Promise<MixClip[]> {
+  const rows = audibleClips.value
+  const decoded = new Map<string, AudioPcm>()
+  for (const row of rows) {
+    if (decoded.has(row.asset.id)) continue
+    updateLoading(`正在解码 ${row.asset.fileName}`)
+    decoded.set(row.asset.id, await decodeAsset(row.asset))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  return rows.map((row) => ({
+    pcm: decoded.get(row.asset.id) as AudioPcm,
+    startSec: row.clip.startSec,
+    trimStartSec: row.clip.trimStartSec,
+    trimEndSec: row.clip.trimEndSec,
+    gainDb: row.clip.gainDb,
+    fadeInSec: row.clip.fadeInSec,
+    fadeOutSec: row.clip.fadeOutSec,
+  }))
+}
 
-    let result: AudioPcm
-    if (mode === 'keep') {
-      result = cropPcm(pcm, start, end)
-    } else {
-      const head = cropPcm(pcm, 0, start)
-      const tail = cropPcm(pcm, end, total)
-      result = await concatPcm([head, tail])
+/** 混音输出采样率取参与混音素材的最高值，避免把高采样素材降级 */
+function mixdownSampleRate(): number {
+  let highest = 0
+  for (const row of audibleClips.value) highest = Math.max(highest, row.asset.sampleRate)
+  return highest || 48000
+}
+
+/** 按时间轴混音出 PCM（试听与合成都走这一条路径，保证听到的就是合成的） */
+export async function buildMixdownPcm(): Promise<AudioPcm> {
+  const clips = await loadAudibleClips()
+  if (clips.length === 0) throw new Error('时间轴上没有可合成的片段，请先拖素材到音轨')
+  updateLoading('正在混音')
+  return mixPcm(clips, { sampleRate: mixdownSampleRate() })
+}
+
+/** 把时间轴混音成一条新素材加入素材库，之后可继续走批量编辑导出 */
+export async function mixdownToAsset(): Promise<AudioAsset | null> {
+  if (audibleClips.value.length === 0) {
+    fail('时间轴上没有可合成的片段，请先把左侧素材拖到音轨上')
+    return null
+  }
+  audioState.error = ''
+  beginLoading('正在合成音频')
+  try {
+    const pcm = await buildMixdownPcm()
+    if (pcm.length === 0) {
+      fail('合成结果为空，请检查片段的裁剪区间')
+      return null
     }
-    if (result.length === 0) {
-      fail('选区为空，没有可保留的样本')
-      return
-    }
-    const base = sanitizeStem(asset.fileName.replace(/\.[^.]+$/, ''))
-    registerGeneratedPcm(result, `${base}_${mode === 'keep' ? 'trim' : 'cut'}`)
-    notify(mode === 'keep' ? '已按选区保留并生成新素材' : '已裁掉选区并生成新素材')
+    const usedTracks = audioState.tracks.filter((track) => track.clips.length > 0).length
+    const asset = registerGeneratedPcm(pcm, `mix_${usedTracks}tracks`)
+    notify(`已合成 ${pcmDuration(pcm).toFixed(2)} 秒音频，可继续批量编辑`)
+    return asset
   } catch (error) {
-    fail(error instanceof Error ? error.message : '裁剪失败')
+    fail(error instanceof Error ? error.message : '合成失败')
+    return null
   } finally {
-    audioState.importing = false
-    audioState.importText = ''
+    endLoading()
   }
 }
 
-/** 把合成顺序里的素材首尾拼接为一条新素材 */
-export async function createMergedAsset(): Promise<void> {
-  const sequence = mergeSequence.value
-  if (sequence.length < 2) {
-    fail('至少需要两条素材才能合成')
+/**
+ * 直接把时间轴混音结果编码后下载。
+ * 与「合成到素材库 → 批量编辑」是两条不同的路：这里只出一份文件，不进素材库、不进批量队列。
+ */
+export async function exportMixdown(): Promise<void> {
+  if (audibleClips.value.length === 0) {
+    fail('时间轴上没有可导出的片段，请先把左侧素材拖到音轨上')
+    return
+  }
+  const issue = mixFormatIssue()
+  if (issue) {
+    fail(issue)
     return
   }
   audioState.error = ''
-  audioState.importing = true
+  beginLoading('正在合成音频')
   try {
-    const parts: AudioPcm[] = []
-    for (const asset of sequence) {
-      audioState.importText = `正在解析 ${asset.fileName}`
-      parts.push(await decodeAsset(asset))
-      await new Promise((resolve) => setTimeout(resolve, 0))
+    const pcm = await buildMixdownPcm()
+    if (pcm.length === 0) {
+      fail('合成结果为空，请检查片段的裁剪区间')
+      return
     }
-    audioState.importText = '正在拼接'
-    const pcm = await concatPcm(parts, {
-      gapSec: audioState.mergeSettings.gapSec,
-      fadeSec: audioState.mergeSettings.fadeSec,
-    })
-    registerGeneratedPcm(pcm, `merge_${sequence.length}`)
-    notify(`已合成 ${sequence.length} 条素材，共 ${pcmDuration(pcm).toFixed(2)} 秒`)
+    updateLoading('正在编码音频')
+    const encoded = await encodeAudio(pcm, encodeOptionsFor(audioState.mixExport))
+    const stem = sanitizeFileName(audioState.mixFileName.trim() || 'mix')
+    downloadBlob(
+      new Blob([encoded.bytes as BlobPart], { type: encoded.mimeType }),
+      `${stem}.${encoded.extension}`,
+    )
+    notify(`已导出 ${pcmDuration(pcm).toFixed(2)} 秒合成音频（${stem}.${encoded.extension}）`)
   } catch (error) {
-    fail(error instanceof Error ? error.message : '合成失败')
+    fail(error instanceof Error ? error.message : '合成导出失败')
   } finally {
-    audioState.importing = false
-    audioState.importText = ''
+    endLoading()
   }
 }
 
@@ -484,18 +811,41 @@ export function cancelBatch(): void {
   audioState.batch.text = '正在取消…'
 }
 
-/** 当前导出格式是否可用，不可用时给出原因 */
-export function formatIssue(): string {
-  const info = AUDIO_FORMATS.find((item) => item.format === audioState.exportSettings.format)
+function encodeOptionsFor(settings: EncodeSettings): EncodeOptions {
+  return {
+    format: settings.format,
+    wavEncoding: settings.wavEncoding,
+    mp3Bitrate: settings.mp3Bitrate,
+    oggQuality: settings.oggQuality,
+  }
+}
+
+function issueOf(format: string): string {
+  const info = AUDIO_FORMATS.find((item) => item.format === format)
   if (!info) return '未知导出格式'
   if (!info.available) return `${info.label} 暂不可用：${info.hint ?? ''}`
   return ''
+}
+
+/** 批量导出设置的可用性问题（批量编辑弹窗用） */
+export function formatIssue(): string {
+  return issueOf(audioState.exportSettings.format)
+}
+
+/** 合成导出设置的可用性问题 */
+export function mixFormatIssue(): string {
+  return issueOf(audioState.mixExport.format)
 }
 
 export async function runBatch(): Promise<void> {
   if (audioState.batch.running) return
   if (audioState.assets.length === 0) {
     fail('请先导入音频素材')
+    return
+  }
+  const targets = selectedAssets.value
+  if (targets.length === 0) {
+    fail('请先在左侧素材库勾选要批量处理的素材')
     return
   }
   const issue = formatIssue()
@@ -507,12 +857,12 @@ export async function runBatch(): Promise<void> {
   cancelRequested = false
   clearOutputs()
   audioState.error = ''
-  const total = audioState.assets.length
+  const total = targets.length
   Object.assign(audioState.batch, { running: true, cancelling: false, done: 0, total, text: '', error: '' })
 
   try {
     let sequence = 1
-    for (const asset of audioState.assets) {
+    for (const asset of targets) {
       if (cancelRequested) throw new CancelledError()
       audioState.batch.text = `处理 ${asset.fileName}`
       await processAsset(asset, () => sequence++)
@@ -600,13 +950,9 @@ async function emitOutput(
   stepText: string[],
   sequence: number,
 ): Promise<void> {
-  const encodeOptions: EncodeOptions = {
-    format: audioState.exportSettings.format,
-    wavEncoding: audioState.exportSettings.wavEncoding,
-    mp3Bitrate: audioState.exportSettings.mp3Bitrate,
-    oggQuality: audioState.exportSettings.oggQuality,
-  }
-  const encoded = await encodeAudio(pcm, encodeOptions, { isCancelled: () => cancelRequested })
+  const encoded = await encodeAudio(pcm, encodeOptionsFor(audioState.exportSettings), {
+    isCancelled: () => cancelRequested,
+  })
   const analysis = analyzeLoudness(pcm)
   const findings = inspectPcm(pcm, analysis, qcLimits.value)
 
@@ -730,12 +1076,13 @@ export function persist(): void {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
       chain: audioState.chain,
       exportSettings: audioState.exportSettings,
+      mixExport: audioState.mixExport,
+      mixFileName: audioState.mixFileName,
       variants: audioState.variants,
       platformPresetId: audioState.platformPresetId,
       userPresets: audioState.userPresets,
       namingPattern: audioState.namingPattern,
       maxDurationSec: audioState.maxDurationSec,
-      mergeSettings: audioState.mergeSettings,
     }))
   } catch {
     /* 本地存储不可用时忽略，不影响本次会话使用 */
@@ -747,12 +1094,13 @@ function restore(): void {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null') as {
       chain?: AudioChain
       exportSettings?: ExportSettings
+      mixExport?: EncodeSettings
+      mixFileName?: string
       variants?: VariantSettings
       platformPresetId?: string
       userPresets?: ChainPreset[]
       namingPattern?: string
       maxDurationSec?: number
-      mergeSettings?: MergeSettings
     } | null
     if (!saved) return
     if (saved.chain) {
@@ -768,12 +1116,18 @@ function restore(): void {
         audioState.exportSettings.format = 'wav'
       }
     }
+    if (saved.mixExport) {
+      Object.assign(audioState.mixExport, saved.mixExport)
+      if (!AUDIO_FORMATS.some((item) => item.format === audioState.mixExport.format && item.available)) {
+        audioState.mixExport.format = 'wav'
+      }
+    }
+    if (typeof saved.mixFileName === 'string') audioState.mixFileName = saved.mixFileName
     if (saved.variants) Object.assign(audioState.variants, saved.variants)
     if (saved.platformPresetId) audioState.platformPresetId = saved.platformPresetId
     if (Array.isArray(saved.userPresets)) audioState.userPresets = saved.userPresets
     if (typeof saved.namingPattern === 'string') audioState.namingPattern = saved.namingPattern
     if (Number.isFinite(saved.maxDurationSec)) audioState.maxDurationSec = saved.maxDurationSec as number
-    if (saved.mergeSettings) Object.assign(audioState.mergeSettings, saved.mergeSettings)
   } catch {
     /* 本地设置损坏时按默认值继续 */
   }

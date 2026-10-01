@@ -118,9 +118,17 @@ type EncoderModule = typeof import('wasm-media-encoders')
 
 let encoderModulePromise: Promise<EncoderModule> | null = null
 
-/** 动态引入编码器包（内含 base64 WASM），只在真正需要压缩格式时加载 */
+/**
+ * 动态引入编码器包（内含 base64 WASM），只在真正需要压缩格式时加载。
+ * 失败时不缓存失败态：dev 下服务重启或依赖重新预构建会让旧 URL 失效，
+ * 若把 rejected promise 一直留着，页面此后每次导出都会失败，只能刷新才能恢复。
+ */
 function loadEncoderModule(): Promise<EncoderModule> {
-  encoderModulePromise ??= import('wasm-media-encoders')
+  encoderModulePromise ??= import('wasm-media-encoders').catch((error: unknown) => {
+    encoderModulePromise = null
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`音频编码器加载失败（${detail}）。若页面已长时间未刷新，请刷新页面后重试。`)
+  })
   return encoderModulePromise
 }
 
