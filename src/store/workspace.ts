@@ -5,7 +5,7 @@ import type { FrameGroup, DirectionSlot } from '@/core/direction-sprite'
 import type { PaletteSlot, PaletteVariant } from '@/core/palette'
 import type { TilemapOptions } from '@/core/tilemap'
 
-export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette' | 'atlaspack' | 'directionsprite' | 'tilemap'
+export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette' | 'atlaspack' | 'directionsprite' | 'tilemap' | 'audio'
 
 export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'rmbg'
 

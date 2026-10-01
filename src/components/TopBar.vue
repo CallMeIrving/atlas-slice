@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { store, loadImage, loadMetaFile, autoDetectFrames } from '@/store/atlas'
 import { setPage, workspace, type LayerSplitState, type WatermarkState, type WorkspacePage } from '@/store/workspace'
 import { modelManager } from '@/store/model-status'
+import { audioState } from '@/store/audio'
 
 /** 2D 工具下拉框条目：page 为 null 表示本期未实现（禁用展示） */
 const TOOL_ENTRIES: { page: WorkspacePage | null; label: string }[] = [
@@ -65,6 +66,10 @@ const pageStatus = computed(() => {
   }
   if (workspace.page === 'tilemap') {
     return workspace.tilemap.image ? `${workspace.tilemap.tiles} 块` : '未导入'
+  }
+  if (workspace.page === 'audio') {
+    if (!audioState.assets.length) return '未导入'
+    return `${audioState.assets.length} 素材 · ${audioState.outputs.length} 结果`
   }
   return WATERMARK_STATUS[workspace.watermark.status]
 })
@@ -132,6 +137,7 @@ defineExpose({})
       <button class="nav-item" :class="{ active: workspace.page === 'video' }" @click="setPage('video')">视频帧 <span v-if="workspace.video.frames.length" class="nav-count">{{ workspace.video.frames.length }}</span></button>
       <button class="nav-item" :class="{ active: workspace.page === 'watermark' }" @click="setPage('watermark')">去水印 <span v-if="workspace.watermark.status === 'done'" class="nav-dot">●</span></button>
       <button class="nav-item" :class="{ active: workspace.page === 'layersplit' }" @click="setPage('layersplit')">图层拆分 <span v-if="workspace.layersplit.status === 'done'" class="nav-dot">●</span></button>
+      <button class="nav-item" :class="{ active: workspace.page === 'audio' }" @click="setPage('audio')">音频工具 <span v-if="audioState.outputs.length" class="nav-count">{{ audioState.outputs.length }}</span></button>
       <div class="tools-menu" @click.stop>
         <button class="nav-item" :class="{ active: isToolPage }" aria-haspopup="menu" :aria-expanded="toolsOpen" @click="toolsOpen = !toolsOpen">{{ toolLabel }} <span class="nav-caret">▾</span></button>
         <div v-if="toolsOpen" class="tools-dropdown" role="menu">
