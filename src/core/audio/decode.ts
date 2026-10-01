@@ -15,6 +15,8 @@ export interface DecodeResult {
   detectedRate: boolean
   /** 探测到的容器/编码名称，供界面展示 */
   container: string
+  /** true 表示源文件是视频，当前 PCM 是从中提取的音轨 */
+  extracted: boolean
 }
 
 const DEFAULT_RATE = 48000
@@ -26,22 +28,23 @@ const PROBE_BYTES = 256 * 1024
 
 export async function decodeAudioFile(file: File | Blob, fileName = ''): Promise<DecodeResult> {
   const bytes = new Uint8Array(await file.arrayBuffer())
-  if (bytes.byteLength === 0) throw new Error('音频文件为空')
+  if (bytes.byteLength === 0) throw new Error('文件为空')
 
-  // 视频判定用完整字节：moov 可能在文件尾部，只看探测窗口会漏判（文件已全量读入，遍历盒头开销可忽略）
-  assertAudioOnly(bytes, file, fileName)
+  // 准入判定用完整字节：moov 可能在文件尾部，只看探测窗口会漏判（文件已全量读入，遍历盒头开销可忽略）
+  const media = assertImportableMedia(bytes, file, fileName)
   const probe = bytes.subarray(0, Math.min(PROBE_BYTES, bytes.byteLength))
   const probeResult = detectFormat(probe)
-  const container = probeResult?.container ?? guessContainer(fileName)
+  let container = probeResult?.container ?? guessContainer(fileName)
+  if (media.extracted) container = media.containerKey
 
   if (probeResult?.container === 'wav') {
-    return { pcm: decodeWav(bytes), detectedRate: true, container }
+    return { pcm: decodeWav(bytes), detectedRate: true, container, extracted: media.extracted }
   }
 
   const rate = sanitizeRate(probeResult?.sampleRate ?? 0)
   const pcm = await decodeWithBrowser(bytes, rate)
-  if (pcm.length === 0) throw new Error('解码结果为空，可能是浏览器不支持的音频格式')
-  return { pcm, detectedRate: rate > 0, container }
+  if (pcm.length === 0) throw new Error('解码结果为空')
+  return { pcm, detectedRate: rate > 0, container, extracted: media.extracted }
 }
 
 function sanitizeRate(rate: number): number {
@@ -67,7 +70,6 @@ async function decodeWithBrowser(bytes: Uint8Array, rate: number): Promise<Audio
   }
   if (contexts.length === 0) throw new Error('当前浏览器不支持音频解码')
 
-  let lastError: unknown = null
   for (let i = 0; i < contexts.length; i++) {
     const ctx = contexts[i]
     try {
@@ -76,13 +78,13 @@ async function decodeWithBrowser(bytes: Uint8Array, rate: number): Promise<Audio
       const copy = payload.slice(0)
       const audioBuffer = await ctx.decodeAudioData(copy)
       return fromAudioBuffer(audioBuffer)
-    } catch (error) {
-      lastError = error
+    } catch {
+      // 继续尝试下一个上下文，全部失败再给简短错误
     } finally {
       if (ctx instanceof AudioContext) void ctx.close()
     }
   }
-  throw new Error(`浏览器无法解码该音频（${lastError instanceof Error ? lastError.message : '未知原因'}）`)
+  throw new Error('无法解码，请转成 MP4 / WAV / MP3 等常见格式')
 }
 
 function fromAudioBuffer(buffer: AudioBuffer): AudioPcm {
@@ -99,39 +101,42 @@ interface FormatProbe {
 }
 
 /**
- * 视频文件一律拒收。
+ * 导入准入。
  *
- * 为什么必须显式拦截：`decodeAudioData` 会自动解出容器里的音轨，MP4 / MOV 视频
- * 也能成功解出声音，于是「导入视频」会静默成功，素材库里多出一条以视频文件命名的音频。
- * 另外 macOS 的 `.m4a` 与 `.mp4` 共用同一个 UTI（public.mpeg-4），文件选择器
- * 无法靠 accept 过滤掉视频，所以只能在读文件头时判断。
+ * 音频文件直接放行；浏览器能从容器里解出音轨的视频（MP4 / MOV / WebM）也放行，
+ * 后续链路只使用提取出的 PCM。浏览器无法解码的视频容器（AVI / FLV / WMV /
+ * MPEG-PS / MPEG-TS）在这里提前给出简短错误。MP4 若只有视频轨没有音轨同样拒绝。
+ * macOS 的 .m4a 与 .mp4 共用同一个 UTI，文件选择器靠 accept 分不开，所以按文件头判断。
  */
-function assertAudioOnly(probe: Uint8Array, file: File | Blob, fileName: string): void {
-  const container = detectVideoContainer(probe)
-  if (container) throw videoRejected(container, fileName)
-  if (!matchAscii(probe, 4, 'ftyp')) return
-  // MP4 家族：只有 moov 里存在 vide 轨才是视频；moov 超出探测窗口时按 MIME 兜底
-  const video = mp4VideoTrack(probe)
-  if (video === true || (video === null && file.type.startsWith('video/'))) {
-    throw videoRejected('MP4 / MOV', fileName)
+function assertImportableMedia(
+  bytes: Uint8Array,
+  file: File | Blob,
+  fileName: string,
+): { extracted: boolean; containerKey: string } {
+  const unsupported = detectUnsupportedVideo(bytes)
+  if (unsupported) throw new Error(`格式不支持（${unsupported}），请转为 MP4 或 WebM`)
+
+  if (isMatroska(bytes)) {
+    // Chromium 可直接解出 WebM 里的 Opus/Vorbis 音轨；是否真有音轨交给解码器验证
+    const looksVideo = file.type.startsWith('video/') || /\.(webm|mkv)$/i.test(fileName)
+    return { extracted: looksVideo, containerKey: 'webm-track' }
   }
+
+  if (!matchAscii(bytes, 4, 'ftyp')) return { extracted: false, containerKey: '' }
+
+  // MP4 / MOV 家族：moov 里同时有 vide / soun 轨时按「视频提取音轨」处理
+  const tracks = inspectMp4Tracks(bytes)
+  if (tracks && tracks.hasVideo && !tracks.hasAudio) throw new Error('没有音轨')
+  const extracted = tracks ? tracks.hasVideo : file.type.startsWith('video/')
+  return { extracted, containerKey: 'mp4-track' }
 }
 
-function videoRejected(container: string, fileName: string): Error {
-  return new Error(
-    `「${fileName || '所选文件'}」是视频文件（${container}），音频工具只接受音频素材；请先抽出音轨再导入`,
-  )
-}
-
-/** 头部魔数就能断定的视频容器 */
-function detectVideoContainer(bytes: Uint8Array): string {
+/** 头部魔数就能断定、且浏览器解不出音轨的视频容器 */
+function detectUnsupportedVideo(bytes: Uint8Array): string {
   if (matchAscii(bytes, 0, 'RIFF') && matchAscii(bytes, 8, 'AVI ')) return 'AVI'
   if (matchAscii(bytes, 0, 'FLV')) return 'FLV'
-  if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
-    return 'Matroska / WebM'
-  }
   if (bytes.length >= 4 && bytes[0] === 0x30 && bytes[1] === 0x26 && bytes[2] === 0xb2 && bytes[3] === 0x75) {
-    return 'ASF / WMV'
+    return 'WMV'
   }
   if (bytes.length >= 4 && bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0x01 && bytes[3] === 0xba) {
     return 'MPEG 视频'
@@ -141,24 +146,34 @@ function detectVideoContainer(bytes: Uint8Array): string {
   return ''
 }
 
+function isMatroska(bytes: Uint8Array): boolean {
+  return bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3
+}
+
 /** 可继续向下递归的 MP4 容器盒 */
 const MP4_CONTAINERS = new Set(['moov', 'trak', 'mdia'])
 
 /**
- * MP4 / MOV 是否含视频轨。
+ * 解析 MP4 / MOV 的轨道类型。
  * 返回 null 表示整份字节里都没有 moov（分片 mp4），无法判断。
  */
-function mp4VideoTrack(bytes: Uint8Array): boolean | null {
+function inspectMp4Tracks(bytes: Uint8Array): { hasVideo: boolean; hasAudio: boolean } | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   let offset = 0
   while (offset + 8 <= bytes.length) {
-    const size = view.getUint32(offset, false)
+    let size = view.getUint32(offset, false)
+    let headerSize = 8
+    if (size === 1 && offset + 16 <= bytes.length) {
+      // 64 位 largesize
+      size = view.getUint32(offset + 8, false) * 2 ** 32 + view.getUint32(offset + 12, false)
+      headerSize = 16
+    }
     const bodyEnd = size === 0 ? bytes.length : Math.min(bytes.length, offset + size)
-    if (bodyEnd <= offset + 8) break
+    if (bodyEnd <= offset + headerSize) break
     if (ascii4(view, offset + 4) === 'moov') {
       const handlers: string[] = []
-      collectMp4Handlers(bytes, offset + 8, bodyEnd, handlers)
-      return handlers.includes('vide')
+      collectMp4Handlers(bytes, offset + headerSize, bodyEnd, handlers)
+      return { hasVideo: handlers.includes('vide'), hasAudio: handlers.includes('soun') }
     }
     offset = bodyEnd
   }
@@ -349,9 +364,10 @@ function guessContainer(fileName: string): string {
   if (ext === 'ogg' || ext === 'oga') return 'ogg'
   if (ext === 'opus') return 'opus'
   if (ext === 'flac') return 'flac'
-  if (ext === 'm4a' || ext === 'aac' || ext === 'mp4') return 'm4a'
+  if (ext === 'm4a' || ext === 'aac' || ext === 'mp4' || ext === 'mov') return 'm4a'
   if (ext === 'aiff' || ext === 'aif') return 'aiff'
   if (ext === 'wav') return 'wav'
+  if (ext === 'webm' || ext === 'mkv') return 'webm'
   return ext || '未知'
 }
 
@@ -364,6 +380,9 @@ export const CONTAINER_LABEL: Record<string, string> = {
   flac: 'FLAC',
   m4a: 'M4A',
   aiff: 'AIFF',
+  webm: 'WEBM',
+  'mp4-track': 'MP4 视频音轨',
+  'webm-track': 'WebM 视频音轨',
 }
 
 export { DEFAULT_RATE }

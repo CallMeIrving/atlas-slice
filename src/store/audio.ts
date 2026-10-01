@@ -481,10 +481,30 @@ export function endLoading(): void {
 
 // ---------------------------------------------------------------- 导入
 
+/**
+ * 单文件大小上限。解码要把整文件读进内存并展开成 PCM（立体声 48k 约 384KB/秒），
+ * 过大会直接拖垮页面。视频文件因含画面天然更大，但只提取音轨，故额度比纯音频高一档。
+ */
+export const MAX_AUDIO_MB = 50
+export const MAX_VIDEO_MB = 100
+
+/** 按 MIME / 扩展名判断额度档；内容真实性仍由解码层按文件头判定 */
+function importLimitMb(file: { type?: string; name?: string }): number {
+  const isVideo =
+    (file.type ?? '').startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name ?? '')
+  return isVideo ? MAX_VIDEO_MB : MAX_AUDIO_MB
+}
+
+/** 超限返回简短错误信息，未超限返回空串 */
+export function importSizeIssue(file: { size: number; type?: string; name?: string }): string {
+  const limitMb = importLimitMb(file)
+  return file.size > limitMb * 1024 * 1024 ? `超过 ${limitMb}MB 上限` : ''
+}
+
 export async function importFiles(files: File[]): Promise<void> {
   if (!files.length) return
   audioState.error = ''
-  beginLoading(files.length > 1 ? '正在解析音频文件' : `正在解析 ${files[0].name}`, files.length)
+  beginLoading(files.length > 1 ? '正在解析文件' : `正在解析 ${files[0].name}`, files.length)
   const failures: string[] = []
   let imported = 0
   try {
@@ -504,11 +524,14 @@ export async function importFiles(files: File[]): Promise<void> {
   } finally {
     endLoading()
   }
-  if (imported > 0) notify(`已导入 ${imported} 个音频文件`)
+  if (imported > 0) notify(`已导入 ${imported} 个素材`)
   if (failures.length > 0) fail(failures.join('；'))
 }
 
 async function importOne(file: File): Promise<void> {
+  // 大小在读入内存之前拦掉，避免超大文件先占满内存再失败
+  const sizeIssue = importSizeIssue(file)
+  if (sizeIssue) throw new Error(sizeIssue)
   const result = await decodeAudioFile(file, file.name)
   addPcmAsset(file, result.pcm, result.container)
   // 探测不到原始采样率时提示一次，避免用户以为素材本身有问题

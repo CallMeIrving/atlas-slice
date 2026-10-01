@@ -91,6 +91,37 @@ function onImport(e: Event): void {
   if (files.length) void importFiles(files)
 }
 
+// ---------------------------------------------------------------- 系统文件拖放
+
+/** 拖入的是操作系统文件时显示整页落点提示；内部素材拖拽（自定义 MIME）不响应 */
+const dragDepth = ref(0)
+const fileDragOver = computed(() => dragDepth.value > 0)
+
+function hasFiles(e: DragEvent): boolean {
+  return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')
+}
+
+function onFileDragEnter(e: DragEvent): void {
+  if (hasFiles(e)) dragDepth.value++
+}
+
+function onFileDragOver(e: DragEvent): void {
+  // 必须 preventDefault，否则浏览器会直接打开文件
+  if (hasFiles(e)) e.preventDefault()
+}
+
+function onFileDragLeave(): void {
+  dragDepth.value = Math.max(0, dragDepth.value - 1)
+}
+
+function onFileDrop(e: DragEvent): void {
+  if (!hasFiles(e)) return
+  e.preventDefault()
+  dragDepth.value = 0
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  if (files.length) void importFiles(files)
+}
+
 // ---------------------------------------------------------------- 素材试听
 
 /** 全列表共用一个 audio 元素，天然只可能响一条 */
@@ -190,12 +221,22 @@ watch(
 </script>
 
 <template>
-  <div class="tool-page" :class="{ 'no-list': !hasAssets }">
+  <div
+    class="tool-page"
+    :class="{ 'no-list': !hasAssets }"
+    @dragenter="onFileDragEnter"
+    @dragover="onFileDragOver"
+    @dragleave="onFileDragLeave"
+    @drop="onFileDrop"
+  >
+    <div v-if="fileDragOver" class="drop-overlay">
+      <span>松开导入，视频自动提取音轨</span>
+    </div>
     <!-- 左栏：素材库 -->
     <section v-if="hasAssets" class="tool-sidebar panel">
       <div class="section">
         <h2 class="section-title">素材库（{{ audioState.assets.length }}）</h2>
-        <button class="btn full" :disabled="busy" @click="input?.click()">＋ 导入音频</button>
+        <button class="btn full" :disabled="busy" @click="input?.click()">＋ 导入</button>
         <div class="select-bar">
           <label class="check-row">
             <input type="checkbox" :checked="allSelected" @change="onToggleAll" />
@@ -266,8 +307,15 @@ watch(
           </p>
         </div>
         <div class="header-actions">
-          <input ref="input" hidden type="file" accept="audio/*,.wav,.mp3,.ogg,.flac,.m4a" multiple @change="onImport" />
-          <button class="btn" :disabled="busy" @click="input?.click()">导入音频</button>
+          <input
+            ref="input"
+            hidden
+            type="file"
+            accept="audio/*,.wav,.mp3,.ogg,.flac,.m4a,video/mp4,video/quicktime,video/webm,.mov,.webm"
+            multiple
+            @change="onImport"
+          />
+          <button class="btn" :disabled="busy" @click="input?.click()">导入</button>
           <button v-if="hasOutputs" class="btn" @click="audioState.resultModalOpen = true">
             查看结果（{{ audioState.outputs.length }}）
           </button>
@@ -285,9 +333,9 @@ watch(
       <div class="tool-body">
         <div v-if="!hasAssets" class="empty-state">
           <span class="big">♪</span>
-          <strong>还没有音频素材</strong>
-          <span>导入 WAV / MP3 / OGG / FLAC / M4A，支持一次选多个文件</span>
-          <button class="btn btn-primary" @click="input?.click()">导入音频</button>
+          <strong>还没有素材</strong>
+          <span>音频 WAV/MP3/OGG/FLAC/M4A，视频 MP4/MOV/WebM 自动提取音轨</span>
+          <button class="btn btn-primary" @click="input?.click()">选择文件或拖到此处</button>
         </div>
         <MultiTrackEditor v-else />
       </div>
@@ -391,7 +439,9 @@ watch(
 </template>
 
 <style scoped>
-.tool-page { display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; height: 100%; min-height: 0; }
+.tool-page { position: relative; display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; height: 100%; min-height: 0; }
+.drop-overlay { position: absolute; inset: 8px; z-index: 50; display: grid; place-items: center; border: 2px dashed var(--accent-border); border-radius: var(--radius-m); background: var(--accent-dim); pointer-events: none; }
+.drop-overlay span { font-size: var(--fs-head); color: var(--accent-strong); }
 .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 340px; }
 .tool-sidebar { border-right: 1px solid var(--border); overflow: auto; display: flex; flex-direction: column; }
 .tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }

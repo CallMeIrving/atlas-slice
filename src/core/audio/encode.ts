@@ -9,7 +9,7 @@ import { type AudioPcm } from './pcm'
 import { encodeWav, type WavEncoding } from './wav'
 import type { ProcessContext } from './dsp'
 
-export type AudioFormat = 'wav' | 'mp3' | 'ogg' | 'opus' | 'aac'
+export type AudioFormat = 'wav' | 'mp3' | 'ogg'
 
 export interface FormatInfo {
   format: AudioFormat
@@ -23,15 +23,13 @@ export interface FormatInfo {
 
 /**
  * 可用格式清单。
- * opus / aac 目前没有稳定可用的纯前端 WASM 编码器（AAC 无成熟实现，opus 的现成库面向录音流），
- * 先在界面置灰标注，等有合适方案再补，不影响 wav / mp3 / ogg 三条主链路。
+ * 只保留游戏引擎可导入的格式：wav / mp3 / ogg(vorbis) 是 Unity、Unreal、Godot 的共同交集。
+ * opus 仅 Unreal 支持导入，aac(M4A) 三大引擎均不支持，对游戏工具没有交付价值，已从清单移除。
  */
 export const AUDIO_FORMATS: FormatInfo[] = [
   { format: 'wav', label: 'WAV', extension: 'wav', mimeType: 'audio/wav', available: true },
   { format: 'ogg', label: 'OGG (Vorbis)', extension: 'ogg', mimeType: 'audio/ogg', available: true },
   { format: 'mp3', label: 'MP3', extension: 'mp3', mimeType: 'audio/mpeg', available: true },
-  { format: 'opus', label: 'OPUS', extension: 'opus', mimeType: 'audio/ogg', available: false, hint: '暂无稳定的纯前端编码器' },
-  { format: 'aac', label: 'AAC', extension: 'm4a', mimeType: 'audio/mp4', available: false, hint: '暂无稳定的纯前端编码器' },
 ]
 
 /** MP3 支持的码率档位 */
