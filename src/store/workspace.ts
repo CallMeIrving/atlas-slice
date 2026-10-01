@@ -4,8 +4,9 @@ import type { ImageCropRect } from '@/core/crop'
 import type { FrameGroup, DirectionSlot } from '@/core/direction-sprite'
 import type { PaletteSlot, PaletteVariant } from '@/core/palette'
 import type { TilemapOptions } from '@/core/tilemap'
+import type { CharsetOptions, FontRenderMode } from '@/core/font'
 
-export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette' | 'atlaspack' | 'directionsprite' | 'tilemap' | 'audio'
+export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette' | 'atlaspack' | 'directionsprite' | 'tilemap' | 'audio' | 'font'
 
 export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'rmbg'
 
@@ -378,6 +379,43 @@ export interface DirectionSpriteState {
   error: string
 }
 
+/** 位图字体生成页状态：设置可持久化，字体文件与生成结果只留在会话内 */
+export interface FontState {
+  fileName: string
+  /** 字体来源：上传字体文件 / 使用本机已安装的系统字体 */
+  source: 'upload' | 'system'
+  /** 上传字体的 blob URL，页面重挂载时据此重新注册 FontFace */
+  fontUrl: string
+  /** 注册后可用的字体家族名 */
+  family: string
+  /** 系统字体名（source 为 system 时使用） */
+  systemFamily: string
+  /** 字符集勾选项与自定义输入 */
+  charset: CharsetOptions
+  sizePx: number
+  padding: number
+  mode: FontRenderMode
+  /** SDF 扩散半径（像素），仅 sdf 模式生效 */
+  sdfSpread: number
+  maxAtlasSize: number
+  powerOfTwo: boolean
+  /** 导出附带项 */
+  withFnt: boolean
+  withXml: boolean
+  withJson: boolean
+  /** 导出文件名（不带扩展名） */
+  name: string
+  /** 预览文本 */
+  previewText: string
+  /** 生成结果摘要（结果本体含像素缓冲，留在页面组件内，不进 store） */
+  pageCount: number
+  glyphCount: number
+  pageUrls: string[]
+  activePage: number
+  status: 'empty' | 'ready' | 'done' | 'error'
+  error: string
+}
+
 export interface TilemapState {
   fileName: string
   sourceUrl: string
@@ -485,6 +523,14 @@ export const workspace = reactive({
       skipEmpty: false, alphaThreshold: 8, pattern: '{name}_{index}.png',
     },
   } as TilemapState,
+  font: {
+    fileName: '', source: 'upload', fontUrl: '', family: '', systemFamily: '',
+    charset: { ascii: true, latin1: false, digits: true, custom: '', ranges: '' },
+    sizePx: 32, padding: 1, mode: 'bitmap', sdfSpread: 6, maxAtlasSize: 2048, powerOfTwo: true,
+    withFnt: true, withXml: false, withJson: true, name: 'font',
+    previewText: 'AtlasSlice 字体预览 ABC 123',
+    pageCount: 0, glyphCount: 0, pageUrls: [], activePage: 0, status: 'empty', error: '',
+  } as FontState,
 })
 
 const SETTINGS_KEY = 'atlas-slice:media-settings'
@@ -497,6 +543,8 @@ const LAYER_CATEGORIES: LayerCategory[] = ['button', 'icon', 'text', 'panel', 'b
 const LAYER_DETECTORS: LayerDetector[] = ['grounding-dino', 'florence2', 'auto']
 const LAYER_BACKGROUNDS: LayerBackgroundMode[] = ['none', 'erase', 'inpaint']
 const LAYER_DEVICES: LayerDevice[] = ['auto', 'cuda', 'mps', 'cpu']
+/** 字体页支持的字形表示方式，用于丢弃本地设置里已下线的取值 */
+const FONT_MODES: FontRenderMode[] = ['bitmap', 'sdf']
 
 /**
  * 收敛本地保存的图层拆分设置。
@@ -530,6 +578,7 @@ try {
     atlaspack?: { settings?: Partial<AtlasPackSettings> }
     directionsprite?: { directionSet?: 2 | 4 | 8; padding?: number; cellSize?: number }
     tilemap?: { options?: Partial<TilemapOptions> }
+    font?: Partial<Pick<FontState, 'source' | 'systemFamily' | 'charset' | 'sizePx' | 'padding' | 'mode' | 'sdfSpread' | 'maxAtlasSize' | 'powerOfTwo' | 'withFnt' | 'withXml' | 'withJson' | 'name' | 'previewText'>>
   } | null
   if (saved?.matte) Object.assign(workspace.matte, saved.matte)
   // 旧版本可能存过已经移除的处理方式，直接收敛到默认值，避免下拉框出现空选项
@@ -550,6 +599,13 @@ try {
     if (Number.isFinite(saved.directionsprite.cellSize)) workspace.directionsprite.cellSize = saved.directionsprite.cellSize!
   }
   if (saved?.tilemap?.options) Object.assign(workspace.tilemap.options, saved.tilemap.options)
+  // 字体页只持久化参数：字体文件（blob URL）与生成结果不跨会话保留
+  if (saved?.font) {
+    const { charset, ...rest } = saved.font
+    Object.assign(workspace.font, rest)
+    if (charset) Object.assign(workspace.font.charset, charset)
+  }
+  if (!FONT_MODES.includes(workspace.font.mode)) workspace.font.mode = 'bitmap'
 } catch { /* ignore invalid local settings */ }
 
 export function persistMediaSettings(): void {
@@ -561,6 +617,14 @@ export function persistMediaSettings(): void {
     atlaspack: { settings: { ...workspace.atlaspack.settings } },
     directionsprite: { directionSet: workspace.directionsprite.directionSet, padding: workspace.directionsprite.padding, cellSize: workspace.directionsprite.cellSize },
     tilemap: { options: { ...workspace.tilemap.options } },
+    font: {
+      source: workspace.font.source, systemFamily: workspace.font.systemFamily,
+      charset: { ...workspace.font.charset },
+      sizePx: workspace.font.sizePx, padding: workspace.font.padding, mode: workspace.font.mode,
+      sdfSpread: workspace.font.sdfSpread, maxAtlasSize: workspace.font.maxAtlasSize, powerOfTwo: workspace.font.powerOfTwo,
+      withFnt: workspace.font.withFnt, withXml: workspace.font.withXml, withJson: workspace.font.withJson,
+      name: workspace.font.name, previewText: workspace.font.previewText,
+    },
   }))
 }
 
@@ -650,4 +714,13 @@ export function resetDirectionSprite(): void {
 export function resetTilemap(): void {
   if (workspace.tilemap.sourceUrl) URL.revokeObjectURL(workspace.tilemap.sourceUrl)
   Object.assign(workspace.tilemap, { fileName: '', sourceUrl: '', image: null, tiles: 0, status: 'empty', error: '' })
+}
+
+/** 重置字体页：释放字体文件的 blob URL，清空生成结果（字符集与渲染参数保留） */
+export function resetFont(): void {
+  if (workspace.font.fontUrl) URL.revokeObjectURL(workspace.font.fontUrl)
+  Object.assign(workspace.font, {
+    fileName: '', fontUrl: '', family: '',
+    pageCount: 0, glyphCount: 0, pageUrls: [], activePage: 0, status: 'empty', error: '',
+  })
 }

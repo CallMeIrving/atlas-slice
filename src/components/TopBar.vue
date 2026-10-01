@@ -11,13 +11,15 @@ const TOOL_ENTRIES: { page: WorkspacePage | null; label: string }[] = [
   { page: 'atlaspack', label: '雪碧图' },
   { page: 'palette', label: '调色板换色' },
   { page: 'tilemap', label: 'Tilemap 切片' },
+  { page: 'font', label: '位图字体' },
   { page: null, label: '洋葱皮预览' },
   { page: 'directionsprite', label: '多方向精灵' },
 ]
 /** 当前是否处于 2D 工具页；触发按钮据此显示模块名并高亮 */
 const isToolPage = computed(() =>
   workspace.page === 'nineslice' || workspace.page === 'palette'
-  || workspace.page === 'atlaspack' || workspace.page === 'directionsprite' || workspace.page === 'tilemap',
+  || workspace.page === 'atlaspack' || workspace.page === 'directionsprite'
+  || workspace.page === 'tilemap' || workspace.page === 'font',
 )
 const toolLabel = computed(() => {
   const entry = TOOL_ENTRIES.find((item) => item.page === workspace.page)
@@ -70,6 +72,10 @@ const pageStatus = computed(() => {
   if (workspace.page === 'audio') {
     if (!audioState.assets.length) return '未导入'
     return `${audioState.assets.length} 素材 · ${audioState.outputs.length} 结果`
+  }
+  if (workspace.page === 'font') {
+    if (!workspace.font.glyphCount) return '未导入'
+    return `${workspace.font.glyphCount} 字形 · ${workspace.font.pageCount} 页`
   }
   return WATERMARK_STATUS[workspace.watermark.status]
 })

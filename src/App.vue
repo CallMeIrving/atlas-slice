@@ -15,6 +15,7 @@ import AtlasPackPage from '@/components/AtlasPackPage.vue'
 import DirectionSpritePage from '@/components/DirectionSpritePage.vue'
 import TilemapPage from '@/components/TilemapPage.vue'
 import AudioPage from '@/components/AudioPage.vue'
+import FontPage from '@/components/FontPage.vue'
 import ModelManagerModal from '@/components/ModelManagerModal.vue'
 import { modelManager } from '@/store/model-status'
 import { workspace } from '@/store/workspace'
@@ -50,6 +51,7 @@ const progressPct = () => {
     <DirectionSpritePage v-else-if="workspace.page === 'directionsprite'" />
     <TilemapPage v-else-if="workspace.page === 'tilemap'" />
     <AudioPage v-else-if="workspace.page === 'audio'" />
+    <FontPage v-else-if="workspace.page === 'font'" />
     <!-- 兜底：页面枚举与分支不同步时也不会整屏空白 -->
     <div v-else class="page-fallback">未知页面</div>
 
