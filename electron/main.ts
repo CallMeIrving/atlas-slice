@@ -50,12 +50,21 @@ let staticPort = 0
 let pythonStopping = false
 
 function pythonVenvPath(): string {
-  return join(backendRoot(), '.venv', 'bin', 'python')
+  // Windows 下 venv 解释器在 Scripts/ 目录且带 .exe，其余平台走 bin/
+  return process.platform === 'win32'
+    ? join(backendRoot(), '.venv', 'Scripts', 'python.exe')
+    : join(backendRoot(), '.venv', 'bin', 'python')
 }
 
 /** 随包分发的冻结后端可执行文件：electron-builder extraResources → Resources/backend/atlas-backend/ */
 function bundledBackendExe(): string {
-  return join(resources, 'backend', 'atlas-backend', 'atlas-backend')
+  // Windows 下 PyInstaller 产物带 .exe 后缀
+  return join(
+    resources,
+    'backend',
+    'atlas-backend',
+    process.platform === 'win32' ? 'atlas-backend.exe' : 'atlas-backend',
+  )
 }
 
 /** 取一个空闲的 127.0.0.1 端口，避免与本机其它服务冲突 */

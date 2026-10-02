@@ -13,11 +13,13 @@ directories:
 npmRebuild: false
 
 # 只打前端产物与主进程编译产物；node_modules 由 esbuild/vite 打进产物，运行时不再需要
+# 测试资源（public/assets/test/ 下约 21 MB 音视频/字体/图片）仅供开发期自测，随 vite 拷进 dist 后在此排除，不入包
 files:
   - dist/**
   - dist-electron/**
   - package.json
   - "!node_modules/**"
+  - "!dist/assets/test/**"
 
 # 主进程在打包态要从 Resources/ 下取这几份：模型下载脚本 + 它读取的清单 + 冻结后的 Python 后端
 extraResources:
@@ -46,3 +48,15 @@ mac:
 
 dmg:
   title: AtlasSlice
+
+# Windows 安装包：由 pnpm backend:freeze 在 Windows 上冻结 backend 后通过 dist:win 产出。
+# 注意：PyInstaller 产物平台相关，必须在 Windows 机器上冻结；本机（macOS）只能验证 --win --dir 前端壳。
+win:
+  target:
+    - nsis
+  icon: public/assets/logo.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
