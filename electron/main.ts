@@ -10,7 +10,7 @@
  * 本文件由 esbuild 编译为 CommonJS（dist-electron/main.cjs），不做类型检查。
  */
 
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu } from 'electron'
 import { spawn } from 'node:child_process'
 import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
@@ -353,7 +353,89 @@ function createWindow(): void {
   })
 }
 
+/**
+ * 中文应用菜单：Electron 默认菜单跟随系统语言，打包给中文用户时整条菜单栏
+ * （文件/编辑/视图/窗口）都会是英文，这里显式用 role + 中文 label 自建一份。
+ * role 保留全部原生行为（快捷键、mac 应用菜单的服务/隐藏等），只替换文案。
+ */
+function setupMenu(): void {
+  const isMac = process.platform === 'darwin'
+  // 开发态 app.name 是 package.json 的 name（atlas-slice），统一用产品名做文案
+  const appName = 'AtlasSlice'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [{
+          label: appName,
+          submenu: [
+            { label: `关于 ${appName}`, role: 'about' as const },
+            { type: 'separator' as const },
+            { label: '服务', role: 'services' as const },
+            { type: 'separator' as const },
+            { label: `隐藏 ${appName}`, role: 'hide' as const },
+            { label: '隐藏其他', role: 'hideOthers' as const },
+            { label: '显示全部', role: 'unhide' as const },
+            { type: 'separator' as const },
+            { label: `退出 ${appName}`, role: 'quit' as const },
+          ],
+        }]
+      : []),
+    // {
+    //   label: '文件',
+    //   submenu: [{ label: '关闭窗口', role: 'close' }],
+    // },
+    // {
+    //   label: '编辑',
+    //   submenu: [
+    //     { label: '撤销', role: 'undo' },
+    //     { label: '重做', role: 'redo' },
+    //     { type: 'separator' },
+    //     { label: '剪切', role: 'cut' },
+    //     { label: '复制', role: 'copy' },
+    //     { label: '粘贴', role: 'paste' },
+    //     { label: '全选', role: 'selectAll' },
+    //   ],
+    // },
+    {
+      label: '视图',
+      submenu: [
+        // { label: '重新加载', role: 'reload' },
+        // { label: '强制重新加载', role: 'forceReload' },
+        // { label: '切换开发者工具', role: 'toggleDevTools' },
+        { type: 'separator' },
+        { label: '实际大小', role: 'resetZoom' },
+        { label: '放大', role: 'zoomIn' },
+        { label: '缩小', role: 'zoomOut' },
+        { type: 'separator' },
+        { label: '切换全屏幕', role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: '窗口',
+      submenu: [
+        { label: '最小化', role: 'minimize' },
+        { label: '缩放', role: 'zoom' },
+        ...(isMac
+          ? [
+              { type: 'separator' as const },
+              { label: '前置全部窗口', role: 'front' as const },
+            ]
+          : [{ label: '关闭窗口', role: 'close' as const }]),
+      ],
+    },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
 app.whenReady().then(async () => {
+  setupMenu()
+  // macOS「关于」面板文案：作者署名走 copyright/credits，版本号默认取 package.json
+  if (process.platform === 'darwin') {
+    app.setAboutPanelOptions({
+      applicationName: 'AtlasSlice',
+      copyright: 'Copyright © 2026 欧补文',
+      credits: '作者：欧补文',
+    })
+  }
   ipcMain.on('python:getBaseUrl', (event) => {
     event.returnValue = pythonBaseUrl
   })
