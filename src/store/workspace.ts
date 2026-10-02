@@ -6,7 +6,7 @@ import type { PaletteSlot, PaletteVariant } from '@/core/palette'
 import type { TilemapOptions } from '@/core/tilemap'
 import type { CharsetOptions, FontKerningPair, FontRenderMode, FontSceneTemplate } from '@/core/font'
 
-export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette' | 'atlaspack' | 'directionsprite' | 'tilemap' | 'audio' | 'font'
+export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette' | 'atlaspack' | 'directionsprite' | 'tilemap' | 'audio' | 'font' | 'onion'
 
 export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'rmbg'
 
@@ -48,6 +48,48 @@ export interface VideoFrame {
   cropUrl?: string
   timestamp: number
   selected: boolean
+}
+
+/** 帧动画预览器共用的帧形状：只需 id + 展示图像 URL（视频帧页映射处理图，洋葱皮模块传原图） */
+export interface PreviewFrameLike {
+  id: string
+  url: string
+}
+
+/** 洋葱皮模块的帧序列元素 */
+export interface OnionFrame extends PreviewFrameLike {
+  name: string
+}
+
+/** 帧间补间产物 */
+export interface OnionTweenResult {
+  id: string
+  url: string
+  name: string
+  /** 所属相邻帧对的下标与对内步进：预览时按此插回原序列生成合并时间轴 */
+  pairIndex: number
+  step: number
+}
+
+export interface OnionState {
+  frames: OnionFrame[]
+  fps: number
+  loop: boolean
+  /** 洋葱皮前/后帧数与基础透明度 */
+  before: number
+  after: number
+  alpha: number
+  /** 前后帧着色区分（过去=暖橙 / 未来=冷蓝） */
+  tint: boolean
+  /** 每对相邻帧生成的中间帧数 */
+  tweenCount: number
+  /** 补间权重曲线 */
+  tweenEasing: 'linear' | 'ease'
+  /** 是否为末帧→首帧也补间（循环动画） */
+  tweenLoop: boolean
+  tweenResults: OnionTweenResult[]
+  status: 'empty' | 'ready' | 'tweening' | 'done' | 'error'
+  error: string
 }
 
 /** 视频帧抠图方式：solid 走纯色背景色相判据，其余为 AI 模型 */
@@ -561,6 +603,10 @@ export const workspace = reactive({
     scene: 'none', sdfThreshold: 0.5,
     pageCount: 0, glyphCount: 0, pageUrls: [], activePage: 0, status: 'empty', error: '',
   } as FontState,
+  onion: {
+    frames: [], fps: 12, loop: true, before: 2, after: 2, alpha: 0.35, tint: true,
+    tweenCount: 2, tweenEasing: 'linear', tweenLoop: false, tweenResults: [], status: 'empty', error: '',
+  } as OnionState,
 })
 
 const SETTINGS_KEY = 'atlas-slice:media-settings'
@@ -610,6 +656,7 @@ try {
     atlaspack?: { settings?: Partial<AtlasPackSettings> }
     directionsprite?: { directionSet?: 2 | 4 | 8; padding?: number; cellSize?: number }
     tilemap?: { options?: Partial<TilemapOptions> }
+    onion?: Partial<Pick<OnionState, 'fps' | 'loop' | 'before' | 'after' | 'alpha' | 'tint' | 'tweenCount' | 'tweenEasing' | 'tweenLoop'>>
     font?: Partial<Pick<FontState, 'source' | 'systemFamily' | 'charset' | 'sizePx' | 'padding' | 'mode' | 'sdfSpread' | 'maxAtlasSize' | 'powerOfTwo' | 'withFnt' | 'withXml' | 'withJson' | 'name' | 'previewText' | 'excluded' | 'excludeMissing' | 'letterSpacing' | 'lineSpacing' | 'showMetrics' | 'kerning' | 'kerningPairs' | 'strokeWidth' | 'strokeColor' | 'shadowEnabled' | 'shadowX' | 'shadowY' | 'shadowColor' | 'scene' | 'sdfThreshold'>>
   } | null
   if (saved?.matte) Object.assign(workspace.matte, saved.matte)
@@ -640,6 +687,18 @@ try {
   if (!FONT_MODES.includes(workspace.font.mode)) workspace.font.mode = 'bitmap'
   if (!FONT_SCENES.includes(workspace.font.scene)) workspace.font.scene = 'none'
   if (!Array.isArray(workspace.font.kerningPairs)) workspace.font.kerningPairs = []
+  // 洋葱皮只持久化预览参数：帧序列与补间结果不跨会话保留
+  if (saved?.onion) Object.assign(workspace.onion, saved.onion)
+  const clampNum = (value: number, min: number, max: number, fallback: number): number =>
+    Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback
+  workspace.onion.fps = clampNum(workspace.onion.fps, 1, 30, 12)
+  workspace.onion.before = clampNum(workspace.onion.before, 0, 5, 2)
+  workspace.onion.after = clampNum(workspace.onion.after, 0, 5, 2)
+  workspace.onion.alpha = Math.min(0.9, Math.max(0.05, workspace.onion.alpha || 0.35))
+  workspace.onion.tweenCount = clampNum(workspace.onion.tweenCount, 1, 5, 2)
+  if (workspace.onion.tweenEasing !== 'linear' && workspace.onion.tweenEasing !== 'ease') workspace.onion.tweenEasing = 'linear'
+  workspace.onion.tint = Boolean(workspace.onion.tint)
+  workspace.onion.tweenLoop = Boolean(workspace.onion.tweenLoop)
 } catch { /* ignore invalid local settings */ }
 
 export function persistMediaSettings(): void {
@@ -666,6 +725,11 @@ export function persistMediaSettings(): void {
       shadowEnabled: workspace.font.shadowEnabled, shadowX: workspace.font.shadowX,
       shadowY: workspace.font.shadowY, shadowColor: workspace.font.shadowColor,
       scene: workspace.font.scene, sdfThreshold: workspace.font.sdfThreshold,
+    },
+    onion: {
+      fps: workspace.onion.fps, loop: workspace.onion.loop, before: workspace.onion.before,
+      after: workspace.onion.after, alpha: workspace.onion.alpha, tint: workspace.onion.tint,
+      tweenCount: workspace.onion.tweenCount, tweenEasing: workspace.onion.tweenEasing, tweenLoop: workspace.onion.tweenLoop,
     },
   }))
 }

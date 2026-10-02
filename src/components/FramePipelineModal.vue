@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { frameBaseUrl, persistMediaSettings, workspace } from '@/store/workspace'
+import { frameBaseUrl, frameImageUrl, persistMediaSettings, workspace } from '@/store/workspace'
 import { captureFrame, createCancelToken, extractOptionsFrom, extractRangeError, seekTo, type CancelToken } from '@/core/frame-extract'
 import { describeMattingError, AI_ENGINES } from '@/core/ai-matting'
 import { runFramePipeline, type PipelineProgress } from '@/core/frame-pipeline'
@@ -286,7 +286,7 @@ onMounted(() => { if (pipeline.cropEnabled) void prepareCropSource() })
 
         <section v-if="finished && workspace.video.frames.length" class="step">
           <h3 class="step-title">结果预览与导出 <span class="badge">{{ workspace.video.frames.length }} 帧</span></h3>
-          <div class="result-preview"><FramePreviewPlayer v-model:current-id="previewId" :frames="workspace.video.frames" /></div>
+          <div class="result-preview"><FramePreviewPlayer v-model:current-id="previewId" :frames="workspace.video.frames.map((frame) => ({ id: frame.id, url: frameImageUrl(frame) }))" /></div>
           <div class="result-actions">
             <FrameExportActions :frames="workspace.video.frames" :current-id="previewId" :zip-name="zipName" />
           </div>

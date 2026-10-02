@@ -22,6 +22,21 @@ const cropTargetId = ref<string | null>(null)
 const pipelineOpen = ref(false)
 const selectedCount = computed(() => workspace.video.frames.filter((frame) => frame.selected).length)
 const selectedFrames = computed(() => workspace.video.frames.filter((frame) => frame.selected))
+
+/** 把勾选帧（未勾选任何帧时用全部帧）送入洋葱皮预览模块：有处理结果用处理图，切页继续调参 */
+function sendToOnion(): void {
+  const source = selectedFrames.value.length ? selectedFrames.value : workspace.video.frames
+  const base = workspace.video.fileName.replace(/\.[^.]+$/, '') || 'video'
+  workspace.onion.frames = source.map((frame, index) => ({
+    id: crypto.randomUUID(),
+    name: `${base}-${String(index + 1).padStart(3, '0')}.png`,
+    url: frameImageUrl(frame),
+  }))
+  workspace.onion.tweenResults = []
+  workspace.onion.status = 'ready'
+  workspace.onion.error = ''
+  workspace.page = 'onion'
+}
 const zipName = computed(() => `${workspace.video.fileName.replace(/\.[^.]+$/, '') || 'video'}-frames.zip`)
 
 /** 导入视频文件：重置帧列表与视频元信息 */
@@ -135,7 +150,7 @@ function closePipeline(): void {
       </section>
       <section class="animation-panel panel">
         <div class="panel-title">帧动画预览</div>
-        <FramePreviewPlayer v-model:current-id="previewId" :frames="selectedFrames" />
+        <FramePreviewPlayer v-model:current-id="previewId" :frames="selectedFrames.map((frame) => ({ id: frame.id, url: frameImageUrl(frame) }))" />
       </section>
       <aside class="video-settings panel">
         <h2 class="section-title">抽帧设置</h2>
@@ -158,6 +173,7 @@ function closePipeline(): void {
         <button class="btn" :disabled="!workspace.video.frames.length" @click="openCrop">批量裁切</button>
         <button class="btn" :disabled="!workspace.video.frames.length" @click="openMatte">移除背景</button>
         <button class="btn" :disabled="!workspace.video.frames.length" @click="openWatermark">去水印</button>
+        <button class="btn" :disabled="!workspace.video.frames.length" title="把当前勾选帧（有处理结果用处理图）送入洋葱皮预览模块" @click="sendToOnion">送入洋葱皮</button>
       </div>
       <div v-if="!workspace.video.frames.length" class="strip-empty">抽取结果会显示在这里</div>
       <div v-else class="frames">
