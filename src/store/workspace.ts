@@ -4,7 +4,7 @@ import type { ImageCropRect } from '@/core/crop'
 import type { FrameGroup, DirectionSlot } from '@/core/direction-sprite'
 import type { PaletteSlot, PaletteVariant } from '@/core/palette'
 import type { TilemapOptions } from '@/core/tilemap'
-import type { CharsetOptions, FontRenderMode } from '@/core/font'
+import type { CharsetOptions, FontKerningPair, FontRenderMode, FontSceneTemplate } from '@/core/font'
 
 export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette' | 'atlaspack' | 'directionsprite' | 'tilemap' | 'audio' | 'font'
 
@@ -407,6 +407,32 @@ export interface FontState {
   name: string
   /** 预览文本 */
   previewText: string
+  /** 生成时排除的字符（手动排除，字符串形式便于持久化） */
+  excluded: string
+  /** 生成时自动排除字体缺失的字符 */
+  excludeMissing: boolean
+  /** 字间距（px），叠加在字体原始步进上 */
+  letterSpacing: number
+  /** 行间距（px），叠加在原始行高上 */
+  lineSpacing: number
+  /** 预览是否显示基线与行高辅助线 */
+  showMetrics: boolean
+  /** 是否生成字距调整表并应用 */
+  kerning: boolean
+  /** 手动覆盖的字距对：与自动计算结果合并，手动优先 */
+  kerningPairs: FontKerningPair[]
+  /** 描边宽度（px），0 表示不描边 */
+  strokeWidth: number
+  strokeColor: string
+  /** 阴影开关与偏移 / 颜色 */
+  shadowEnabled: boolean
+  shadowX: number
+  shadowY: number
+  shadowColor: string
+  /** 场景预览模板 */
+  scene: FontSceneTemplate
+  /** SDF / MSDF 着色阈值（0–1），仅随 JSON 元数据导出供 shader 参考 */
+  sdfThreshold: number
   /** 生成结果摘要（结果本体含像素缓冲，留在页面组件内，不进 store） */
   pageCount: number
   glyphCount: number
@@ -529,6 +555,10 @@ export const workspace = reactive({
     sizePx: 32, padding: 1, mode: 'bitmap', sdfSpread: 6, maxAtlasSize: 2048, powerOfTwo: true,
     withFnt: true, withXml: false, withJson: true, name: 'font',
     previewText: 'AtlasSlice 字体预览 ABC 123',
+    excluded: '', excludeMissing: false, letterSpacing: 0, lineSpacing: 0, showMetrics: true,
+    kerning: false, kerningPairs: [], strokeWidth: 0, strokeColor: '#000000',
+    shadowEnabled: false, shadowX: 2, shadowY: 2, shadowColor: '#000000',
+    scene: 'none', sdfThreshold: 0.5,
     pageCount: 0, glyphCount: 0, pageUrls: [], activePage: 0, status: 'empty', error: '',
   } as FontState,
 })
@@ -544,7 +574,9 @@ const LAYER_DETECTORS: LayerDetector[] = ['grounding-dino', 'florence2', 'auto']
 const LAYER_BACKGROUNDS: LayerBackgroundMode[] = ['none', 'erase', 'inpaint']
 const LAYER_DEVICES: LayerDevice[] = ['auto', 'cuda', 'mps', 'cpu']
 /** 字体页支持的字形表示方式，用于丢弃本地设置里已下线的取值 */
-const FONT_MODES: FontRenderMode[] = ['bitmap', 'sdf']
+const FONT_MODES: FontRenderMode[] = ['bitmap', 'sdf', 'msdf', 'mtsdf']
+/** 字体页支持的场景预览模板 */
+const FONT_SCENES: FontSceneTemplate[] = ['none', 'hp', 'coins', 'level', 'damage', 'dialog', 'button']
 
 /**
  * 收敛本地保存的图层拆分设置。
@@ -578,7 +610,7 @@ try {
     atlaspack?: { settings?: Partial<AtlasPackSettings> }
     directionsprite?: { directionSet?: 2 | 4 | 8; padding?: number; cellSize?: number }
     tilemap?: { options?: Partial<TilemapOptions> }
-    font?: Partial<Pick<FontState, 'source' | 'systemFamily' | 'charset' | 'sizePx' | 'padding' | 'mode' | 'sdfSpread' | 'maxAtlasSize' | 'powerOfTwo' | 'withFnt' | 'withXml' | 'withJson' | 'name' | 'previewText'>>
+    font?: Partial<Pick<FontState, 'source' | 'systemFamily' | 'charset' | 'sizePx' | 'padding' | 'mode' | 'sdfSpread' | 'maxAtlasSize' | 'powerOfTwo' | 'withFnt' | 'withXml' | 'withJson' | 'name' | 'previewText' | 'excluded' | 'excludeMissing' | 'letterSpacing' | 'lineSpacing' | 'showMetrics' | 'kerning' | 'kerningPairs' | 'strokeWidth' | 'strokeColor' | 'shadowEnabled' | 'shadowX' | 'shadowY' | 'shadowColor' | 'scene' | 'sdfThreshold'>>
   } | null
   if (saved?.matte) Object.assign(workspace.matte, saved.matte)
   // 旧版本可能存过已经移除的处理方式，直接收敛到默认值，避免下拉框出现空选项
@@ -606,6 +638,8 @@ try {
     if (charset) Object.assign(workspace.font.charset, charset)
   }
   if (!FONT_MODES.includes(workspace.font.mode)) workspace.font.mode = 'bitmap'
+  if (!FONT_SCENES.includes(workspace.font.scene)) workspace.font.scene = 'none'
+  if (!Array.isArray(workspace.font.kerningPairs)) workspace.font.kerningPairs = []
 } catch { /* ignore invalid local settings */ }
 
 export function persistMediaSettings(): void {
@@ -624,6 +658,14 @@ export function persistMediaSettings(): void {
       sdfSpread: workspace.font.sdfSpread, maxAtlasSize: workspace.font.maxAtlasSize, powerOfTwo: workspace.font.powerOfTwo,
       withFnt: workspace.font.withFnt, withXml: workspace.font.withXml, withJson: workspace.font.withJson,
       name: workspace.font.name, previewText: workspace.font.previewText,
+      excluded: workspace.font.excluded, excludeMissing: workspace.font.excludeMissing,
+      letterSpacing: workspace.font.letterSpacing, lineSpacing: workspace.font.lineSpacing,
+      showMetrics: workspace.font.showMetrics, kerning: workspace.font.kerning,
+      kerningPairs: workspace.font.kerningPairs.map((pair) => ({ ...pair })),
+      strokeWidth: workspace.font.strokeWidth, strokeColor: workspace.font.strokeColor,
+      shadowEnabled: workspace.font.shadowEnabled, shadowX: workspace.font.shadowX,
+      shadowY: workspace.font.shadowY, shadowColor: workspace.font.shadowColor,
+      scene: workspace.font.scene, sdfThreshold: workspace.font.sdfThreshold,
     },
   }))
 }

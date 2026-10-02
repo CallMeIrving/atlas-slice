@@ -12,8 +12,28 @@
  */
 import { releaseCanvas } from '@/core/image'
 
-/** 字形表示方式：位图覆盖度 / 单通道距离场 */
-export type FontRenderMode = 'bitmap' | 'sdf'
+/** 字形表示方式：位图覆盖度 / 单通道距离场 / MSDF(RGB) / MTSDF(RGBA) */
+export type FontRenderMode = 'bitmap' | 'sdf' | 'msdf' | 'mtsdf'
+
+/** 距离场类模式（sdf/msdf/mtsdf）统一按距离场流程处理 */
+export function isDistanceFieldMode(mode: FontRenderMode): boolean {
+  return mode !== 'bitmap'
+}
+
+/** MSDF / MTSDF 的通道数：3 = RGB，4 = RGBA（附加单通道 SDF 存 alpha） */
+export function sdfChannelCount(mode: FontRenderMode): number {
+  return mode === 'mtsdf' ? 4 : 3
+}
+
+/** 字距调整对：first / second 为字符码点，amount 为叠加在步进上的调整量（通常为负） */
+export interface FontKerningPair {
+  first: number
+  second: number
+  amount: number
+}
+
+/** 场景预览模板 */
+export type FontSceneTemplate = 'none' | 'hp' | 'coins' | 'level' | 'damage' | 'dialog' | 'button'
 
 /** 单个字符的图集落位与排版度量（字段语义对齐 BMFont 的 char 行） */
 export interface FontGlyph {
@@ -41,11 +61,13 @@ export interface FontAtlasPage {
   height: number
 }
 
-/** 字形像素缓冲：bitmap 为覆盖度，sdf 为归一化距离（均为单通道，长度 width×height） */
+/** 字形像素缓冲：bitmap/sdf 为单通道，msdf 为 3 通道、mtsdf 为 4 通道（长度 width×height×channels） */
 export interface GlyphBitmap {
   w: number
   h: number
-  data: Uint8Array
+  /** 每像素通道数：1 = 覆盖度 / 距离场，3 = MSDF，4 = MTSDF */
+  channels: number
+  data: Uint8Array | Uint8ClampedArray
 }
 
 export interface FontBuildResult {
@@ -53,14 +75,32 @@ export interface FontBuildResult {
   glyphs: FontGlyph[]
   /** 按码点索引的字形像素缓冲，导出时按图集落位拼页 */
   pixels: Map<number, GlyphBitmap>
-  /** 行高与基线（相对行顶） */
+  /** 行高与基线（相对行顶，已含行间距与字间距的实际生效值） */
   lineHeight: number
   base: number
+  /** 字体原始度量（相对行顶），用于「重置为字体原始 Metrics」 */
+  ascent: number
+  descent: number
+  /** 生效的字间距 / 行间距 */
+  letterSpacing: number
+  lineSpacing: number
   sizePx: number
   mode: FontRenderMode
   sdfSpread: number
+  /** 距离场着色阈值（0–1），随 JSON 元数据导出 */
+  sdfThreshold: number
   /** 图集内相邻字形的留白 */
   padding: number
+  /** 字距调整表（自动计算 + 手动覆盖合并后的结果） */
+  kerning: FontKerningPair[]
+  /** 因排除而跳过的字符数 */
+  excludedCount: number
+  /** 整体装箱占用率（字形外框面积 / 全部图集像素），0–1 */
+  occupancy: number
+  /** 每页装箱占用率，下标与 pages 对应 */
+  pageOccupancy: number[]
+  /** 生成耗时（毫秒，含逐字栅格化、距离场与装箱） */
+  buildMs: number
   warnings: string[]
 }
 
@@ -85,8 +125,28 @@ export interface FontBuildOptions extends CharsetOptions {
   padding: number
   mode: FontRenderMode
   sdfSpread: number
+  /** 距离场着色阈值（0–1），仅写进 JSON 元数据供 shader 参考，不参与栅格化 */
+  sdfThreshold?: number
   maxAtlasSize: number
   powerOfTwo: boolean
+  /** 需要跳过的字符码点（手动排除 + 自动排除缺失） */
+  excludeChars?: number[]
+  /** 字间距（px），叠加在每个字形的步进上 */
+  letterSpacing?: number
+  /** 行间距（px），叠加在行高上 */
+  lineSpacing?: number
+  /** 是否生成字距调整表 */
+  kerning?: boolean
+  /** 手动字距对，优先于自动计算结果 */
+  kerningPairs?: FontKerningPair[]
+  /** 描边宽度（px），0 表示不描边；描边在图集生成前完成 */
+  strokeWidth?: number
+  strokeColor?: string
+  /** 阴影偏移与颜色，在图集生成前完成 */
+  shadowEnabled?: boolean
+  shadowX?: number
+  shadowY?: number
+  shadowColor?: string
   onProgress?: (done: number, total: number) => void
 }
 
@@ -130,6 +190,87 @@ export function buildCharset(opts: CharsetOptions): string {
     if (code >= 32) codes.add(code)
   }
   return Array.from(codes).sort((a, b) => a - b).map((code) => String.fromCodePoint(code)).join('')
+}
+
+/**
+ * 常用 CJK / 全角字符集预设。
+ * heavy 标记的预设字符量很大（会触及单次上限），提示改用「文本扫描」，但不做特殊配色；
+ * 预设一律没有默认选中态——选中态只反映「Unicode 范围」里是否真的填了它。
+ */
+export interface CharsetPreset {
+  id: string
+  label: string
+  /** 追加到「Unicode 范围」输入框的内容 */
+  ranges: string
+  /** 是否为大字符集（悬浮提示里提醒会被上限截断） */
+  heavy?: boolean
+}
+
+export const CHARSET_PRESETS: CharsetPreset[] = [
+  { id: 'cjk-punc', label: '中文标点', ranges: '3000-303F' },
+  { id: 'fullwidth', label: '全角字母数字与标点', ranges: 'FF01-FF5E, FF65' },
+  { id: 'hiragana', label: '日文平假名', ranges: '3041-3096' },
+  { id: 'katakana', label: '日文片假名', ranges: '30A1-30FA' },
+  { id: 'hangul', label: '韩文音节', ranges: 'AC00-D7A3', heavy: true },
+  { id: 'cjk-ideograph', label: 'CJK 基本汉字', ranges: '4E00-9FFF', heavy: true },
+]
+
+/** 从文本（TXT / JSON / CSV 原文）中提取实际使用的字符：去重、按码点升序 */
+export function extractCharsFromText(text: string): string {
+  const codes = new Set<number>()
+  for (const ch of text) {
+    const code = ch.codePointAt(0)
+    if (code === undefined || code < 32) continue
+    codes.add(code)
+  }
+  return Array.from(codes).sort((a, b) => a - b).map((code) => String.fromCodePoint(code)).join('')
+}
+
+/** 字符覆盖率报告 */
+export interface CoverageReport {
+  /** 字体缺失（会回落到系统字体）的字符 */
+  missing: string[]
+  /** 支持 / 目标 / 覆盖率 */
+  supported: number
+  total: number
+  ratio: number
+}
+
+/**
+ * 生成前探测字体是否包含目标字符。
+ *
+ * 做法：把同一字符分别用「目标字体 + sans-serif 兜底」与「仅 sans-serif」测量，
+ * 若前进宽度与墨迹外接框完全一致，说明目标字体没有该字形、整串回落到了兜底字体。
+ * 空白类字符没有墨迹，无法用度量判断，按存在处理。
+ */
+export function inspectCoverage(family: string, chars: string, sizePx: number): CoverageReport {
+  const list = Array.from(chars)
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')!
+  const missing: string[] = []
+  const readMetrics = (font: string, char: string): number[] => {
+    ctx.font = font
+    const m = ctx.measureText(char)
+    return [m.width, m.actualBoundingBoxLeft, m.actualBoundingBoxRight, m.actualBoundingBoxAscent, m.actualBoundingBoxDescent]
+  }
+  const withFamily = `${sizePx}px ${quoteFamily(family)}, sans-serif`
+  const sentinel = `${sizePx}px sans-serif`
+  for (const char of list) {
+    if (/\s/.test(char)) continue
+    const a = readMetrics(withFamily, char)
+    const b = readMetrics(sentinel, char)
+    // NaN 表示该度量不适用，视作「有差异」，避免把正常字形误判为缺失
+    const same = a.every((value, index) => Number.isFinite(b[index]) && Math.abs(value - b[index]) < 0.01)
+    if (same) missing.push(char)
+  }
+  releaseCanvas(canvas)
+  const total = list.length
+  return {
+    missing,
+    total,
+    supported: total - missing.length,
+    ratio: total ? (total - missing.length) / total : 1,
+  }
 }
 
 /** 向上取整到 2 的幂 */
@@ -201,22 +342,37 @@ export const MAX_FONT_FILE_SIZE = 24 * 1024 * 1024
 /* 字形栅格化                                                          */
 /* ------------------------------------------------------------------ */
 
-/** 栅格化中间结果：1x 尺度下的覆盖度与相对笔位的偏移 */
+/** 字体效果（描边 / 阴影）：在图集栅格化时一并绘制，仅位图模式支持 */
+interface FontEffects {
+  /** 描边宽度（1x 尺度 px），0 表示不描边 */
+  strokeWidth: number
+  strokeColor: string
+  shadow: boolean
+  shadowX: number
+  shadowY: number
+  shadowColor: string
+}
+
+/** 栅格化中间结果：超采样像素 + 相对笔位 / 基线的偏移 */
 interface RasterGlyph {
   code: number
   char: string
-  /** 覆盖度数据（长度 w×h），空格等无形字形 w=h=0 */
-  data: Uint8Array
-  w: number
-  h: number
-  /** 位图左缘 / 上缘相对笔位与行顶的偏移（1x，可为小数） */
+  /** 超采样后的 RGBA 像素（含描边 / 阴影），尺寸 sw×sh */
+  image: ImageData
+  sw: number
+  sh: number
+  /** 画布左缘相对笔位的偏移（1x，可为小数） */
   xoffsetBase: number
-  yoffsetBase: number
+  /** 画布上缘相对「行顶（基线 - ascent）」多留出的高度（1x），位图模式的 yoffset 需补回 */
+  topPadPx: number
   advance: number
 }
 
-/** 由高分辨率覆盖度做 ss×ss 盒式降采样，得到 1x 尺度的抗锯齿覆盖度 */
-function downsample(src: Uint8ClampedArray, sw: number, sh: number, ss: number): { data: Uint8Array; w: number; h: number } {
+/**
+ * 覆盖度降采样（距离场系列用）。
+ * 直接聚合 alpha：字形以白字绘制，alpha 即覆盖度，等价于旧实现里「红通道 × alpha / 255」。
+ */
+function downsampleAlpha(src: Uint8ClampedArray, sw: number, sh: number, ss: number): { data: Uint8Array; w: number; h: number } {
   const w = Math.max(1, Math.ceil(sw / ss))
   const h = Math.max(1, Math.ceil(sh / ss))
   const out = new Uint8Array(w * h)
@@ -230,8 +386,7 @@ function downsample(src: Uint8ClampedArray, sw: number, sh: number, ss: number):
         for (let sx = 0; sx < ss; sx++) {
           const px = x * ss + sx
           if (px >= sw) break
-          // 画布用白字 + 透明底绘制，红通道即覆盖度，再乘 alpha 处理半透明边缘
-          sum += src[(py * sw + px) * 4] * (src[(py * sw + px) * 4 + 3] / 255)
+          sum += src[(py * sw + px) * 4 + 3]
         }
       }
       // 除以块面积而非实际像素数：边缘不足一块的部分按透明处理，避免边缘亮度被抬高
@@ -242,9 +397,48 @@ function downsample(src: Uint8ClampedArray, sw: number, sh: number, ss: number):
 }
 
 /**
- * 栅格化单个字形。
- * 先按超采样倍率绘制（边缘更干净），再盒式降采样回目标字号；
- * 画布范围覆盖字形外接框并向外留出 margin，保证斜体/悬垂笔画不被裁掉。
+ * RGBA 降采样（位图模式用，保留描边 / 阴影颜色）。
+ * 颜色按 alpha 加权求平均再除以总 alpha，避免与透明黑混出暗边。
+ */
+function downsampleRgba(src: Uint8ClampedArray, sw: number, sh: number, ss: number): { data: Uint8ClampedArray; w: number; h: number } {
+  const w = Math.max(1, Math.ceil(sw / ss))
+  const h = Math.max(1, Math.ceil(sh / ss))
+  const out = new Uint8ClampedArray(w * h * 4)
+  const area = ss * ss
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let r = 0
+      let g = 0
+      let b = 0
+      let a = 0
+      for (let sy = 0; sy < ss; sy++) {
+        const py = y * ss + sy
+        if (py >= sh) break
+        for (let sx = 0; sx < ss; sx++) {
+          const px = x * ss + sx
+          if (px >= sw) break
+          const index = (py * sw + px) * 4
+          const alpha = src[index + 3]
+          r += src[index] * alpha
+          g += src[index + 1] * alpha
+          b += src[index + 2] * alpha
+          a += alpha
+        }
+      }
+      const target = (y * w + x) * 4
+      out[target] = a ? Math.round(r / a) : 0
+      out[target + 1] = a ? Math.round(g / a) : 0
+      out[target + 2] = a ? Math.round(b / a) : 0
+      out[target + 3] = Math.round(Math.min(255, a / area))
+    }
+  }
+  return { data: out, w, h }
+}
+
+/**
+ * 栅格化单个字形（超采样绘制后再降采样）。
+ * 画布范围覆盖字形外接框，并向外留出 margin、描边宽度与阴影偏移，保证不被裁掉；
+ * 描边 / 阴影在此阶段绘制完成，后续装箱只处理成品像素。
  */
 function rasterizeGlyph(
   ctx: CanvasRenderingContext2D,
@@ -256,19 +450,25 @@ function rasterizeGlyph(
   descent: number,
   marginPx: number,
   ss: number,
+  effects: FontEffects,
 ): RasterGlyph {
   const font = `${sizePx * ss}px ${quoteFamily(family)}, sans-serif`
   ctx.font = font
+  // measureText 的度量是按超采样字号（sizePx × ss）给出的，这里统一除回 1× 尺度，
+  // 下面的画布范围再乘 ss 变回超采样像素；漏除会让 advance 与画布宽度整体放大 ss 倍
   const metrics = ctx.measureText(char)
-  const inkLeft = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : 0
-  const inkRight = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : metrics.width
-  const advance = Number.isFinite(metrics.width) ? metrics.width : 0
+  const inkLeft = (Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : 0) / ss
+  const inkRight = (Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : metrics.width) / ss
+  const advance = Number.isFinite(metrics.width) ? metrics.width / ss : 0
 
+  const strokeHi = effects.strokeWidth * ss
+  const shadowXHi = effects.shadow ? effects.shadowX * ss : 0
+  const shadowYHi = effects.shadow ? effects.shadowY * ss : 0
   const marginHi = marginPx * ss
-  const x0 = Math.floor(inkLeft * ss) - marginHi
-  const x1 = Math.ceil(inkRight * ss) + marginHi
-  const y0 = -Math.ceil(ascent * ss) - marginHi
-  const y1 = Math.ceil(descent * ss) + marginHi
+  const x0 = Math.floor(inkLeft * ss) - marginHi - strokeHi - Math.max(0, -shadowXHi)
+  const x1 = Math.ceil(inkRight * ss) + marginHi + strokeHi + Math.max(0, shadowXHi)
+  const y0 = -Math.ceil(ascent * ss) - marginHi - strokeHi - Math.max(0, -shadowYHi)
+  const y1 = Math.ceil(descent * ss) + marginHi + strokeHi + Math.max(0, shadowYHi)
   const canvasW = Math.max(1, x1 - x0)
   const canvasH = Math.max(1, y1 - y0)
 
@@ -279,39 +479,78 @@ function rasterizeGlyph(
   gctx.font = font
   gctx.textAlign = 'left'
   gctx.textBaseline = 'alphabetic'
+  // 笔位在画布中的位置：横向 -x0，纵向 -y0（画布上缘到基线的距离）
+  const penX = -x0
+  const baselineY = -y0
+  if (effects.shadow) {
+    gctx.shadowColor = effects.shadowColor
+    gctx.shadowOffsetX = shadowXHi
+    gctx.shadowOffsetY = shadowYHi
+    gctx.fillStyle = effects.shadowColor
+    gctx.fillText(char, penX, baselineY)
+    gctx.shadowColor = 'transparent'
+    gctx.shadowOffsetX = 0
+    gctx.shadowOffsetY = 0
+  }
+  if (strokeHi > 0) {
+    gctx.lineWidth = strokeHi * 2
+    gctx.strokeStyle = effects.strokeColor
+    gctx.lineJoin = 'round'
+    gctx.strokeText(char, penX, baselineY)
+  }
   gctx.fillStyle = '#ffffff'
-  // 笔位在画布中的位置：横向 -x0，纵向 marginHi + ascent（基线）
-  gctx.fillText(char, -x0, marginHi + Math.ceil(ascent * ss))
+  gctx.fillText(char, penX, baselineY)
   const image = gctx.getImageData(0, 0, canvasW, canvasH)
   releaseCanvas(canvas)
 
-  const small = downsample(image.data, canvasW, canvasH, ss)
   return {
     code,
     char,
-    data: small.data,
-    w: small.w,
-    h: small.h,
+    image,
+    sw: canvasW,
+    sh: canvasH,
     xoffsetBase: x0 / ss,
-    yoffsetBase: y0 / ss,
+    topPadPx: effects.strokeWidth + (effects.shadow ? Math.max(0, -effects.shadowY) : 0),
     advance,
   }
 }
 
-/** 求覆盖度数据的非空外接框；全空返回 null */
-function inkBBox(data: Uint8Array, w: number, h: number): { x: number; y: number; w: number; h: number } | null {
+/** 外接框 */
+interface BBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** 求 RGBA 像素按 alpha 的非空外接框；全透明返回 null */
+function inkBBoxAlpha(data: Uint8ClampedArray, w: number, h: number): BBox | null {
+  return scanBBox(w, h, (x, y) => data[(y * w + x) * 4 + 3] > 0)
+}
+
+/** 从多通道缓冲里裁出指定窗口（宽按 w 为原始行宽，channels 为每像素通道数） */
+function cropChannels(data: Uint8Array, w: number, channels: number, crop: BBox): Uint8Array {
+  const out = new Uint8Array(crop.w * crop.h * channels)
+  for (let y = 0; y < crop.h; y++) {
+    const from = ((crop.y + y) * w + crop.x) * channels
+    out.set(data.subarray(from, from + crop.w * channels), y * crop.w * channels)
+  }
+  return out
+}
+
+/** 按像素判据扫出最小外接框 */
+function scanBBox(w: number, h: number, isInk: (x: number, y: number) => boolean): BBox | null {
   let minX = w
   let minY = h
   let maxX = -1
   let maxY = -1
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (data[y * w + x] > 0) {
-        if (x < minX) minX = x
-        if (x > maxX) maxX = x
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
-      }
+      if (!isInk(x, y)) continue
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
     }
   }
   if (maxX < 0) return null
@@ -390,7 +629,7 @@ function distanceTransform(mask: Uint8Array, w: number, h: number): Float32Array
 /**
  * 覆盖度 → 单通道距离场。
  * 以 0.5 覆盖度为边界把像素分成内外两组，分别求到边界的距离后合成带符号距离，
- * 再按 spread 归一化到 0–255：0.5 为边界，spread 像素外饱和。
+ * 再按 spread 归一化到 0–255：0.5 为边界，字形内部为白、外部为黑，spread 像素外饱和。
  */
 function coverageToSdf(coverage: Uint8Array, w: number, h: number, spread: number): Uint8Array {
   const inside = new Uint8Array(w * h)
@@ -403,9 +642,67 @@ function coverageToSdf(coverage: Uint8Array, w: number, h: number, spread: numbe
   const scale = 1 / (2 * spread)
   const out = new Uint8Array(w * h)
   for (let i = 0; i < out.length; i++) {
-    const signed = inside[i] ? -distToOutside[i] : distToInside[i]
+    // 内部为正、外部为负，保证与主流 SDF / MSDF shader 的「内部亮、外部暗」一致
+    const signed = inside[i] ? distToOutside[i] : -distToInside[i]
     const value = Math.round(Math.min(1, Math.max(0, 0.5 + signed * scale)) * 255)
     out[i] = value
+  }
+  return out
+}
+
+/**
+ * 覆盖度 → MSDF / MTSDF 多通道距离场。
+ *
+ * 真实 MSDF 需要字形轮廓数据，而浏览器端只能拿到栅格化结果；这里按边界像素的梯度方向
+ * 把它们分成 R/G/B 三组，每个通道只求到本组边沿的距离，shader 取三通道中位数即可在放大时保住尖角。
+ * 梯度接近 0（角点）时三组都参与。mtsdf 额外把整体距离场写进 alpha，方便只支持单通道的着色器直接使用。
+ */
+function coverageToMsdf(coverage: Uint8Array, w: number, h: number, spread: number, withAlpha: boolean): Uint8Array {
+  const channels = withAlpha ? 4 : 3
+  const out = new Uint8Array(w * h * channels)
+  const inside = new Uint8Array(w * h)
+  for (let i = 0; i < coverage.length; i++) inside[i] = coverage[i] >= 128 ? 1 : 0
+
+  const edgeMasks = [new Uint8Array(w * h), new Uint8Array(w * h), new Uint8Array(w * h)]
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const index = y * w + x
+      const value = inside[index]
+      let boundary = false
+      for (let oy = -1; oy <= 1 && !boundary; oy++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          const nx = x + ox
+          const ny = y + oy
+          if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue
+          if (inside[ny * w + nx] !== value) { boundary = true; break }
+        }
+      }
+      if (!boundary) continue
+      const gx = (x + 1 < w ? coverage[index + 1] : coverage[index]) - (x > 0 ? coverage[index - 1] : coverage[index])
+      const gy = (y + 1 < h ? coverage[index + w] : coverage[index]) - (y > 0 ? coverage[index - w] : coverage[index])
+      if (Math.abs(gx) < 1 && Math.abs(gy) < 1) {
+        edgeMasks[0][index] = 1
+        edgeMasks[1][index] = 1
+        edgeMasks[2][index] = 1
+        continue
+      }
+      // 梯度方向：竖直边归 R、水平边归 G、斜边归 B
+      const angle = Math.atan2(Math.abs(gy), Math.abs(gx))
+      edgeMasks[angle < Math.PI / 6 ? 0 : angle < Math.PI / 3 ? 2 : 1][index] = 1
+    }
+  }
+
+  const scale = 1 / (2 * spread)
+  const distances = edgeMasks.map((mask) => distanceTransform(mask, w, h))
+  for (let i = 0; i < w * h; i++) {
+    for (let channel = 0; channel < 3; channel++) {
+      const signed = inside[i] ? distances[channel][i] : -distances[channel][i]
+      out[i * channels + channel] = Math.round(Math.min(1, Math.max(0, 0.5 + signed * scale)) * 255)
+    }
+  }
+  if (withAlpha) {
+    const single = coverageToSdf(coverage, w, h, spread)
+    for (let i = 0; i < w * h; i++) out[i * channels + 3] = single[i]
   }
   return out
 }
@@ -483,13 +780,24 @@ interface PackedAtlas {
   pages: FontAtlasPage[]
   placements: ShelfPlacement[]
   indexByCode: Map<number, number>
+  /** 每页装箱占用率：该页字形外框面积之和 / 页像素面积 */
+  pageOccupancy: number[]
 }
 
-/** 在若干 2 的幂候选宽度里挑总像素面积最小的一种，多页时页尺寸保持一致 */
+/**
+ * 在若干 2 的幂候选宽度里挑最合适的一种，多页时页尺寸保持一致。
+ *
+ * 打分以总像素面积为主，但只比面积会出问题：窄页把字形拆到更多页后，
+ * 2 的幂补高让它的面积反而更小，于是选出 64×2048 这类极端长条图集。
+ * 因此对宽高比超过 2 的候选按超出比例加价，长条页即使面积略小也不会胜出。
+ */
 function packGlyphBoxes(boxes: GlyphBox[], maxSize: number, powerOfTwo: boolean): PackedAtlas {
   const candidates: number[] = []
   for (let width = 64; width <= maxSize; width *= 2) candidates.push(width)
   if (candidates[candidates.length - 1] !== maxSize) candidates.push(maxSize)
+
+  const areaByCode = new Map<number, number>()
+  for (const box of boxes) areaByCode.set(box.code, box.w * box.h)
 
   let best: { width: number; height: number; layout: ShelfLayout } | null = null
   let bestScore = Infinity
@@ -499,8 +807,10 @@ function packGlyphBoxes(boxes: GlyphBox[], maxSize: number, powerOfTwo: boolean)
     const usedH = Math.max(...layout.used.map((u) => u.h), 1)
     const pageW = powerOfTwo ? width : Math.min(width, usedW)
     const pageH = powerOfTwo ? nextPowerOfTwo(usedH) : usedH
+    const aspect = Math.max(pageW, pageH) / Math.min(pageW, pageH)
     // 丢字形的候选必须重罚，否则「窄页跳过放不下的字形」会因面积更小而胜出
-    const score = pageW * pageH * layout.pages.length + layout.skipped * 1e9
+    const score = layout.skipped * 1e9
+      + pageW * pageH * layout.pages.length * (1 + 0.06 * Math.max(0, aspect - 2))
     if (score < bestScore) {
       bestScore = score
       best = { width: pageW, height: pageH, layout }
@@ -516,11 +826,99 @@ function packGlyphBoxes(boxes: GlyphBox[], maxSize: number, powerOfTwo: boolean)
       placements.push(placement)
     }
   })
+  const pageArea = Math.max(1, chosen.width * chosen.height)
+  const pageOccupancy = chosen.layout.pages.map((page) => {
+    let sum = 0
+    for (const placement of page) sum += areaByCode.get(placement.code) ?? 0
+    return Math.min(1, sum / pageArea)
+  })
   return {
     pages: chosen.layout.pages.map(() => ({ width: chosen.width, height: chosen.height })),
     placements,
     indexByCode,
+    pageOccupancy,
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* 字距（Kerning）                                                      */
+/* ------------------------------------------------------------------ */
+
+/** 逐行墨迹范围：用于按行计算字距（列坐标相对笔位） */
+interface KerningSource {
+  code: number
+  advance: number
+  /** 每行墨迹的首 / 末列（相对笔位），无墨迹为 -1 */
+  first: Int16Array
+  last: Int16Array
+}
+
+/**
+ * 取一个字形的逐行墨迹范围。
+ * 行坐标用「画布行」，各字形的画布上下界只由 ascent / descent / margin / 效果决定，
+ * 因此不同字形的同一行号对齐，可以直接逐行比较。
+ */
+function buildKerningRows(
+  code: number,
+  advance: number,
+  w: number,
+  h: number,
+  xoffsetBase: number,
+  isInk: (x: number, y: number) => boolean,
+): KerningSource {
+  const first = new Int16Array(h).fill(-1)
+  const last = new Int16Array(h).fill(-1)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!isInk(x, y)) continue
+      const column = Math.round(xoffsetBase + x)
+      if (first[y] < 0) first[y] = column
+      last[y] = column
+    }
+  }
+  return { code, advance, first, last }
+}
+
+/** 自动字距的字符数上限：逐对比较是 O(n²)，太多会拖慢生成 */
+const MAX_KERNING_GLYPHS = 512
+/** 自动字距表条数上限，避免大字符集导出元数据膨胀 */
+const MAX_KERNING_PAIRS = 4000
+
+/**
+ * 按墨迹几何自动计算字距表。
+ *
+ * 先逐对求两字形墨迹的逐行最小水平间隙，再取全体间隙的 60 分位作为「典型间隙」：
+ * 字体自带的左右边距本来就是这个量级，把它们一律收掉等于压缩字间距，并不是 kerning。
+ * 只有比典型间隙还紧、且差值达到容差（约字号的 6%）的字符对，才算真正需要互相靠近的组合
+ * （如 AV / To / r.），按差值收紧；调整量取整后不足 1px 的丢弃。
+ */
+function computeKerning(sources: KerningSource[], letterSpacing: number, sizePx: number): FontKerningPair[] {
+  const measured: Array<{ first: number; second: number; gap: number }> = []
+  for (const a of sources) {
+    for (const b of sources) {
+      let minGap = Infinity
+      const rows = Math.min(a.first.length, b.first.length)
+      for (let y = 0; y < rows; y++) {
+        if (a.last[y] < 0 || b.first[y] < 0) continue
+        const gap = a.advance + letterSpacing - a.last[y] + b.first[y]
+        if (gap < minGap) minGap = gap
+      }
+      if (Number.isFinite(minGap)) measured.push({ first: a.code, second: b.code, gap: minGap })
+    }
+  }
+  if (!measured.length) return []
+  const sorted = measured.map((item) => item.gap).sort((x, y) => x - y)
+  const typical = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.6))]
+  const tolerance = Math.max(1, Math.round(sizePx * 0.06))
+  const pairs: FontKerningPair[] = []
+  for (const item of measured) {
+    if (item.gap > typical - tolerance) continue
+    const amount = Math.round(Math.min(0, -(item.gap - typical)))
+    if (amount > -1) continue
+    pairs.push({ first: item.first, second: item.second, amount })
+  }
+  pairs.sort((x, y) => x.amount - y.amount)
+  return pairs.slice(0, MAX_KERNING_PAIRS)
 }
 
 /* ------------------------------------------------------------------ */
@@ -532,16 +930,34 @@ function packGlyphBoxes(boxes: GlyphBox[], maxSize: number, powerOfTwo: boolean)
  * 步骤：合成字符集 → 逐字栅格化（带超采样）→ 按需转距离场 → 货架装箱 → 组装 BMFont 度量。
  */
 export async function buildFont(options: FontBuildOptions): Promise<FontBuildResult> {
+  const startedAt = performance.now()
   const warnings: string[] = []
+  const exclude = new Set(options.excludeChars ?? [])
   const all = Array.from(buildCharset(options))
-  const chars = all.slice(0, MAX_GLYPHS)
-  if (all.length > chars.length) warnings.push(`字符数 ${all.length} 超过上限 ${MAX_GLYPHS}，已截断`)
+  const target = all.filter((char) => !exclude.has(char.codePointAt(0)!))
+  const excludedCount = all.length - target.length
+  const chars = target.slice(0, MAX_GLYPHS)
+  if (target.length > chars.length) warnings.push(`字符数 ${target.length} 超过上限 ${MAX_GLYPHS}，已截断`)
+  if (excludedCount) warnings.push(`已排除 ${excludedCount} 个字符`)
   if (!chars.length) throw new Error('字符集为空，请至少勾选一个预设或填写自定义字符')
 
   const sizePx = Math.max(6, Math.round(options.sizePx))
   const padding = Math.max(0, Math.round(options.padding))
-  const spread = options.mode === 'sdf' ? Math.max(1, Math.round(options.sdfSpread)) : 0
+  const letterSpacing = Math.round(options.letterSpacing ?? 0)
+  const lineSpacing = Math.round(options.lineSpacing ?? 0)
+  const distanceField = isDistanceFieldMode(options.mode)
+  const spread = distanceField ? Math.max(1, Math.round(options.sdfSpread)) : 0
+  const sdfThreshold = Math.min(1, Math.max(0, options.sdfThreshold ?? 0.5))
   const ss = sizePx <= 32 ? 4 : sizePx <= 64 ? 2 : 1
+  // 描边 / 阴影只对位图模式生效：距离场本身是单色场，轮廓与投影交给引擎 shader
+  const effects: FontEffects = {
+    strokeWidth: distanceField ? 0 : Math.max(0, Math.round(options.strokeWidth ?? 0)),
+    strokeColor: options.strokeColor || '#000000',
+    shadow: !distanceField && Boolean(options.shadowEnabled),
+    shadowX: options.shadowX ?? 0,
+    shadowY: options.shadowY ?? 0,
+    shadowColor: options.shadowColor || '#000000',
+  }
 
   const measure = document.createElement('canvas').getContext('2d')!
   measure.font = `${sizePx}px ${quoteFamily(options.family)}, sans-serif`
@@ -560,42 +976,70 @@ export async function buildFont(options: FontBuildOptions): Promise<FontBuildRes
   const glyphs: FontGlyph[] = []
   const pixels = new Map<number, GlyphBitmap>()
   const boxes: GlyphBox[] = []
-  const luminance: Array<{ code: number; scaled: GlyphBitmap; xoffset: number; yoffset: number; advance: number }> = []
+  const kernSources: KerningSource[] = []
+  const placed: Array<{ code: number; bitmap: GlyphBitmap; xoffset: number; yoffset: number; advance: number }> = []
 
   for (let i = 0; i < chars.length; i++) {
     const char = chars[i]
     const code = char.codePointAt(0)!
-    const raster = rasterizeGlyph(ctx, options.family, char, code, sizePx, ascent, descent, marginPx, ss)
+    const raster = rasterizeGlyph(ctx, options.family, char, code, sizePx, ascent, descent, marginPx, ss, effects)
     let bitmap: GlyphBitmap
     let xoffset: number
     let yoffset: number
     if (options.mode === 'bitmap') {
-      const bbox = inkBBox(raster.data, raster.w, raster.h)
+      const small = downsampleRgba(raster.image.data, raster.sw, raster.sh, ss)
+      kernSources.push(buildKerningRows(code, raster.advance, small.w, small.h, raster.xoffsetBase, (x, y) => small.data[(y * small.w + x) * 4 + 3] > 0))
+      const bbox = inkBBoxAlpha(small.data, small.w, small.h)
       if (!bbox) {
         // 空格类字形没有墨迹：只保留步进宽度
-        bitmap = { w: 0, h: 0, data: new Uint8Array(0) }
+        bitmap = { w: 0, h: 0, channels: 4, data: new Uint8ClampedArray(0) }
         xoffset = 0
         yoffset = 0
         boxes.push({ code, w: 0, h: 0 })
       } else {
-        const trimmed = new Uint8Array(bbox.w * bbox.h)
+        const trimmed = new Uint8ClampedArray(bbox.w * bbox.h * 4)
         for (let y = 0; y < bbox.h; y++) {
-          trimmed.set(raster.data.subarray((bbox.y + y) * raster.w + bbox.x, (bbox.y + y) * raster.w + bbox.x + bbox.w), y * bbox.w)
+          const from = ((bbox.y + y) * small.w + bbox.x) * 4
+          trimmed.set(small.data.subarray(from, from + bbox.w * 4), y * bbox.w * 4)
         }
-        bitmap = { w: bbox.w, h: bbox.h, data: trimmed }
-        xoffset = raster.xoffsetBase + bbox.x
-        // 栅格化的 yoffsetBase 相对基线，BMFont 的 yoffset 相对行顶（基线 - ascent），故补回 ascent
-        yoffset = bbox.y - marginPx
+        bitmap = { w: bbox.w, h: bbox.h, channels: 4, data: trimmed }
+        xoffset = Math.round(raster.xoffsetBase + bbox.x)
+        // BMFont 的 yoffset 相对行顶（基线 - ascent），故从 bbox 位置换算回行顶
+        yoffset = Math.round(bbox.y - marginPx - raster.topPadPx)
         boxes.push({ code, w: bbox.w + padding * 2, h: bbox.h + padding * 2 })
       }
     } else {
-      bitmap = { w: raster.w, h: raster.h, data: coverageToSdf(raster.data, raster.w, raster.h, spread) }
-      xoffset = raster.xoffsetBase
-      yoffset = -marginPx
-      boxes.push({ code, w: bitmap.w + padding * 2, h: bitmap.h + padding * 2 })
+      const coverage = downsampleAlpha(raster.image.data, raster.sw, raster.sh, ss)
+      kernSources.push(buildKerningRows(code, raster.advance, coverage.w, coverage.h, raster.xoffsetBase, (x, y) => coverage.data[y * coverage.w + x] >= 128))
+      const channels = options.mode === 'sdf' ? 1 : options.mode === 'mtsdf' ? 4 : 3
+      const field = options.mode === 'sdf'
+        ? coverageToSdf(coverage.data, coverage.w, coverage.h, spread)
+        : coverageToMsdf(coverage.data, coverage.w, coverage.h, spread, options.mode === 'mtsdf')
+      // 距离场裁到「墨迹外扩 spread」：既留足过渡带，又不用让每个字形都占满 ascent+descent 的整行高
+      const ink = scanBBox(coverage.w, coverage.h, (x, y) => coverage.data[y * coverage.w + x] > 0)
+      if (!ink) {
+        bitmap = { w: 0, h: 0, channels, data: new Uint8Array(0) }
+        xoffset = 0
+        yoffset = 0
+        boxes.push({ code, w: 0, h: 0 })
+      } else {
+        const crop: BBox = {
+          x: Math.max(0, ink.x - spread),
+          y: Math.max(0, ink.y - spread),
+          w: 0,
+          h: 0,
+        }
+        crop.w = Math.min(coverage.w, ink.x + ink.w + spread) - crop.x
+        crop.h = Math.min(coverage.h, ink.y + ink.h + spread) - crop.y
+        bitmap = { w: crop.w, h: crop.h, channels, data: cropChannels(field, coverage.w, channels, crop) }
+        xoffset = Math.round(raster.xoffsetBase + crop.x)
+        // 与位图模式同构：行顶到裁剪框上缘的距离（距离场模式没有描边 / 阴影的额外上边距）
+        yoffset = crop.y - marginPx
+        boxes.push({ code, w: crop.w + padding * 2, h: crop.h + padding * 2 })
+      }
     }
     pixels.set(code, bitmap)
-    luminance.push({ code, scaled: bitmap, xoffset, yoffset, advance: raster.advance })
+    placed.push({ code, bitmap, xoffset, yoffset, advance: raster.advance })
 
     if (i % 24 === 23) {
       options.onProgress?.(i + 1, chars.length)
@@ -615,7 +1059,7 @@ export async function buildFont(options: FontBuildOptions): Promise<FontBuildRes
   }
   if (skipped) warnings.push(`${skipped} 个字形超出图集最大边长，已跳过`)
 
-  for (const item of luminance) {
+  for (const item of placed) {
     const index = packed.indexByCode.get(item.code)
     const metrics = index === undefined ? null : packed.placements[index]
     glyphs.push({
@@ -624,62 +1068,111 @@ export async function buildFont(options: FontBuildOptions): Promise<FontBuildRes
       page: metrics ? metrics.page : 0,
       x: metrics ? metrics.x + padding : 0,
       y: metrics ? metrics.y + padding : 0,
-      width: item.scaled.w,
-      height: item.scaled.h,
-      xoffset: Math.round(item.xoffset),
-      yoffset: Math.round(item.yoffset),
-      xadvance: Math.max(0, Math.round(item.advance)),
+      width: item.bitmap.w,
+      height: item.bitmap.h,
+      xoffset: item.xoffset,
+      yoffset: item.yoffset,
+      xadvance: Math.max(0, Math.round(item.advance) + letterSpacing),
     })
   }
+
+  // 自动字距 + 手动覆盖：手动优先，只保留两端字符都在本次字符集里的条目
+  const merged = new Map<string, FontKerningPair>()
+  if (options.kerning) {
+    let sources = kernSources
+    if (sources.length > MAX_KERNING_GLYPHS) {
+      sources = sources.slice(0, MAX_KERNING_GLYPHS)
+      warnings.push(`字符数超过 ${MAX_KERNING_GLYPHS}，自动字距只对前 ${MAX_KERNING_GLYPHS} 个字符计算`)
+    }
+    for (const pair of computeKerning(sources, letterSpacing, sizePx)) {
+      merged.set(`${pair.first},${pair.second}`, pair)
+    }
+  }
+  for (const pair of options.kerningPairs ?? []) {
+    merged.set(`${pair.first},${pair.second}`, { ...pair })
+  }
+  const kerning = Array.from(merged.values()).filter((pair) => pixels.has(pair.first) && pixels.has(pair.second))
 
   return {
     pages: packed.pages,
     glyphs,
     pixels,
-    lineHeight: Math.round(ascent + descent),
+    lineHeight: Math.round(ascent + descent) + lineSpacing,
     base: Math.round(ascent),
+    ascent: Math.round(ascent),
+    descent: Math.round(descent),
+    letterSpacing,
+    lineSpacing,
     sizePx,
     mode: options.mode,
     sdfSpread: spread,
+    sdfThreshold,
     padding,
+    kerning,
+    excludedCount,
+    occupancy: packed.pageOccupancy.length
+      ? packed.pageOccupancy.reduce((sum, value) => sum + value, 0) / packed.pageOccupancy.length
+      : 0,
+    pageOccupancy: packed.pageOccupancy,
+    buildMs: Math.round(performance.now() - startedAt),
     warnings,
   }
+}
+
+/** 把字形像素按落位拼成一页的像素缓冲（预览与导出共用同一套拼页逻辑） */
+export function renderFontPageImageData(result: FontBuildResult, pageIndex: number): ImageData | null {
+  const page = result.pages[pageIndex]
+  if (!page) return null
+  const buffer = new Uint8ClampedArray(page.width * page.height * 4)
+  // sdf / msdf 页必须整页不透明：空白区域代表「远离字形」（外部距离为负 → 黑），
+  // 若留成透明像素，解码后 RGB 会被清零且 alpha 为 0，着色器采样就丢了距离信息。
+  // mtsdf 的 alpha 本身就是距离值（外部同样为 0），因此不能铺不透明底，保持透明黑即可。
+  if (result.mode === 'sdf' || result.mode === 'msdf') {
+    for (let i = 3; i < buffer.length; i += 4) buffer[i] = 255
+  }
+  for (const glyph of result.glyphs) {
+    if (glyph.page !== pageIndex || !glyph.width || !glyph.height) continue
+    const bitmap = result.pixels.get(glyph.code)
+    if (!bitmap) continue
+    const { channels } = bitmap
+    for (let y = 0; y < glyph.height; y++) {
+      for (let x = 0; x < glyph.width; x++) {
+        const source = (y * glyph.width + x) * channels
+        const target = ((glyph.y + y) * page.width + glyph.x + x) * 4
+        if (channels === 1) {
+          // 单通道距离场：复制到 RGB，alpha 全不透明，着色交给 shader
+          const value = bitmap.data[source]
+          buffer[target] = value
+          buffer[target + 1] = value
+          buffer[target + 2] = value
+          buffer[target + 3] = 255
+        } else if (channels === 3) {
+          // MSDF：RGB 三通道各存一组边沿的距离场
+          buffer[target] = bitmap.data[source]
+          buffer[target + 1] = bitmap.data[source + 1]
+          buffer[target + 2] = bitmap.data[source + 2]
+          buffer[target + 3] = 255
+        } else {
+          // 位图（白字 + 描边/阴影，RGBA）与 MTSDF（RGB 距离场 + alpha 单通道距离场）
+          buffer[target] = bitmap.data[source]
+          buffer[target + 1] = bitmap.data[source + 1]
+          buffer[target + 2] = bitmap.data[source + 2]
+          buffer[target + 3] = bitmap.data[source + 3]
+        }
+      }
+    }
+  }
+  return new ImageData(buffer, page.width, page.height)
 }
 
 /** 把字形像素按落位拼进各页画布，返回每页的 PNG dataURL */
 export function renderFontPages(result: FontBuildResult): string[] {
   return result.pages.map((page, pageIndex) => {
-    const buffer = new Uint8ClampedArray(page.width * page.height * 4)
-    // 距离场整页必须不透明：空白区域代表「远离字形」，需填满白（1.0），
-    // 否则透明像素解码后为黑，会被着色器当成字形内部
-    if (result.mode === 'sdf') buffer.fill(255)
-    for (const glyph of result.glyphs) {
-      if (glyph.page !== pageIndex || !glyph.width || !glyph.height) continue
-      const bitmap = result.pixels.get(glyph.code)
-      if (!bitmap) continue
-      for (let y = 0; y < glyph.height; y++) {
-        for (let x = 0; x < glyph.width; x++) {
-          const value = bitmap.data[y * glyph.width + x]
-          const target = ((glyph.y + y) * page.width + glyph.x + x) * 4
-          if (result.mode === 'bitmap') {
-            buffer[target] = 255
-            buffer[target + 1] = 255
-            buffer[target + 2] = 255
-            buffer[target + 3] = value
-          } else {
-            // 距离场存灰度通道，alpha 全不透明，着色交给 shader
-            buffer[target] = value
-            buffer[target + 1] = value
-            buffer[target + 2] = value
-            buffer[target + 3] = 255
-          }
-        }
-      }
-    }
+    const image = renderFontPageImageData(result, pageIndex)!
     const canvas = document.createElement('canvas')
     canvas.width = page.width
     canvas.height = page.height
-    canvas.getContext('2d')!.putImageData(new ImageData(buffer, page.width, page.height), 0, 0)
+    canvas.getContext('2d')!.putImageData(image, 0, 0)
     const url = canvas.toDataURL('image/png')
     releaseCanvas(canvas)
     return url
@@ -695,13 +1188,19 @@ export function pageFileName(name: string, index: number): string {
 export function buildBmfontText(result: FontBuildResult, name: string): string {
   const lines: string[] = []
   const pad = `${result.padding},${result.padding},${result.padding},${result.padding}`
-  const sdf = result.mode === 'sdf' ? ` distanceField=${result.sdfSpread}` : ''
-  lines.push(`info face="${name}" size=${result.sizePx} bold=0 italic=0 charset="" unicode=1 stretchH=100 smooth=1 aa=1 padding=${pad} spacing=1,1 outline=0${sdf}`)
+  // 相邻字形各自带一圈留白，实际间隙是两倍留白；原实现写死 1,1 与用户参数不符
+  const spacing = `${result.padding * 2},${result.padding * 2}`
+  const sdf = isDistanceFieldMode(result.mode) ? ` distanceField=${result.sdfSpread}` : ''
+  lines.push(`info face="${name}" size=${result.sizePx} bold=0 italic=0 charset="" unicode=1 stretchH=100 smooth=1 aa=1 padding=${pad} spacing=${spacing} outline=0${sdf}`)
   lines.push(`common lineHeight=${result.lineHeight} base=${result.base} scaleW=${result.pages[0]?.width ?? 0} scaleH=${result.pages[0]?.height ?? 0} pages=${result.pages.length} packed=0`)
   result.pages.forEach((_, index) => lines.push(`page id=${index} file="${pageFileName(name, index)}"`))
   lines.push(`chars count=${result.glyphs.length}`)
   for (const glyph of result.glyphs) {
     lines.push(`char id=${glyph.code} x=${glyph.x} y=${glyph.y} width=${glyph.width} height=${glyph.height} xoffset=${glyph.xoffset} yoffset=${glyph.yoffset} xadvance=${glyph.xadvance} page=${glyph.page} chnl=15`)
+  }
+  lines.push(`kernings count=${result.kerning.length}`)
+  for (const pair of result.kerning) {
+    lines.push(`kerning first=${pair.first} second=${pair.second} amount=${pair.amount}`)
   }
   return `${lines.join('\n')}\n`
 }
@@ -710,11 +1209,12 @@ export function buildBmfontText(result: FontBuildResult, name: string): string {
 export function buildBmfontXml(result: FontBuildResult, name: string): string {
   const escape = (value: string): string => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
   const pad = `${result.padding},${result.padding},${result.padding},${result.padding}`
-  const sdf = result.mode === 'sdf' ? ` distanceField="${result.sdfSpread}"` : ''
+  const spacing = `${result.padding * 2},${result.padding * 2}`
+  const sdf = isDistanceFieldMode(result.mode) ? ` distanceField="${result.sdfSpread}"` : ''
   const rows: string[] = []
   rows.push('<?xml version="1.0"?>')
   rows.push('<font>')
-  rows.push(`  <info face="${escape(name)}" size="${result.sizePx}" bold="0" italic="0" charset="" unicode="1" stretchH="100" smooth="1" aa="1" padding="${pad}" spacing="1,1" outline="0"${sdf}/>`)
+  rows.push(`  <info face="${escape(name)}" size="${result.sizePx}" bold="0" italic="0" charset="" unicode="1" stretchH="100" smooth="1" aa="1" padding="${pad}" spacing="${spacing}" outline="0"${sdf}/>`)
   rows.push(`  <common lineHeight="${result.lineHeight}" base="${result.base}" scaleW="${result.pages[0]?.width ?? 0}" scaleH="${result.pages[0]?.height ?? 0}" pages="${result.pages.length}" packed="0"/>`)
   result.pages.forEach((_, index) => rows.push(`  <page id="${index}" file="${escape(pageFileName(name, index))}"/>`))
   rows.push(`  <chars count="${result.glyphs.length}">`)
@@ -722,6 +1222,11 @@ export function buildBmfontXml(result: FontBuildResult, name: string): string {
     rows.push(`    <char id="${glyph.code}" x="${glyph.x}" y="${glyph.y}" width="${glyph.width}" height="${glyph.height}" xoffset="${glyph.xoffset}" yoffset="${glyph.yoffset}" xadvance="${glyph.xadvance}" page="${glyph.page}" chnl="15"/>`)
   }
   rows.push('  </chars>')
+  rows.push(`  <kernings count="${result.kerning.length}">`)
+  for (const pair of result.kerning) {
+    rows.push(`    <kerning first="${pair.first}" second="${pair.second}" amount="${pair.amount}"/>`)
+  }
+  rows.push('  </kernings>')
   rows.push('</font>')
   return `${rows.join('\n')}\n`
 }
@@ -732,14 +1237,17 @@ export function buildFontJson(result: FontBuildResult, name: string): string {
     name,
     size: result.sizePx,
     mode: result.mode,
-    ...(result.mode === 'sdf' ? { sdfSpread: result.sdfSpread } : {}),
+    ...(isDistanceFieldMode(result.mode) ? { sdfSpread: result.sdfSpread, sdfThreshold: result.sdfThreshold } : {}),
     padding: result.padding,
     lineHeight: result.lineHeight,
     base: result.base,
+    letterSpacing: result.letterSpacing,
+    lineSpacing: result.lineSpacing,
     pages: result.pages.map((page, index) => ({
       file: pageFileName(name, index),
       width: page.width,
       height: page.height,
+      occupancy: Math.round((result.pageOccupancy[index] ?? 0) * 1000) / 1000,
     })),
     glyphs: result.glyphs.map((glyph) => ({
       char: glyph.char,
@@ -752,6 +1260,12 @@ export function buildFontJson(result: FontBuildResult, name: string): string {
       xoffset: glyph.xoffset,
       yoffset: glyph.yoffset,
       xadvance: glyph.xadvance,
+    })),
+    kerning: result.kerning.map((pair) => ({
+      char: String.fromCodePoint(pair.first),
+      first: pair.first,
+      second: pair.second,
+      amount: pair.amount,
     })),
   }, null, 2)
 }
