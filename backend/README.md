@@ -107,7 +107,7 @@ server: { proxy: { '/layer-api': { target: 'http://127.0.0.1:8000', changeOrigin
 curl -s http://127.0.0.1:8000/api/health | python3 -m json.tool
 
 JOB=$(curl -s -X POST http://127.0.0.1:8000/api/layers/split \
-  -F "file=@../public/assets/testImages/gameUI.png" \
+  -F "file=@../public/assets/test/testImages/gameUI.png" \
   -F 'params={"classes":[{"label":"按钮","prompt":"button","category":"button"},{"label":"图标","prompt":"icon","category":"icon"},{"label":"文本","prompt":"text","category":"text"},{"label":"面板","prompt":"panel","category":"panel"}],"segmenter":"sam","ocr":true,"background":"inpaint"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')
 
@@ -138,7 +138,7 @@ curl -s -o /tmp/layers.zip "http://127.0.0.1:8000/api/layers/jobs/$JOB/bundle.zi
 接前端之前先把模型调通用这条：
 
 ```bash
-python -m app.pipeline.runner --image ../public/assets/testImages/gameUI.png \
+python -m app.pipeline.runner --image ../public/assets/test/testImages/gameUI.png \
   --prompt "button,icon,text,panel" --max-side 1536
 ```
 

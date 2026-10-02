@@ -306,7 +306,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```bash
 curl -s http://127.0.0.1:8000/api/health | python3 -m json.tool
 JOB=$(curl -s -X POST http://127.0.0.1:8000/api/layers/split \
-  -F "file=@public/assets/testImages/gameUI.png" \
+  -F "file=@public/assets/test/testImages/gameUI.png" \
   -F 'params={"classes":[{"label":"按钮","prompt":"button","category":"button"},{"label":"图标","prompt":"icon","category":"icon"},{"label":"文本","prompt":"text","category":"text"},{"label":"面板","prompt":"panel","category":"panel"}],"segmenter":"sam","ocr":true,"background":"inpaint"}' \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')
 curl -s "http://127.0.0.1:8000/api/layers/jobs/$JOB"            # 轮询到 succeeded
@@ -319,7 +319,7 @@ curl -s -o /tmp/layers.zip "http://127.0.0.1:8000/api/layers/jobs/$JOB/bundle.zi
 
 **3) 前端端到端**（`pnpm dev` → 5173）
 - 未起服务：页面 `.warn` + 启动命令 + 复制按钮，`pageStatus` 显示「服务未连接」，主按钮禁用；起服务后「重试连接」→「待处理」。
-- 导入 `public/assets/testImages/gameUI.png`（1448×1086，已确认存在，< max_side 1536 不缩放）；`gameAssets.png`（1536×1024）验证边界。
+- 导入 `public/assets/test/testImages/gameUI.png`（1448×1086，已确认存在，< max_side 1536 不缩放）；`gameAssets.png`（1536×1024）验证边界。
 - 点「开始拆分」→ `TaskProgress` 依次走 detect→segment→export；图层列表出缩略图（棋盘底）；勾选可见即时反映到右侧合成预览；改名后「导出 ZIP（当前编辑）」解压验证 `layers.json` 是新名字、隐藏层不在 `layers/` 里。
 - 拖拽换序 → 合并选中 → 导出与原图对照（非独占模式重叠区有轻微差异，属预期）。
 - **回灌验证**：在「精灵图」页导入 `gameUI.png`，再导入 ZIP 里的 `atlas.json`，确认出现与图层同名同坐标的帧。
