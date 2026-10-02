@@ -104,23 +104,27 @@ function removeClass(index: number): void {
 </script>
 
 <template>
-  <div class="layer-fields">
+  <div class="flex flex-col">
     <div class="section">
       <h2 class="section-title">类别预设</h2>
-      <div class="preset-row">
+      <div class="flex flex-wrap gap-2">
         <button v-for="preset in PRESETS" :key="preset.name" class="btn btn-ghost" @click="applyPreset(preset)">
           {{ preset.name }}
         </button>
       </div>
     </div>
 
-    <div class="section">
+    <div class="section [&>div+div]:mt-1 [&>div+button]:mt-3">
       <h2 class="section-title">元素类别（{{ enabledCount }} 个启用）</h2>
       <p class="muted">
         提示词必须是英文：模型词表由训练语料决定，中文提示词会静默返回 0 个框。「名称」只影响界面与导出文件名。
       </p>
-      <div v-for="(item, index) in settings.classes" :key="index" class="class-row">
-        <label class="check-row class-toggle">
+      <div
+        v-for="(item, index) in settings.classes"
+        :key="index"
+        class="mt-2 grid grid-cols-[20px_minmax(0,0.9fr)_minmax(0,1fr)_84px_28px] items-center gap-2"
+      >
+        <label class="check-row m-0 gap-0">
           <input
             type="checkbox"
             :checked="item.enabled !== false"
@@ -128,14 +132,14 @@ function removeClass(index: number): void {
             @change="item.enabled = ($event.target as HTMLInputElement).checked"
           />
         </label>
-        <input v-model="item.label" class="input" placeholder="名称" maxlength="48" />
-        <input v-model="item.prompt" class="input mono" placeholder="prompt" maxlength="96" />
-        <select v-model="item.category" class="select">
+        <input v-model="item.label" class="input min-w-0 text-caption" placeholder="名称" maxlength="48" />
+        <input v-model="item.prompt" class="input mono min-w-0 text-caption" placeholder="prompt" maxlength="96" />
+        <select v-model="item.category" class="select min-w-0 text-caption">
           <option v-for="option in CATEGORY_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
         <button class="btn btn-ghost" title="删除该类别" @click="removeClass(index)">×</button>
       </div>
-      <button class="btn full" @click="addClass">添加类别</button>
+      <button class="btn w-full justify-center" @click="addClass">添加类别</button>
       <div v-if="!enabledCount" class="warn">至少启用一个类别，否则服务端会拒绝这次请求。</div>
     </div>
 
@@ -150,19 +154,19 @@ function removeClass(index: number): void {
       <label class="check-row"><input v-model="settings.ocr" type="checkbox" /> 识别文本（用 Florence-2 取紧致笔画，需额外权重）</label>
     </div>
 
-    <div class="section">
+    <div class="section [&_.field+.field]:mt-3 [&_.check-row+.field]:mt-3 [&_p+.field]:mt-3">
       <h2 class="section-title">阈值</h2>
       <label class="field">
         <span class="field-label">检测框阈值 {{ settings.boxThreshold.toFixed(2) }}（越低越容易多框）</span>
-        <input v-model.number="settings.boxThreshold" class="range" type="range" min="0.05" max="0.9" step="0.05" />
+        <input v-model.number="settings.boxThreshold" class="range w-full accent-accent" type="range" min="0.05" max="0.9" step="0.05" />
       </label>
       <label class="field">
         <span class="field-label">文本阈值 {{ settings.textThreshold.toFixed(2) }}（同时决定笔画与底色的灰度差）</span>
-        <input v-model.number="settings.textThreshold" class="range" type="range" min="0.05" max="0.9" step="0.05" />
+        <input v-model.number="settings.textThreshold" class="range w-full accent-accent" type="range" min="0.05" max="0.9" step="0.05" />
       </label>
       <label class="field">
         <span class="field-label">同类别去重 IoU {{ settings.nmsIou.toFixed(2) }}</span>
-        <input v-model.number="settings.nmsIou" class="range" type="range" min="0.3" max="0.95" step="0.05" />
+        <input v-model.number="settings.nmsIou" class="range w-full accent-accent" type="range" min="0.3" max="0.95" step="0.05" />
       </label>
       <label class="field">
         <span class="field-label">最小面积 {{ settings.minArea }} px（小于它的碎块丢弃）</span>
@@ -170,7 +174,7 @@ function removeClass(index: number): void {
       </label>
     </div>
 
-    <div class="section">
+    <div class="section [&_.field+.field]:mt-3 [&_.check-row+.field]:mt-3 [&_p+.field]:mt-3">
       <h2 class="section-title">输出</h2>
       <label class="field">
         <span class="field-label">推理长边上限 {{ settings.maxSide }} px（超出等比缩小，坐标会映射回原图）</span>
@@ -182,7 +186,7 @@ function removeClass(index: number): void {
       </label>
       <label class="field">
         <span class="field-label">羽化半径 {{ settings.feather }} px</span>
-        <input v-model.number="settings.feather" class="range" type="range" min="0" max="8" />
+        <input v-model.number="settings.feather" class="range w-full accent-accent" type="range" min="0" max="8" />
       </label>
       <div class="field">
         <span class="field-label">背景层策略</span>
@@ -201,60 +205,3 @@ function removeClass(index: number): void {
     </div>
   </div>
 </template>
-
-<style scoped>
-.layer-fields {
-  display: flex;
-  flex-direction: column;
-}
-
-.preset-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-}
-
-.class-row {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 0.9fr) minmax(0, 1fr) 84px 28px;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-top: var(--sp-2);
-}
-
-.class-row .input,
-.class-row .select {
-  min-width: 0;
-  height: 28px;
-  font-size: var(--fs-caption);
-}
-
-.class-toggle {
-  margin: 0;
-  gap: 0;
-}
-
-.class-row + .class-row {
-  margin-top: var(--sp-1);
-}
-
-.class-row + .btn {
-  margin-top: var(--sp-3);
-}
-
-.full {
-  width: 100%;
-  justify-content: center;
-}
-
-.range {
-  width: 100%;
-  accent-color: var(--accent);
-}
-
-.section .field + .field,
-.section .check-row + .field,
-.section p + .field {
-  margin-top: var(--sp-3);
-}
-</style>

@@ -119,8 +119,8 @@ function closePipeline(): void {
 </script>
 
 <template>
-  <div class="video-page">
-    <header class="video-toolbar">
+  <div class="video-page flex-1 min-h-0 h-auto overflow-hidden grid grid-rows-[64px_minmax(0,1fr)_250px]">
+    <header class="video-toolbar flex items-center justify-between px-4 border-b border-line bg-surface">
       <div class="brand">
         <span class="brand-mark">▶</span>
         <div>
@@ -137,27 +137,27 @@ function closePipeline(): void {
         <FrameExportActions :frames="selectedFrames" :current-id="previewId" :zip-name="zipName" />
       </div>
     </header>
-    <div class="video-content">
-      <section class="video-preview panel">
-        <div class="panel-title">原视频</div>
+    <div class="video-content grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_280px] gap-px min-h-0 overflow-hidden bg-line">
+      <section class="video-preview panel min-w-0 min-h-0 flex flex-col overflow-hidden bg-stage">
+        <div class="panel-title h-9 flex-none flex items-center gap-2 px-3 text-muted border-b border-line text-caption">原视频</div>
         <div v-if="!workspace.video.sourceUrl" class="empty-state">
           <span class="big">▣</span><strong>导入视频开始抽帧</strong><span>支持浏览器可解码的 MP4 / WebM / MOV</span>
         </div>
         <template v-else>
-          <video ref="video" controls :src="workspace.video.sourceUrl" @loadedmetadata="onMetadata" />
-          <p v-if="workspace.video.error" class="range-error">{{ workspace.video.error }}</p>
+          <video ref="video" controls class="w-full h-[calc(100%-36px)] min-w-0 min-h-0 object-contain" :src="workspace.video.sourceUrl" @loadedmetadata="onMetadata" />
+          <p v-if="workspace.video.error" class="range-error text-danger text-caption">{{ workspace.video.error }}</p>
         </template>
       </section>
-      <section class="animation-panel panel">
-        <div class="panel-title">帧动画预览</div>
+      <section class="animation-panel panel min-w-0 min-h-0 flex flex-col overflow-hidden bg-stage">
+        <div class="panel-title h-9 flex-none flex items-center gap-2 px-3 text-muted border-b border-line text-caption">帧动画预览</div>
         <FramePreviewPlayer v-model:current-id="previewId" :frames="selectedFrames.map((frame) => ({ id: frame.id, url: frameImageUrl(frame) }))" />
       </section>
-      <aside class="video-settings panel">
-        <h2 class="section-title">抽帧设置</h2>
-        <div class="settings-body"><ExtractSettingsFields /></div>
-        <div class="settings-footer">
+      <aside class="video-settings panel flex flex-col overflow-hidden">
+        <h2 class="section-title flex-none m-0 px-4 pt-3.5 pb-3 border-b border-line">抽帧设置</h2>
+        <div class="settings-body flex-1 min-h-0 overflow-auto p-4"><ExtractSettingsFields /></div>
+        <div class="settings-footer flex-none px-4 py-3 border-t border-line">
           <button
-            class="btn btn-primary full"
+            class="btn btn-primary w-full justify-center"
             :disabled="!workspace.video.sourceUrl || workspace.video.status === 'processing'"
             @click="extract"
           >
@@ -166,30 +166,35 @@ function closePipeline(): void {
         </div>
       </aside>
     </div>
-    <section class="frame-strip panel">
-      <div class="strip-head">
-        <h2 class="section-title">帧列表 <span class="badge">{{ selectedCount }} 已选</span></h2>
-        <span class="muted">拖拽调整顺序 · 点击帧后可单独抠图 · 同一裁切区域可批量应用到全部帧 · 动画预览只播放当前勾选帧</span>
+    <section class="frame-strip panel border-t border-line px-4 py-3 min-h-0 overflow-auto">
+      <div class="strip-head flex justify-between items-center gap-3">
+        <h2 class="section-title m-0">帧列表 <span class="badge">{{ selectedCount }} 已选</span></h2>
+        <span class="muted flex-1 text-faint">拖拽调整顺序 · 点击帧后可单独抠图 · 同一裁切区域可批量应用到全部帧 · 动画预览只播放当前勾选帧</span>
         <button class="btn" :disabled="!workspace.video.frames.length" @click="openCrop">批量裁切</button>
         <button class="btn" :disabled="!workspace.video.frames.length" @click="openMatte">移除背景</button>
         <button class="btn" :disabled="!workspace.video.frames.length" @click="openWatermark">去水印</button>
         <button class="btn" :disabled="!workspace.video.frames.length" title="把当前勾选帧（有处理结果用处理图）送入洋葱皮预览模块" @click="sendToOnion">送入洋葱皮</button>
       </div>
-      <div v-if="!workspace.video.frames.length" class="strip-empty">抽取结果会显示在这里</div>
-      <div v-else class="frames">
+      <div v-if="!workspace.video.frames.length" class="strip-empty text-faint py-[30px]">抽取结果会显示在这里</div>
+      <div v-else class="frames flex gap-2.5 overflow-x-auto pt-2 pb-3">
         <button
           v-for="(frame, index) in workspace.video.frames"
           :key="frame.id"
-          class="frame-card"
-          :class="{ active: previewId === frame.id, matted: !!frame.matteUrl, cropped: !!frame.cropUrl, watermarked: !!frame.watermarkUrl }"
+          class="frame-card w-[120px] flex-none p-1 text-left bg-raised border border-line rounded-sm"
+          :class="{
+            'border-accent': previewId === frame.id,
+            'border-accent-border': !!frame.matteUrl,
+            'outline-1 outline-dashed outline-accent outline-offset-[-3px]': !!frame.cropUrl,
+            'outline-1 outline-dotted outline-accent-strong outline-offset-[-3px]': !!frame.watermarkUrl,
+          }"
           draggable="true"
           @dragstart="draggingId = frame.id"
           @dragover.prevent
           @drop.prevent="moveFrame(frame.id)"
           @click="previewId = frame.id"
         >
-          <img :src="frameImageUrl(frame)" :alt="`帧 ${index + 1}`" />
-          <span><input v-model="frame.selected" type="checkbox" @click.stop /><b>#{{ index + 1 }}</b> {{ frame.timestamp.toFixed(2) }}s</span>
+          <img :src="frameImageUrl(frame)" :alt="`帧 ${index + 1}`" class="w-[110px] h-[90px] object-contain bg-checker-a bg-[linear-gradient(45deg,#232734_25%,transparent_25%),linear-gradient(-45deg,transparent_75%,#232734_75%)] [background-size:12px_12px]" />
+          <span class="flex items-center gap-1 pt-[3px] text-faint text-[11px] font-mono leading-[normal]"><input v-model="frame.selected" type="checkbox" @click.stop /><b>#{{ index + 1 }}</b> {{ frame.timestamp.toFixed(2) }}s</span>
         </button>
       </div>
     </section>
@@ -198,7 +203,3 @@ function closePipeline(): void {
     <FramePipelineModal v-if="pipelineOpen" :video="video ?? null" @close="closePipeline" />
   </div>
 </template>
-
-<style scoped>
-.video-page { flex:1; min-height:0; height:auto; overflow:hidden; display:grid; grid-template-rows:64px minmax(0,1fr) 250px; }.video-toolbar { display:flex; align-items:center; justify-content:space-between; padding:0 16px; border-bottom:1px solid var(--border); background:var(--surface); }.video-toolbar h1 { margin:0; font-size:var(--fs-title); }.video-content { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 280px; gap:1px; min-height:0; overflow:hidden; background:var(--border); }.video-preview, .animation-panel { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:var(--stage); }.panel-title { height:36px; flex:none; display:flex; align-items:center; gap:8px; padding:0 12px; color:var(--text-muted); border-bottom:1px solid var(--border); font-size:var(--fs-caption); }.video-preview video { width:100%; height:calc(100% - 36px); min-width:0; min-height:0; object-fit:contain; }.video-settings { display:flex; flex-direction:column; overflow:hidden; }.video-settings .section-title { flex:none; margin:0; padding:14px 16px 12px; border-bottom:1px solid var(--border); }.settings-body { flex:1; min-height:0; overflow:auto; padding:16px; }.settings-footer { flex:none; padding:12px 16px; border-top:1px solid var(--border); }.range-error { color:var(--danger); font-size:var(--fs-caption); }.full { width:100%; justify-content:center; }.frame-strip { border-top:1px solid var(--border); padding:12px 16px; min-height:0; overflow:auto; }.strip-head { display:flex; justify-content:space-between; align-items:center; gap:12px; }.strip-head h2 { margin:0; }.strip-head .muted { flex:1; }.frames { display:flex; gap:10px; overflow-x:auto; padding:8px 0 12px; }.frame-card { width:120px; flex:none; padding:4px; text-align:left; background:var(--surface-raised); border:1px solid var(--border); border-radius:var(--radius-s); }.frame-card.active { border-color:var(--accent); }.frame-card.matted { border-color:var(--accent-border); }.frame-card.cropped { outline:1px dashed var(--accent); outline-offset:-3px; }.frame-card.watermarked { outline:1px dotted var(--accent-strong); outline-offset:-3px; }.frame-card img { width:110px; height:90px; object-fit:contain; background-color:var(--checker-a); background-image:linear-gradient(45deg, #232734 25%, transparent 25%), linear-gradient(-45deg, transparent 75%, #232734 75%); background-size:12px 12px; }.frame-card span { display:flex; align-items:center; gap:4px; padding-top:3px; color:var(--text-faint); font:11px var(--font-mono); }.strip-empty { color:var(--text-faint); padding:30px 0; }.muted { color:var(--text-faint); }
-</style>

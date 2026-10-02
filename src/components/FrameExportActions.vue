@@ -112,12 +112,12 @@ function cancelGif(): void {
 </script>
 
 <template>
-  <div class="export-actions">
-    <div class="export-row">
+  <div class="export-actions inline-flex flex-col gap-2 items-end">
+    <div class="export-row flex items-center gap-2">
       <button class="btn" :disabled="!currentFrame || busy" @click="downloadCurrent">下载当前帧</button>
       <button class="btn" :disabled="!frames.length || busy" @click="exportZip">{{ packing ? '打包中…' : '导出 ZIP' }}</button>
       <button class="btn" :disabled="!frames.length || busy" @click="exportGif">{{ encodingGif ? '生成中…' : '导出 GIF' }}</button>
-      <span v-if="error" class="export-error">{{ error }}</span>
+      <span v-if="error" class="export-error text-danger text-caption">{{ error }}</span>
     </div>
     <TaskProgress
       v-if="encodingGif"
@@ -130,23 +130,3 @@ function cancelGif(): void {
     />
   </div>
 </template>
-
-<style scoped>
-.export-actions {
-  display: inline-flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  align-items: flex-end;
-}
-
-.export-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.export-error {
-  color: var(--danger);
-  font-size: var(--fs-caption);
-}
-</style>

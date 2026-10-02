@@ -1,5 +1,7 @@
 /* ===== 设计令牌：AtlasSlice 图集切片 =====
-   深石墨蓝基底 + 单一琥珀强调色，精密仪器气质 */
+   深石墨蓝基底 + 单一琥珀强调色，精密仪器气质
+   只声明 CSS 变量：Tailwind 主题（tailwind.css 的 @theme）映射这些变量，
+   重置与组件类分别落在 @layer base / @layer components。 */
 
 :root {
   /* 色板 */
@@ -48,67 +50,4 @@
 
   --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5);
   --focus-ring: 0 0 0 2px var(--accent-dim), 0 0 0 1px var(--accent-border);
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#app {
-  height: 100%;
-  margin: 0;
-}
-
-body {
-  min-width: 1400px;
-  font-family: var(--font-sans);
-  font-size: var(--fs-body);
-  line-height: 1.5;
-  color: var(--text);
-  background: var(--bg);
-  -webkit-font-smoothing: antialiased;
-}
-
-button {
-  font-family: inherit;
-  font-size: inherit;
-  color: inherit;
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-
-input,
-select {
-  font-family: inherit;
-  font-size: inherit;
-  color: var(--text);
-}
-
-:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 5px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
-  background-clip: content-box;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
 }

@@ -186,43 +186,43 @@ onBeforeUnmount(() => {
   <div
     v-if="frames.length"
     ref="panelRef"
-    class="anim-preview"
-    :class="{ dragged: pos }"
+    class="anim-preview fixed right-5 bottom-5 z-50 w-[232px] flex flex-col gap-2 px-3 py-2 bg-raised border border-line rounded-sm [box-shadow:0_8px_24px_rgb(0_0_0_/_35%)]"
+    :class="{ 'right-auto bottom-auto': pos }"
     :style="pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : undefined"
   >
     <div
-      class="anim-header"
+      class="anim-header flex items-baseline justify-between gap-2 cursor-grab select-none touch-none active:cursor-grabbing"
       title="拖动移动面板"
       @pointerdown="onDragStart"
       @pointermove="onDragMove"
       @pointerup="onDragEnd"
       @pointercancel="onDragEnd"
     >
-      <strong>动画预览</strong>
-      <span class="mono" :title="frames[frameIndex]?.name">{{ frameIndex + 1 }} / {{ frames.length }}</span>
+      <strong class="text-caption">动画预览</strong>
+      <span class="mono min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" :title="frames[frameIndex]?.name">{{ frameIndex + 1 }} / {{ frames.length }}</span>
     </div>
-    <div class="anim-stage">
-      <canvas ref="canvasRef" class="anim-canvas"></canvas>
+    <div class="anim-stage flex items-center justify-center min-h-[72px] p-1 border border-line rounded-sm bg-[repeating-conic-gradient(var(--stage)_0%_25%,transparent_0%_50%)] bg-[length:16px_16px]">
+      <canvas ref="canvasRef" class="anim-canvas max-w-full max-h-[110px] [image-rendering:pixelated]"></canvas>
     </div>
-    <div class="anim-controls">
-      <button class="btn btn-play" @click="playing = !playing">{{ playing ? '暂停' : '播放' }}</button>
-      <label class="anim-fps">
+    <div class="anim-controls flex items-center gap-2">
+      <button class="btn btn-play flex-none" @click="playing = !playing">{{ playing ? '暂停' : '播放' }}</button>
+      <label class="anim-fps flex items-center gap-1 flex-1 min-w-0">
         <span class="muted">FPS</span>
-        <input v-model.number="fps" class="input" type="number" min="1" max="30" @change="clampFps" />
+        <input v-model.number="fps" class="input w-full" type="number" min="1" max="30" @change="clampFps" />
       </label>
-      <label class="anim-check"><input v-model="loop" type="checkbox" /> 循环</label>
+      <label class="anim-check flex items-center gap-1 whitespace-nowrap text-caption"><input v-model="loop" type="checkbox" /> 循环</label>
     </div>
-    <div class="anim-selects">
-      <label v-if="Object.keys(animGroups).length" class="anim-order">
+    <div class="anim-selects flex flex-col gap-2">
+      <label v-if="Object.keys(animGroups).length" class="anim-order flex items-center gap-2">
         <span class="muted">动画</span>
-        <select v-model="activeAnim" class="select">
+        <select v-model="activeAnim" class="select flex-1">
           <option value="">全部帧</option>
           <option v-for="(names, base) in animGroups" :key="base" :value="base">{{ base }}（{{ names.length }}）</option>
         </select>
       </label>
-      <label class="anim-order">
+      <label class="anim-order flex items-center gap-2">
         <span class="muted">帧序</span>
-        <select v-model="order" class="select" :disabled="Boolean(activeAnim)">
+        <select v-model="order" class="select flex-1" :disabled="Boolean(activeAnim)">
           <option value="name">按文件名</option>
           <option value="placement">按落位顺序</option>
         </select>
@@ -230,25 +230,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* 右下角悬浮面板，不占用主区排版；拖动后转为绝对坐标定位 */
-.anim-preview { position: fixed; right: 20px; bottom: 20px; z-index: 50; width: 232px; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-s); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); }
-.anim-preview.dragged { right: auto; bottom: auto; }
-/* 头部即拖动手柄 */
-.anim-header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); cursor: grab; user-select: none; touch-action: none; }
-.anim-header:active { cursor: grabbing; }
-.anim-header strong { font-size: var(--fs-caption); }
-.anim-header .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-/* 棋盘底 + 像素级放大展示，变尺寸帧居中不跳动 */
-.anim-stage { display: flex; align-items: center; justify-content: center; min-height: 72px; padding: var(--sp-1); border: 1px solid var(--border); border-radius: var(--radius-s); background: repeating-conic-gradient(var(--stage) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px; }
-.anim-canvas { max-width: 100%; max-height: 110px; image-rendering: pixelated; }
-.anim-controls { display: flex; align-items: center; gap: var(--sp-2); }
-.btn-play { flex: none; padding-inline: var(--sp-3); }
-.anim-fps { display: flex; align-items: center; gap: var(--sp-1); flex: 1; min-width: 0; }
-.anim-fps .input { width: 100%; min-width: 0; }
-.anim-check { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: var(--fs-caption); }
-.anim-order { display: flex; align-items: center; gap: var(--sp-2); }
-.anim-order .select { flex: 1; min-width: 0; }
-.anim-selects { display: flex; flex-direction: column; gap: var(--sp-2); }
-</style>

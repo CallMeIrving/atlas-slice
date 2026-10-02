@@ -1,0 +1,361 @@
+/* ===== Tailwind CSS 入口 =====
+   分层导入：theme（设计令牌）/ base（重置）/ components（共享控件类）/ utilities（工具类）。
+   这里显式跳过 preflight，改用项目原有的精简重置，保证增量迁移期间旧组件样式零回归。 */
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/* 设计令牌：CSS 变量仍是唯一数据源，Tailwind 主题仅做映射，保留运行时换肤能力 */
+@import './tokens.css';
+
+@source '../**/*.{vue,ts}';
+
+@theme inline {
+  /* 色板 → bg-canvas / text-ink / border-line … */
+  --color-canvas: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+  --color-hover: var(--surface-hover);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-dim: var(--accent-dim);
+  --color-accent-border: var(--accent-border);
+  --color-danger: var(--danger);
+  --color-stage: var(--stage);
+  --color-checker-a: var(--checker-a);
+  --color-checker-b: var(--checker-b);
+
+  /* 字号 → text-caption / text-body / text-title / text-head */
+  --text-caption: var(--fs-caption);
+  --text-body: var(--fs-body);
+  --text-title: var(--fs-title);
+  --text-head: var(--fs-head);
+
+  /* 圆角 → rounded-sm / rounded-md */
+  --radius-sm: var(--radius-s);
+  --radius-md: var(--radius-m);
+
+  /* 阴影 → shadow-popover */
+  --shadow-popover: var(--shadow-pop);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    min-width: 1400px;
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  input,
+  select {
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--text);
+  }
+
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-strong);
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* ---------- 布局骨架 ---------- */
+  .app {
+    @apply flex h-full min-w-350 flex-col overflow-hidden;
+  }
+
+  .workspace {
+    @apply grid min-h-0 flex-1;
+    grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--inspector-w);
+  }
+
+  .panel {
+    @apply border-line bg-surface;
+  }
+
+  /* ---------- 顶部栏 ---------- */
+  .topbar {
+    @apply z-5 flex h-(--bar-h) flex-none items-center gap-4 border-b border-line bg-surface px-4;
+  }
+
+  .brand {
+    @apply flex min-w-0 items-center gap-3;
+  }
+
+  .brand-mark {
+    @apply size-8 flex-none cursor-default rounded-sm border border-line object-cover;
+  }
+
+  .brand h1 {
+    @apply m-0 text-title font-semibold tracking-[0.02em] whitespace-nowrap;
+  }
+
+  .brand-sub {
+    @apply m-0 max-w-105 overflow-hidden font-mono text-caption text-faint text-ellipsis whitespace-nowrap;
+  }
+
+  .topbar-actions {
+    @apply ml-auto flex items-center gap-2;
+  }
+
+  /* ---------- 按钮 ---------- */
+  .btn {
+    @apply inline-flex h-7.5 items-center gap-1.5 rounded-sm border border-line bg-raised px-3 text-body text-ink whitespace-nowrap transition-colors;
+  }
+
+  .btn:hover:not(:disabled) {
+    @apply border-line-strong bg-hover;
+  }
+
+  .btn:disabled {
+    @apply cursor-not-allowed opacity-45;
+  }
+
+  .btn-primary {
+    @apply border-accent bg-accent font-semibold text-[#1a140a];
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    @apply border-accent-strong bg-accent-strong;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent;
+  }
+
+  .btn-danger {
+    @apply border-line text-danger;
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    @apply border-danger;
+  }
+
+  .btn-icon {
+    @apply w-7.5 justify-center px-0;
+  }
+
+  /* ---------- 分段控件 ---------- */
+  .seg {
+    @apply inline-flex overflow-hidden rounded-sm border border-line bg-raised;
+  }
+
+  .seg-item {
+    @apply inline-flex h-7 items-center border-r border-line px-3 text-body text-muted;
+  }
+
+  .seg-item:last-child {
+    @apply border-r-0;
+  }
+
+  .seg-item.active {
+    @apply bg-accent-dim text-accent-strong;
+  }
+
+  .seg-item:hover:not(.active) {
+    @apply bg-hover text-ink;
+  }
+
+  /* ---------- 表单 ---------- */
+  .field {
+    @apply flex flex-col gap-1;
+  }
+
+  .field-label {
+    @apply text-caption tracking-[0.04em] text-faint;
+  }
+
+  .input,
+  .select {
+    @apply h-7 min-w-0 rounded-sm border border-line bg-raised px-2 text-body text-ink;
+  }
+
+  .input:focus,
+  .select:focus {
+    @apply border-accent-border;
+    box-shadow: var(--focus-ring);
+  }
+
+  .input[type='number'] {
+    @apply w-19 font-mono;
+  }
+
+  .check-row {
+    @apply flex cursor-pointer items-center gap-2 text-body text-muted;
+  }
+
+  .check-row input {
+    accent-color: var(--accent);
+  }
+
+  /* ---------- 面板通用 ---------- */
+  .section {
+    @apply border-b border-line px-4 py-3;
+  }
+
+  .section:last-child {
+    @apply border-b-0;
+  }
+
+  .section-title {
+    @apply mb-2 text-caption font-semibold tracking-[0.08em] text-faint uppercase;
+  }
+
+  .muted {
+    @apply text-muted;
+  }
+
+  /* 提示条：许可提醒、模型不可用等需要醒目但不打断流程的说明 */
+  .warn {
+    @apply mb-2 rounded-md border border-[#b45309] bg-[rgb(251_191_36/0.08)] px-2.5 py-2 text-caption text-[#fbbf24];
+  }
+
+  .faint {
+    @apply text-faint;
+  }
+
+  .mono {
+    @apply font-mono text-caption;
+  }
+
+  .kbd {
+    @apply rounded-[3px] border border-line-strong border-b-2 px-1.25 py-px font-mono text-[11px] text-muted;
+  }
+
+  .badge {
+    @apply inline-block rounded-[3px] bg-hover px-1.5 py-px font-mono text-[11px] text-muted;
+  }
+
+  .badge-accent {
+    @apply bg-accent-dim text-accent-strong;
+  }
+
+  /* ---------- 空状态 / 提示 ---------- */
+  .empty-state {
+    @apply flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-faint;
+  }
+
+  .empty-state .big {
+    @apply text-[20px] text-muted;
+  }
+
+  /* ---------- 全局浮层 ---------- */
+  .toast-wrap {
+    @apply fixed left-1/2 z-60 flex -translate-x-1/2 flex-col items-center gap-2;
+    top: calc(var(--bar-h) + 10px);
+  }
+
+  .toast {
+    @apply max-w-[60vw] rounded-md border border-line-strong bg-raised px-4 py-2 text-body shadow-popover;
+  }
+
+  .toast-error {
+    @apply border-danger text-danger;
+  }
+
+  .progress-bar {
+    @apply fixed top-(--bar-h) left-0 z-55 h-0.5 bg-accent transition-[width] duration-150;
+  }
+
+  /* ---------- 弹窗外壳（各功能弹窗共用，个别弹窗可在自身模板中覆盖宽度等） ---------- */
+  .modal-backdrop {
+    @apply fixed inset-0 z-20 grid place-items-center bg-[rgb(8_10_14_/_0.7)] p-6;
+  }
+
+  .modal {
+    @apply w-[min(460px,calc(100vw-48px))] rounded-md border border-line-strong bg-surface shadow-popover;
+  }
+
+  .modal-head,
+  .modal-foot {
+    @apply flex items-center justify-between gap-3 px-5 py-4;
+  }
+
+  .modal-head {
+    @apply border-b border-line;
+  }
+
+  .modal-head h2 {
+    @apply m-0 text-head;
+  }
+
+  .modal-head p {
+    @apply mt-0.5 mb-0 text-caption;
+  }
+
+  .modal-close {
+    @apply text-[20px] text-muted;
+  }
+
+  .modal-body {
+    @apply p-5;
+  }
+
+  .modal-help {
+    @apply mt-0 mb-4 text-muted;
+  }
+
+  .modal-foot {
+    @apply justify-end border-t border-line;
+  }
+
+  .field-row {
+    @apply flex items-center gap-2;
+  }
+
+  .field-row .input {
+    @apply w-auto flex-1;
+  }
+}

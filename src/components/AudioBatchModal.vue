@@ -82,7 +82,7 @@ async function start(): Promise<void> {
 
 <template>
   <div class="modal-backdrop" @click.self="!running && emit('close')">
-    <div class="modal wide">
+    <div class="modal w-[min(920px,calc(100vw-48px))]">
       <header class="modal-head">
         <div>
           <h2>批量编辑</h2>
@@ -91,7 +91,7 @@ async function start(): Promise<void> {
         <button class="modal-close" :disabled="running" @click="emit('close')">×</button>
       </header>
 
-      <div class="modal-body">
+      <div class="modal-body max-h-[min(68vh,720px)] overflow-auto">
         <TaskProgress
           v-if="running || audioState.batch.error"
           :running="running"
@@ -103,10 +103,12 @@ async function start(): Promise<void> {
           @cancel="cancelBatch()"
         />
 
-        <div class="grid">
-          <div class="col">
-            <section class="block">
-              <h3 class="block-title">平台预设</h3>
+        <div
+          class="grid grid-cols-[repeat(2,minmax(0,1fr))] items-start gap-5 [&_.field-row]:items-end [&_.field-row]:gap-3 [&_.field-row_.field]:min-w-0 [&_.field-row_.field]:flex-1 [&_.field-row_.select]:flex-1 [&_.field_.input]:w-full [&_.field_.select]:w-full [&_.check-row+.field]:mt-1 [&_.check-row+.field-row]:mt-1 [&_.field+.field]:mt-1 [&_.field+.field-row]:mt-1 [&_.field-row+.field]:mt-1 [&_.field-row+.field-row]:mt-1 [&_.field-row+.check-row]:mt-1"
+        >
+          <div class="flex min-w-0 flex-col gap-4">
+            <section class="flex flex-col gap-2">
+              <h3 class="m-0 border-b border-line pb-2 text-title">平台预设</h3>
               <label class="field">
                 <span class="field-label">选择规范</span>
                 <select class="select" :value="audioState.platformPresetId" @change="onPlatformChange">
@@ -116,47 +118,47 @@ async function start(): Promise<void> {
                   </option>
                 </select>
               </label>
-              <p class="muted small">{{ presetDescription }}</p>
+              <p class="muted text-caption">{{ presetDescription }}</p>
             </section>
 
-            <section class="block">
-              <h3 class="block-title">我的预设</h3>
+            <section class="flex flex-col gap-2">
+              <h3 class="m-0 border-b border-line pb-2 text-title">我的预设</h3>
               <div class="field-row">
                 <input v-model="presetName" class="input" type="text" placeholder="预设名称" />
                 <button class="btn" :disabled="!presetName.trim()" @click="onSavePreset">保存</button>
               </div>
-              <p v-if="!audioState.userPresets.length" class="muted small">
+              <p v-if="!audioState.userPresets.length" class="muted text-caption">
                 保存后可一键恢复整套处理链与变体配置。
               </p>
-              <ul v-else class="preset-list">
-                <li v-for="preset in audioState.userPresets" :key="preset.id" class="preset-row">
-                  <span class="preset-name" :title="preset.name">{{ preset.name }}</span>
+              <ul v-else class="m-0 flex list-none flex-col gap-2 p-0">
+                <li v-for="preset in audioState.userPresets" :key="preset.id" class="flex items-center gap-2">
+                  <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="preset.name">{{ preset.name }}</span>
                   <button class="btn" @click="applyUserPreset(preset.id)">套用</button>
                   <button class="btn btn-icon btn-danger" title="删除" @click="deleteUserPreset(preset.id)">×</button>
                 </li>
               </ul>
             </section>
 
-            <section class="block">
-              <h3 class="block-title">处理链（固定顺序）</h3>
-              <div v-for="(step, i) in CHAIN_ORDER" :key="step.key" class="chain-step">
+            <section class="flex flex-col gap-2">
+              <h3 class="m-0 border-b border-line pb-2 text-title">处理链（固定顺序）</h3>
+              <div v-for="(step, i) in CHAIN_ORDER" :key="step.key" class="border-t border-line py-2 [&:first-of-type]:border-t-0">
                 <label class="check-row">
                   <input v-model="audioState.chain[step.key].enabled" type="checkbox" />
-                  <span class="chain-index">{{ i + 1 }}</span>
+                  <span class="inline-flex h-4 w-4 flex-none items-center justify-center rounded-[3px] bg-hover font-mono text-[10px] text-faint">{{ i + 1 }}</span>
                   <span>{{ step.label }}</span>
                 </label>
 
-                <div v-if="step.key === 'crop'" class="chain-body">
+                <div v-if="step.key === 'crop'" class="m-0 mt-2 ml-6 flex flex-col gap-2">
                   <div class="field-row">
                     <label class="field"><span class="field-label">起点(s)</span>
                       <input v-model.number="audioState.chain.crop.startSec" class="input" type="number" min="0" step="0.01" /></label>
                     <label class="field"><span class="field-label">终点(s)</span>
                       <input v-model.number="audioState.chain.crop.endSec" class="input" type="number" min="0" step="0.01" /></label>
                   </div>
-                  <p class="muted small">终点填 0 表示裁到结尾。</p>
+                  <p class="muted text-caption">终点填 0 表示裁到结尾。</p>
                 </div>
 
-                <div v-else-if="step.key === 'trimSilence'" class="chain-body">
+                <div v-else-if="step.key === 'trimSilence'" class="m-0 mt-2 ml-6 flex flex-col gap-2">
                   <div class="field-row">
                     <label class="field"><span class="field-label">阈值(dBFS)</span>
                       <input v-model.number="audioState.chain.trimSilence.thresholdDb" class="input" type="number" step="1" /></label>
@@ -167,12 +169,12 @@ async function start(): Promise<void> {
                   </div>
                 </div>
 
-                <div v-else-if="step.key === 'speed'" class="chain-body">
+                <div v-else-if="step.key === 'speed'" class="m-0 mt-2 ml-6 flex flex-col gap-2">
                   <label class="field"><span class="field-label">速率倍率（音高联动）</span>
                     <input v-model.number="audioState.chain.speed.factor" class="input" type="number" min="0.25" max="4" step="0.05" /></label>
                 </div>
 
-                <div v-else-if="step.key === 'fade'" class="chain-body">
+                <div v-else-if="step.key === 'fade'" class="m-0 mt-2 ml-6 flex flex-col gap-2">
                   <div class="field-row">
                     <label class="field"><span class="field-label">淡入(s)</span>
                       <input v-model.number="audioState.chain.fade.inSec" class="input" type="number" min="0" step="0.005" /></label>
@@ -181,7 +183,7 @@ async function start(): Promise<void> {
                   </div>
                 </div>
 
-                <div v-else-if="step.key === 'channels'" class="chain-body">
+                <div v-else-if="step.key === 'channels'" class="m-0 mt-2 ml-6 flex flex-col gap-2">
                   <label class="field"><span class="field-label">目标</span>
                     <select v-model.number="audioState.chain.channels.target" class="select">
                       <option :value="1">单声道</option>
@@ -189,14 +191,14 @@ async function start(): Promise<void> {
                     </select></label>
                 </div>
 
-                <div v-else-if="step.key === 'resample'" class="chain-body">
+                <div v-else-if="step.key === 'resample'" class="m-0 mt-2 ml-6 flex flex-col gap-2">
                   <label class="field"><span class="field-label">目标采样率</span>
                     <select v-model.number="audioState.chain.resample.targetRate" class="select">
                       <option v-for="rate in SAMPLE_RATES" :key="rate" :value="rate">{{ rate }} Hz</option>
                     </select></label>
                 </div>
 
-                <div v-else-if="step.key === 'normalize'" class="chain-body">
+                <div v-else-if="step.key === 'normalize'" class="m-0 mt-2 ml-6 flex flex-col gap-2">
                   <label class="field"><span class="field-label">方式</span>
                     <select v-model="audioState.chain.normalize.mode" class="select">
                       <option value="lufs">响度标准化（EBU R128）</option>
@@ -212,18 +214,18 @@ async function start(): Promise<void> {
                     <input v-model.number="audioState.chain.normalize.targetPeakDb" class="input" type="number" step="0.5" /></label>
                 </div>
 
-                <div v-else-if="step.key === 'limiter'" class="chain-body">
+                <div v-else-if="step.key === 'limiter'" class="m-0 mt-2 ml-6 flex flex-col gap-2">
                   <label class="field"><span class="field-label">上限(dBFS)</span>
                     <input v-model.number="audioState.chain.limiter.ceilingDb" class="input" type="number" step="0.5" /></label>
                 </div>
               </div>
-              <p class="muted small">各步骤按上方顺序依次作用，未勾选的步骤会被跳过。</p>
+              <p class="muted text-caption">各步骤按上方顺序依次作用，未勾选的步骤会被跳过。</p>
             </section>
           </div>
 
-          <div class="col">
-            <section class="block">
-              <h3 class="block-title">变体生成</h3>
+          <div class="flex min-w-0 flex-col gap-4">
+            <section class="flex flex-col gap-2">
+              <h3 class="m-0 border-b border-line pb-2 text-title">变体生成</h3>
               <label class="check-row">
                 <input v-model="audioState.variants.enabled" type="checkbox" />
                 <span>为每条素材生成多个微变体</span>
@@ -256,8 +258,8 @@ async function start(): Promise<void> {
               </template>
             </section>
 
-            <section class="block">
-              <h3 class="block-title">导出设置（批量）</h3>
+            <section class="flex flex-col gap-2">
+              <h3 class="m-0 border-b border-line pb-2 text-title">导出设置（批量）</h3>
               <label class="field"><span class="field-label">格式</span>
                 <select v-model="audioState.exportSettings.format" class="select">
                   <option
@@ -292,13 +294,13 @@ async function start(): Promise<void> {
                 <span class="field-label">命名模板</span>
                 <input
                   v-model="audioState.exportSettings.nameTemplate"
-                  class="input template-input"
+                  class="input font-mono text-caption"
                   type="text"
                   spellcheck="false"
                   placeholder="{name}_{variant}"
                 />
               </label>
-              <p class="muted small">
+              <p class="muted text-caption">
                 占位符：{name} {preset} {variant} {index} {ext} · 预览：<span class="mono">{{ templatePreview }}</span>
               </p>
               <label class="check-row">
@@ -307,40 +309,40 @@ async function start(): Promise<void> {
               </label>
             </section>
 
-            <section class="block">
-              <h3 class="block-title">质检与命名规范</h3>
+            <section class="flex flex-col gap-2">
+              <h3 class="m-0 border-b border-line pb-2 text-title">质检与命名规范</h3>
               <label class="field"><span class="field-label">单条时长上限(s)</span>
                 <input v-model.number="audioState.maxDurationSec" class="input" type="number" min="1" /></label>
               <label class="field"><span class="field-label">素材名规范（正则）</span>
                 <input
                   v-model="audioState.namingPattern"
-                  class="input template-input"
+                  class="input font-mono text-caption"
                   type="text"
                   spellcheck="false"
                   placeholder="^[a-z0-9_\-]+$"
                 /></label>
-              <p class="muted small">
+              <p class="muted text-caption">
                 导入时按此校验素材名，不符合规范的条目会在素材列表中提示；时长上限用于结果质检。
               </p>
             </section>
 
-            <section class="block">
-              <h3 class="block-title">本次输出</h3>
-              <dl class="summary">
+            <section class="flex flex-col gap-2">
+              <h3 class="m-0 border-b border-line pb-2 text-title">本次输出</h3>
+              <dl class="m-0 grid grid-cols-[repeat(2,minmax(0,1fr))] gap-3 [&_dt]:m-0 [&_dt]:text-caption [&_dt]:text-faint [&_dd]:mt-0.5 [&_dd]:mb-0">
                 <div><dt>已勾选素材</dt><dd class="mono">{{ selectedCount }} / {{ audioState.assets.length }} 条</dd></div>
                 <div><dt>预设</dt><dd class="mono">{{ presetLabel() }}</dd></div>
                 <div><dt>导出格式</dt><dd class="mono">{{ formatLabel }}</dd></div>
                 <div><dt>预期文件</dt><dd class="mono">{{ expectedCount }} 个</dd></div>
               </dl>
               <p v-if="!selectedCount" class="warn">素材库中还没有勾选任何素材，请先勾选后再处理。</p>
-              <p class="muted small">合成音频的单文件导出在右侧「合成导出」中设置，与这里互不影响。</p>
+              <p class="muted text-caption">合成音频的单文件导出在右侧「合成导出」中设置，与这里互不影响。</p>
             </section>
           </div>
         </div>
       </div>
 
       <footer class="modal-foot">
-        <p v-if="audioState.notice" class="muted small foot-note">{{ audioState.notice }}</p>
+        <p v-if="audioState.notice" class="muted m-0 mr-auto text-caption">{{ audioState.notice }}</p>
         <button class="btn" :disabled="running" @click="emit('close')">关闭</button>
         <button
           class="btn btn-primary"
@@ -354,132 +356,3 @@ async function start(): Promise<void> {
     </div>
   </div>
 </template>
-
-<style scoped>
-.modal.wide {
-  width: min(920px, calc(100vw - 48px));
-}
-.modal-body {
-  max-height: min(68vh, 720px);
-  overflow: auto;
-}
-.foot-note {
-  margin: 0 auto 0 0;
-}
-.grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--sp-5);
-  align-items: start;
-}
-.col {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-  min-width: 0;
-}
-.block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-.block-title {
-  margin: 0;
-  padding-bottom: var(--sp-2);
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-title);
-}
-.small {
-  font-size: var(--fs-caption);
-}
-.template-input {
-  font-family: var(--font-mono);
-  font-size: var(--fs-caption);
-}
-.field-row {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--sp-3);
-}
-.field-row .field {
-  flex: 1;
-  min-width: 0;
-}
-.field-row .input,
-.field-row .select {
-  flex: 1;
-} 
-.field .input,
-.field .select {
-  width: 100%;
-}
-.check-row + .field,
-.check-row + .field-row,
-.field + .field,
-.field + .field-row,
-.field-row + .field,
-.field-row + .field-row,
-.field-row + .check-row {
-  margin-top: var(--sp-1);
-}
-.chain-step {
-  padding: var(--sp-2) 0;
-  border-top: 1px solid var(--border);
-}
-.chain-step:first-of-type {
-  border-top: none;
-}
-.chain-index {
-  width: 16px;
-  height: 16px;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 3px;
-  background: var(--surface-hover);
-  font: 10px var(--font-mono);
-  color: var(--text-faint);
-}
-.chain-body {
-  margin: var(--sp-2) 0 0 24px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-.preset-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-.preset-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-.preset-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-caption);
-}
-.summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-3);
-  margin: 0;
-}
-.summary dt {
-  margin: 0;
-  font-size: var(--fs-caption);
-  color: var(--text-faint);
-}
-.summary dd {
-  margin: 2px 0 0;
-}
-</style>

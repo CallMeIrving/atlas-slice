@@ -183,14 +183,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="crop-editor">
-    <div class="crop-compare" :class="{ single: !props.showPreview }">
-      <figure class="crop-pane">
+  <div class="flex flex-col gap-4">
+    <div
+      class="grid gap-3"
+      :class="props.showPreview ? 'grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]' : 'grid-cols-[minmax(0,1fr)]'"
+    >
+      <figure class="m-0 flex flex-col gap-2 [&_figcaption]:text-caption">
         <figcaption class="faint">{{ props.caption }}</figcaption>
-        <div ref="stage" class="crop-stage" :class="{ dragging }" @pointerdown="onStageDown">
+        <div ref="stage" class="group relative flex h-80 cursor-crosshair touch-none items-center justify-center overflow-hidden rounded-sm border border-line bg-stage p-2" :class="{ dragging }" @pointerdown="onStageDown">
           <img
             v-if="sourceUrl"
             ref="sourceImage"
+            class="block max-h-full max-w-full object-contain select-none [-webkit-user-drag:none]"
             :src="sourceUrl"
             alt="框选原图"
             draggable="false"
@@ -198,27 +202,36 @@ onBeforeUnmount(() => {
             @error="errorText = '图像加载失败'"
           />
           <span v-else class="faint">暂无可框选的图像</span>
-          <div class="crop-box" :style="boxStyle" @pointerdown.stop="onBoxDown">
+          <div class="absolute cursor-move touch-none border border-accent shadow-[0_0_0_9999px_rgb(8_10_14_/_0.55)] group-[.dragging]:shadow-[0_0_0_9999px_rgb(8_10_14_/_0.68)]" :style="boxStyle" @pointerdown.stop="onBoxDown">
             <span
               v-for="handle in handles"
               :key="handle"
-              class="crop-handle"
-              :class="`h-${handle}`"
+              class="absolute -mt-[5px] -ml-[5px] size-2.5 rounded-[2px] border border-[#1a140a] bg-accent"
+              :class="{
+                'left-0 top-0 cursor-nwse-resize': handle === 'nw',
+                'left-1/2 top-0 cursor-ns-resize': handle === 'n',
+                'left-full top-0 cursor-nesw-resize': handle === 'ne',
+                'left-full top-1/2 cursor-ew-resize': handle === 'e',
+                'left-full top-full cursor-nwse-resize': handle === 'se',
+                'left-1/2 top-full cursor-ns-resize': handle === 's',
+                'left-0 top-full cursor-nesw-resize': handle === 'sw',
+                'left-0 top-1/2 cursor-ew-resize': handle === 'w',
+              }"
               @pointerdown.stop="onHandleDown(handle, $event)"
             ></span>
           </div>
         </div>
       </figure>
-      <figure v-if="props.showPreview" class="crop-pane">
+      <figure v-if="props.showPreview" class="m-0 flex flex-col gap-2 [&_figcaption]:text-caption">
         <figcaption class="faint">区域预览 · {{ Math.round(box.width) }} × {{ Math.round(box.height) }} px</figcaption>
-        <div class="crop-stage checker">
-          <canvas ref="previewCanvas" aria-label="区域预览"></canvas>
+        <div class="relative flex h-80 cursor-default touch-none items-center justify-center overflow-hidden rounded-sm border border-line bg-checker-b p-2 [background-image:linear-gradient(45deg,var(--checker-a)_25%,transparent_25%),linear-gradient(-45deg,var(--checker-a)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--checker-a)_75%),linear-gradient(-45deg,transparent_75%,var(--checker-a)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px]">
+          <canvas ref="previewCanvas" class="block max-h-full max-w-full object-contain select-none [-webkit-user-drag:none]" aria-label="区域预览"></canvas>
         </div>
       </figure>
     </div>
 
-    <div class="crop-fields">
-      <div class="crop-row">
+    <div class="flex flex-col gap-3 [&_.input]:w-full">
+      <div class="grid grid-cols-4 items-end gap-x-4 gap-y-3">
         <label class="field">
           <span class="field-label">X</span>
           <input v-model.number="box.x" class="input" type="number" min="0" step="1" :max="natural.width" @change="normalizeBox" />
@@ -236,10 +249,10 @@ onBeforeUnmount(() => {
           <input v-model.number="box.height" class="input" type="number" min="1" step="1" :max="natural.height" @change="normalizeBox" />
         </label>
       </div>
-      <div class="crop-row crop-tools">
+      <div class="flex items-end gap-4 [&_.field]:flex-none">
         <label v-if="props.showRatio" class="field">
           <span class="field-label">宽高比</span>
-          <select v-model.number="ratio" class="select ratio-select" @change="applyRatio">
+          <select v-model.number="ratio" class="select w-[130px]" @change="applyRatio">
             <option v-for="item in RATIO_PRESETS" :key="item.label" :value="item.value">{{ item.label }}</option>
           </select>
         </label>
@@ -260,148 +273,13 @@ onBeforeUnmount(() => {
     </div>
 
     <slot name="help">
-      <p class="modal-help">
+      <p class="modal-help m-0">
         裁切区域以帧图像像素为单位，会按同一坐标应用到全部帧；已抠图的帧在抠图结果上裁剪，因此抠图后再裁切也不会丢失透明背景。
         输入框与拖拽会实时同步，右侧预览即时可见。整帧范围等价于取消裁切。
       </p>
     </slot>
 
-    <p v-if="errorText" class="crop-error">{{ errorText }}</p>
+    <p v-if="errorText" class="m-0 text-caption text-danger">{{ errorText }}</p>
   </div>
 </template>
 
-<style scoped>
-.crop-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
-.crop-compare {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: var(--sp-3);
-}
-
-/* 关闭预览栏后让框选舞台占满整行 */
-.crop-compare.single {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.crop-pane {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.crop-pane figcaption {
-  font-size: var(--fs-caption);
-}
-
-.crop-stage {
-  position: relative;
-  height: 320px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  padding: var(--sp-2);
-  background: var(--stage);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  cursor: crosshair;
-  touch-action: none;
-}
-
-.crop-stage.checker {
-  background-color: var(--checker-b);
-  background-image: linear-gradient(45deg, var(--checker-a) 25%, transparent 25%), linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--checker-a) 75%), linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
-  cursor: default;
-}
-
-.crop-stage img,
-.crop-stage canvas {
-  max-width: 100%;
-  max-height: 100%;
-  display: block;
-  object-fit: contain;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-.crop-box {
-  position: absolute;
-  border: 1px solid var(--accent);
-  /* 超大扩散阴影实现框外压暗，配合舞台 overflow: hidden 裁掉多余部分 */
-  box-shadow: 0 0 0 9999px rgba(8, 10, 14, 0.55);
-  cursor: move;
-  touch-action: none;
-}
-
-.crop-stage.dragging .crop-box {
-  box-shadow: 0 0 0 9999px rgba(8, 10, 14, 0.68);
-}
-
-.crop-handle {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  margin: -5px 0 0 -5px;
-  background: var(--accent);
-  border: 1px solid #1a140a;
-  border-radius: 2px;
-}
-
-.h-nw { left: 0; top: 0; cursor: nwse-resize; }
-.h-n { left: 50%; top: 0; cursor: ns-resize; }
-.h-ne { left: 100%; top: 0; cursor: nesw-resize; }
-.h-e { left: 100%; top: 50%; cursor: ew-resize; }
-.h-se { left: 100%; top: 100%; cursor: nwse-resize; }
-.h-s { left: 50%; top: 100%; cursor: ns-resize; }
-.h-sw { left: 0; top: 100%; cursor: nesw-resize; }
-.h-w { left: 0; top: 50%; cursor: ew-resize; }
-
-.crop-fields {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
-
-.crop-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--sp-3) var(--sp-4);
-  align-items: end;
-}
-
-.crop-tools {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--sp-4);
-}
-
-.crop-tools .field {
-  flex: none;
-}
-
-.ratio-select {
-  width: 130px;
-}
-
-.crop-fields .input {
-  width: 100%;
-}
-
-.crop-editor .modal-help {
-  margin: 0;
-}
-
-.crop-error {
-  margin: 0;
-  color: var(--danger);
-  font-size: var(--fs-caption);
-}
-</style>

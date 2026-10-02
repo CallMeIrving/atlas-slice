@@ -371,15 +371,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+  <div class="grid h-full min-h-0" :class="hasSource ? 'grid-cols-[280px_minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)_320px]'">
     <!-- 左栏：已导入图片列表，未导入时整栏不显示 -->
-    <section v-if="hasSource" class="tool-sidebar panel">
+    <section v-if="hasSource" class="panel overflow-auto border-r border-line">
       <div class="section">
         <h2 class="section-title">图集列表</h2>
-        <ul class="asset-list">
-          <li class="asset-row">
-            <img class="asset-thumb" :src="state.sourceUrl" :alt="state.fileName" draggable="false" />
-            <span class="asset-name" :title="state.fileName">{{ state.fileName }}</span>
+        <ul class="m-0 flex list-none flex-col gap-2 p-0">
+          <li class="flex items-center gap-2">
+            <img class="size-10 flex-none rounded-sm border border-line bg-stage object-contain" :src="state.sourceUrl" :alt="state.fileName" draggable="false" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="state.fileName">{{ state.fileName }}</span>
             <span class="mono faint">{{ state.image?.width }}×{{ state.image?.height }}</span>
             <button class="btn btn-icon btn-danger" title="移除" @click="resetAll">×</button>
           </li>
@@ -387,13 +387,13 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
+    <main class="flex min-h-0 min-w-0 flex-col">
+      <div class="flex h-16 flex-none items-center justify-between gap-4 border-b border-line px-6">
         <div>
-          <h2>换色工作区</h2>
-          <p>{{ state.image ? `${state.image.width}×${state.image.height} px · ${slots.length} 个色槽 · ${variants.length} 套变体` : '导入一张精灵图开始提取色板' }}</p>
+          <h2 class="m-0 text-head">换色工作区</h2>
+          <p class="mt-0.5 mb-0 text-faint">{{ state.image ? `${state.image.width}×${state.image.height} px · ${slots.length} 个色槽 · ${variants.length} 套变体` : '导入一张精灵图开始提取色板' }}</p>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-3">
           <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
           <button class="btn btn-primary" @click="input?.click()">导入图片</button>
           <label class="check-row">
@@ -405,7 +405,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="tool-body">
+      <div class="flex min-h-0 flex-1 flex-col gap-5 overflow-auto p-6">
         <div v-if="!hasSource" class="empty-state">
           <span class="big">◑</span>
           <strong>还没有可换色的图片</strong>
@@ -413,14 +413,14 @@ onBeforeUnmount(() => {
         </div>
 
         <template v-else>
-          <section class="pa-block">
-            <h3 class="pa-block-title">
+          <section class="flex flex-col gap-3">
+            <h3 class="m-0 flex flex-wrap items-center gap-3 text-caption font-semibold tracking-[0.06em] text-faint uppercase">
               色槽与目标色
-              <span class="faint">关闭的色槽不参与换色；只有勾选「阵营色」的槽会被预设换色</span>
+              <span class="faint normal-case font-normal tracking-normal">关闭的色槽不参与换色；只有勾选「阵营色」的槽会被预设换色</span>
             </h3>
-            <div v-if="slots.length" class="slot-grid">
-              <article v-for="slot in slots" :key="slot.id" class="slot-card" :class="{ off: !slot.enabled }">
-                <header class="slot-head">
+            <div v-if="slots.length" class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(268px,1fr))]">
+              <article v-for="slot in slots" :key="slot.id" class="flex flex-col gap-2 rounded-md border border-line bg-surface p-3" :class="!slot.enabled && 'opacity-50'">
+                <header class="flex items-center justify-between">
                   <label class="check-row">
                     <input :checked="slot.enabled" type="checkbox" @change="toggleSlot(slot, $event)" />
                     <span class="mono">{{ slot.id.replace('slot-', '#') }}</span>
@@ -431,78 +431,79 @@ onBeforeUnmount(() => {
                   </label>
                   <span class="badge">{{ (slot.ratio * 100).toFixed(1) }}%</span>
                 </header>
-                <div class="slot-colors">
-                  <span class="swatch" :style="{ background: slot.source }" :title="`原色 ${slot.source}`"></span>
-                  <span class="arrow">→</span>
+                <div class="flex items-center gap-2">
+                  <span class="size-6.5 flex-none rounded-sm border border-line-strong" :style="{ background: slot.source }" :title="`原色 ${slot.source}`"></span>
+                  <span class="text-faint">→</span>
                   <input
-                    class="swatch swatch-input"
+                    class="size-6.5 flex-none cursor-pointer rounded-sm border border-line-strong bg-none bg-transparent p-0 [&::-webkit-color-swatch-wrapper]:p-0.5 [&::-webkit-color-swatch]:rounded-[2px] [&::-webkit-color-swatch]:border-0"
                     type="color"
                     :value="activeVariant?.mapping[slot.id] ?? slot.source"
                     :title="`目标色 ${activeVariant?.mapping[slot.id] ?? slot.source}`"
                     @input="onSlotHexInput(slot, $event)"
                   />
                   <input
-                    class="input hex-input mono"
+                    class="input mono h-6.5 min-w-0 flex-1"
                     type="text"
                     :value="activeVariant?.mapping[slot.id] ?? slot.source"
                     @change="onSlotHexInput(slot, $event)"
                   />
-                  <button class="btn btn-icon" :class="{ picking: pickTarget && samplingSlotId === slot.id }" :title="pickTarget && samplingSlotId === slot.id ? '点击原图取色' : '从原图取色'" @click="startPick(slot)">⌖</button>
+                  <button class="btn btn-icon" :class="pickTarget && samplingSlotId === slot.id && 'text-accent-strong border-accent-border'" :title="pickTarget && samplingSlotId === slot.id ? '点击原图取色' : '从原图取色'" @click="startPick(slot)">⌖</button>
                 </div>
-                <div class="slot-bar"><i :style="{ width: `${Math.min(100, slot.ratio * 100)}%` }"></i></div>
+                <div class="h-[3px] overflow-hidden rounded-[2px] bg-hover"><i class="block h-full bg-accent" :style="{ width: `${Math.min(100, slot.ratio * 100)}%` }"></i></div>
               </article>
             </div>
             <p v-else class="muted">未提取到色槽，请调整容差后重新提取。</p>
           </section>
 
-          <section class="pa-block">
-            <h3 class="pa-block-title">
+          <section class="flex flex-col gap-3">
+            <h3 class="m-0 flex flex-wrap items-center gap-3 text-caption font-semibold tracking-[0.06em] text-faint uppercase">
               对比预览
-              <span v-if="pickTarget" class="picking-tip">取色中：点击左侧原图任意位置写入目标色 <button class="btn btn-ghost btn-sm" @click="cancelPick">取消</button></span>
-              <span v-else-if="state.status === 'processing'" class="picking-tip">渲染中 {{ Math.round(state.progress * 100) }}%</span>
+              <span v-if="pickTarget" class="inline-flex items-center gap-2 font-normal normal-case tracking-normal text-accent-strong">取色中：点击左侧原图任意位置写入目标色 <button class="btn btn-ghost h-[22px] px-2 text-caption" @click="cancelPick">取消</button></span>
+              <span v-else-if="state.status === 'processing'" class="inline-flex items-center gap-2 font-normal normal-case tracking-normal text-accent-strong">渲染中 {{ Math.round(state.progress * 100) }}%</span>
             </h3>
-            <div class="pa-compare">
-              <figure class="pa-figure">
-                <figcaption>原图</figcaption>
-                <div class="pa-canvas" :class="{ checker: state.checkerBg }">
+            <div class="grid grid-cols-2 items-start gap-4">
+              <figure class="m-0 flex flex-col gap-2">
+                <figcaption class="text-caption text-faint">原图</figcaption>
+                <div class="grid min-h-[220px] place-items-center overflow-hidden rounded-sm border border-line bg-stage p-3" :class="state.checkerBg && 'bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:12px_12px]'">
                   <img
                     ref="imgRef"
                     :src="state.sourceUrl"
-                    :class="{ clickable: pickTarget }"
+                    class="block max-h-[46vh] max-w-full object-contain select-none"
+                    :class="pickTarget && 'cursor-crosshair'"
                     alt="原图"
                     draggable="false"
                     @click="onStageClick"
                   />
                 </div>
               </figure>
-              <figure class="pa-figure">
-                <figcaption>{{ activeVariant?.name ?? '变体' }}</figcaption>
-                <div class="pa-canvas" :class="{ checker: state.checkerBg }">
-                  <img v-if="previewUrl" :src="previewUrl" alt="变体预览" draggable="false" />
+              <figure class="m-0 flex flex-col gap-2">
+                <figcaption class="text-caption text-faint">{{ activeVariant?.name ?? '变体' }}</figcaption>
+                <div class="grid min-h-[220px] place-items-center overflow-hidden rounded-sm border border-line bg-stage p-3" :class="state.checkerBg && 'bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:12px_12px]'">
+                  <img v-if="previewUrl" class="block max-h-[46vh] max-w-full object-contain select-none" :src="previewUrl" alt="变体预览" draggable="false" />
                   <p v-else class="muted">渲染中…</p>
                 </div>
               </figure>
             </div>
           </section>
 
-          <section class="pa-block">
-            <h3 class="pa-block-title">
+          <section class="flex flex-col gap-3">
+            <h3 class="m-0 flex flex-wrap items-center gap-3 text-caption font-semibold tracking-[0.06em] text-faint uppercase">
               变体列表
-              <span class="faint">点击卡片切换当前编辑的变体，导出时全部生成</span>
+              <span class="faint normal-case font-normal tracking-normal">点击卡片切换当前编辑的变体，导出时全部生成</span>
             </h3>
-            <div class="variant-grid">
+            <div class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(168px,1fr))]">
               <article
                 v-for="variant in variants"
                 :key="variant.id"
-                class="variant-card"
-                :class="{ active: variant.id === activeVariant?.id }"
+                class="flex cursor-pointer flex-col gap-2 rounded-md border border-line bg-surface p-2"
+                :class="variant.id === activeVariant?.id ? 'border-accent-border shadow-[var(--focus-ring)]' : 'hover:border-line-strong'"
                 @click="state.activeVariantId = variant.id"
               >
-                <div class="variant-thumb" :class="{ checker: state.checkerBg }">
-                  <img v-if="thumbs[variant.id]" :src="thumbs[variant.id]" :alt="variant.name" draggable="false" />
+                <div class="grid h-24 place-items-center overflow-hidden rounded-sm bg-stage" :class="state.checkerBg && 'bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:10px_10px]'">
+                  <img v-if="thumbs[variant.id]" class="max-h-full max-w-full object-contain" :src="thumbs[variant.id]" :alt="variant.name" draggable="false" />
                 </div>
-                <div class="variant-foot">
-                  <input class="input variant-name" type="text" :value="variant.name" @change="onVariantRename(variant, $event)" />
+                <div class="flex items-center gap-2">
+                  <input class="input h-6 min-w-0 flex-1" type="text" :value="variant.name" @change="onVariantRename(variant, $event)" />
                   <button class="btn btn-icon btn-danger" :disabled="variants.length <= 1" title="删除变体" @click.stop="removeVariant(variant.id)">×</button>
                 </div>
               </article>
@@ -513,154 +514,72 @@ onBeforeUnmount(() => {
     </main>
 
     <!-- 右栏：配置、参数与导出 -->
-    <section class="tool-sidepanel panel">
+    <section class="panel overflow-auto border-l border-line">
       <div class="section">
         <h2 class="section-title">调色板换色</h2>
         <p class="muted">Team Color / 皮肤变体，本地处理不上传</p>
       </div>
 
-      <div class="section">
+      <div class="section [&>.field+.field]:mt-3 [&>.field+.check-row]:mt-3 [&>.check-row+.btn]:mt-3 [&>p+.field]:mt-3 [&>p+.btn]:mt-3">
         <h2 class="section-title">主色板提取</h2>
         <label class="field">
           <span class="field-label">色槽数量 {{ state.maxSlots }}</span>
-          <input v-model.number="state.maxSlots" class="range" type="range" min="3" max="12" :disabled="!hasSource" />
+          <input v-model.number="state.maxSlots" class="w-full accent-accent" type="range" min="3" max="12" :disabled="!hasSource" />
         </label>
         <label class="field">
           <span class="field-label">颜色容差 {{ state.tolerance }}</span>
-          <input v-model.number="state.tolerance" class="range" type="range" min="4" max="60" />
+          <input v-model.number="state.tolerance" class="w-full accent-accent" type="range" min="4" max="60" />
         </label>
-        <p class="muted hint">{{ windowHint }}（沿用抠图页的色相/饱和度判据）</p>
+        <p class="muted hint mt-1 mb-0 text-caption">{{ windowHint }}（沿用抠图页的色相/饱和度判据）</p>
         <label class="check-row">
           <input v-model="state.includeNeutrals" type="checkbox" />
           <span>黑/灰/白单独列为色槽</span>
         </label>
-        <button class="btn full" :disabled="!hasSource || state.status === 'processing'" @click="extract">
+        <button class="btn w-full justify-center" :disabled="!hasSource || state.status === 'processing'" @click="extract">
           {{ state.status === 'processing' ? '处理中…' : '重新提取主色板' }}
         </button>
       </div>
 
-      <div class="section">
+      <div class="section [&>.field+.field]:mt-3 [&>.field+.check-row]:mt-3 [&>.check-row+.btn]:mt-3 [&>p+.field]:mt-3 [&>p+.btn]:mt-3">
         <h2 class="section-title">阵营色预设</h2>
-        <div class="preset-grid">
+        <div class="mb-3 grid grid-cols-2 gap-2">
           <button
             v-for="preset in TEAM_COLOR_PRESETS"
             :key="preset.key"
-            class="preset-chip"
+            class="flex h-7 items-center gap-1.5 rounded-sm border border-line bg-raised px-2 text-caption text-muted enabled:hover:border-line-strong enabled:hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
             :disabled="!activeVariant"
             :title="`把 ${preset.label} 应用到当前变体`"
             @click="applyPreset(preset)"
           >
-            <span class="preset-dots">
-              <i v-for="color in preset.colors" :key="color" :style="{ background: color }"></i>
+            <span class="inline-flex gap-0.5">
+              <i v-for="color in preset.colors" :key="color" class="size-2 rounded-[2px]" :style="{ background: color }"></i>
             </span>
             <span>{{ preset.label }}</span>
           </button>
         </div>
-        <p v-if="hasSource" class="muted hint">
+        <p v-if="hasSource" class="muted hint mt-1 mb-0 text-caption">
           <template v-if="teamSlotCount">当前 {{ teamSlotCount }} 个色槽标记为阵营色，预设只换这些区域</template>
           <template v-else>还没有阵营色槽：请在色槽卡片勾选「阵营色」，预设才有可写入的目标</template>
         </p>
-        <button class="btn full" :disabled="!slots.length" @click="generateTeamVariants">一次生成 7 套阵营变体</button>
+        <button class="btn w-full justify-center" :disabled="!slots.length" @click="generateTeamVariants">一次生成 7 套阵营变体</button>
       </div>
 
-      <div class="section">
+      <div class="section [&>.field+.field]:mt-3 [&>.field+.check-row]:mt-3 [&>.check-row+.btn]:mt-3 [&>p+.field]:mt-3 [&>p+.btn]:mt-3">
         <h2 class="section-title">导出</h2>
         <label class="field">
           <span class="field-label">命名模板</span>
           <input v-model="state.nameTemplate" class="input" type="text" placeholder="{base}_{variant}.png" />
         </label>
-        <p class="muted hint">占位符：{base} 源图名 · {variant} 变体名 · {index} 序号</p>
-        <button class="btn btn-primary full" :disabled="!variants.length || exporting || !hasSource" @click="exportZip">
+        <p class="muted hint mt-1 mb-0 text-caption">占位符：{base} 源图名 · {variant} 变体名 · {index} 序号</p>
+        <button class="btn btn-primary w-full justify-center" :disabled="!variants.length || exporting || !hasSource" @click="exportZip">
           {{ exporting ? '导出中…' : `导出 ZIP（${variants.length} 套 PNG + 元数据）` }}
         </button>
-        <button class="btn btn-ghost full" :disabled="!hasSource" @click="resetAll">重置</button>
-        <p v-if="state.error" class="error-text">{{ state.error }}</p>
+        <button class="btn btn-ghost w-full justify-center" :disabled="!hasSource" @click="resetAll">重置</button>
+        <p v-if="state.error" class="text-caption text-danger">{{ state.error }}</p>
       </div>
     </section>
 
   </div>
 </template>
 
-<style scoped>
-/* 页面骨架与雪碧图页同构：左栏图集列表 + 中间工作区 + 右栏参数配置；未导入时左栏隐藏 */
-.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
-.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: var(--fs-head); }
-.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-5); padding: 24px; }
-.full { width: 100%; justify-content: center; }
-.hint { margin: var(--sp-1) 0 0; font-size: var(--fs-caption); }
-.section .field + .field, .section .field + .check-row, .section .check-row + .btn { margin-top: var(--sp-3); }
-.section p + .field, .section p + .btn { margin-top: var(--sp-3); }
 
-.range { width: 100%; accent-color: var(--accent); }
-
-/* 预设色组 */
-.preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-bottom: var(--sp-3); }
-.preset-chip { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised); color: var(--text-muted); font-size: var(--fs-caption); }
-.preset-chip:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
-.preset-chip:disabled { opacity: .45; cursor: not-allowed; }
-.preset-dots { display: inline-flex; gap: 2px; }
-.preset-dots i { width: 8px; height: 8px; border-radius: 2px; }
-
-/* 区块 */
-.pa-block { display: flex; flex-direction: column; gap: var(--sp-3); }
-.pa-block-title { margin: 0; font-size: var(--fs-caption); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
-.pa-block-title .faint { text-transform: none; letter-spacing: 0; font-weight: 400; }
-
-/* 色槽卡片 */
-.slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: var(--sp-3); }
-.slot-card { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--surface); }
-.slot-card.off { opacity: .5; }
-.slot-head { display: flex; align-items: center; justify-content: space-between; }
-.slot-colors { display: flex; align-items: center; gap: var(--sp-2); }
-.swatch { width: 26px; height: 26px; flex: none; border: 1px solid var(--border-strong); border-radius: var(--radius-s); }
-.swatch-input { padding: 0; background: none; cursor: pointer; }
-.swatch-input::-webkit-color-swatch-wrapper { padding: 2px; }
-.swatch-input::-webkit-color-swatch { border: none; border-radius: 2px; }
-.arrow { color: var(--text-faint); }
-.hex-input { flex: 1; min-width: 0; height: 26px; }
-.slot-bar { height: 3px; border-radius: 2px; background: var(--surface-hover); overflow: hidden; }
-.slot-bar i { display: block; height: 100%; background: var(--accent); }
-.picking { color: var(--accent-strong); border-color: var(--accent-border); }
-
-/* 对比预览 */
-.pa-compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
-.pa-figure { margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.pa-figure figcaption { font-size: var(--fs-caption); color: var(--text-faint); }
-.pa-canvas { display: grid; place-items: center; min-height: 220px; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); overflow: hidden; }
-.pa-canvas.checker { background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 12px 12px; }
-.pa-canvas img { display: block; max-width: 100%; max-height: 46vh; object-fit: contain; user-select: none; }
-.pa-canvas img.clickable { cursor: crosshair; }
-.picking-tip { display: inline-flex; align-items: center; gap: var(--sp-2); text-transform: none; letter-spacing: 0; color: var(--accent-strong); font-weight: 400; }
-.btn-sm { height: 22px; padding: 0 8px; font-size: var(--fs-caption); }
-
-/* 变体卡片 */
-.variant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--sp-3); }
-.variant-card { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--surface); cursor: pointer; }
-.variant-card:hover { border-color: var(--border-strong); }
-.variant-card.active { border-color: var(--accent-border); box-shadow: var(--focus-ring); }
-.variant-thumb { display: grid; place-items: center; height: 96px; border-radius: var(--radius-s); overflow: hidden; background: var(--stage); }
-.variant-thumb.checker { background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 10px 10px; }
-.variant-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.variant-foot { display: flex; align-items: center; gap: var(--sp-2); }
-.variant-name { flex: 1; min-width: 0; height: 24px; }
-
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-.error-text { color: var(--danger); font-size: var(--fs-caption); }
-
-@media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
-  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
-  .pa-compare { grid-template-columns: minmax(0, 1fr); }
-}
-/* 左栏图集列表条目：缩略图 + 名称 + 尺寸 + 移除 */
-.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
-.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-</style>

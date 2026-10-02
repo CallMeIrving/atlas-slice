@@ -35,21 +35,23 @@ const total = computed(() =>
 </script>
 
 <template>
-  <div class="frame-list">
-    <div class="list-head">
+  <div class="flex h-full min-h-0 flex-col">
+    <div
+      class="flex flex-none items-center justify-between border-b border-line px-4 py-3 text-caption font-semibold tracking-[0.08em] text-faint uppercase"
+    >
       <span>帧列表</span>
-      <span class="head-right">
+      <span class="flex items-center gap-2">
         <span class="mono faint">{{ store.frames.length }} 帧</span>
         <button
           v-if="store.frames.length"
-          class="clear-btn"
+          class="rounded-sm border border-line px-[7px] py-[2px] text-faint font-normal tracking-normal normal-case transition-[color,border-color] duration-[120ms] hover:border-danger hover:text-danger disabled:cursor-not-allowed disabled:opacity-35"
           :title="allSelected ? '取消全选' : '全选帧'"
           @click="allSelected ? clearFrameSelection() : selectAllFrames()"
         >
           {{ allSelected ? '取消全选' : '全选' }}
         </button>
         <button
-          class="clear-btn"
+          class="rounded-sm border border-line px-[7px] py-[2px] text-faint font-normal tracking-normal normal-case transition-[color,border-color] duration-[120ms] hover:border-danger hover:text-danger disabled:cursor-not-allowed disabled:opacity-35"
           title="清空全部帧"
           :disabled="store.frames.length === 0"
           @click="clearFrames()"
@@ -58,30 +60,42 @@ const total = computed(() =>
         </button>
       </span>
     </div>
-    <div v-if="store.frames.length === 0" class="list-empty">
-      <p>还没有帧</p>
-      <p class="faint">导入元数据，或用「自动识别」扫描透明边缘</p>
+    <div
+      v-if="store.frames.length === 0"
+      class="flex flex-1 flex-col items-center justify-center gap-1 p-4 text-center text-muted"
+    >
+      <p class="m-0">还没有帧</p>
+      <p class="faint m-0">导入元数据，或用「自动识别」扫描透明边缘</p>
     </div>
-    <ul v-else class="frame-ul">
+    <ul v-else class="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto p-2">
       <li
         v-for="frame in list"
         :key="frame.id"
-        class="frame-item"
-        :class="{ active: frame.id === selectedFrame?.id }"
+        class="group flex cursor-pointer items-center gap-2 rounded-sm border px-1.5 py-1"
+        :class="
+          frame.id === selectedFrame?.id
+            ? 'border-accent-border bg-accent-dim'
+            : 'border-transparent hover:bg-hover'
+        "
         @click="selectFrame(frame.id)"
       >
         <input
-          class="frame-check"
+          class="flex-none accent-[var(--accent)]"
           type="checkbox"
           :checked="selectedSet.has(frame.id)"
           :aria-label="`选择 ${frame.name}`"
           @click.stop
           @change="toggleFrameSelection(frame.id)"
         />
-        <img class="thumb" :src="thumb(frame)" alt="" draggable="false" />
-        <div class="item-body">
-          <p class="item-name" :title="frame.name">{{ frame.name }}</p>
-          <p class="mono faint">
+        <img
+          class="h-10 w-10 flex-none rounded-[3px] border border-line bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:10px_10px] object-contain"
+          :src="thumb(frame)"
+          alt=""
+          draggable="false"
+        />
+        <div class="min-w-0 flex-1">
+          <p class="m-0 truncate text-body" :title="frame.name">{{ frame.name }}</p>
+          <p class="mono faint m-0">
             {{ frame.manual ? frame.contentInFrame.w : frame.sourceSize.w }}×{{
               frame.manual ? frame.contentInFrame.h : frame.sourceSize.h
             }}
@@ -89,160 +103,17 @@ const total = computed(() =>
             <template v-if="frame.manual"> · 手动</template>
           </p>
         </div>
-        <button class="btn-icon del" title="删除帧" @click.stop="deleteFrame(frame.id)">×</button>
+        <button
+          class="btn-icon text-faint opacity-0 group-hover:opacity-100 hover:text-danger"
+          title="删除帧"
+          @click.stop="deleteFrame(frame.id)"
+        >
+          ×
+        </button>
       </li>
     </ul>
-    <div v-if="store.frames.length" class="list-foot mono faint">
+    <div v-if="store.frames.length" class="mono faint flex-none border-t border-line px-4 py-1.5 text-right">
       合计内容面积 {{ Math.round(total / 10000) / 100 }} 万像素
     </div>
   </div>
 </template>
-
-<style scoped>
-.frame-list {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.list-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-3) var(--sp-4);
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-caption);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.head-right {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.clear-btn {
-  letter-spacing: normal;
-  text-transform: none;
-  font-weight: 400;
-  padding: 2px 7px;
-  color: var(--text-faint);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  transition: color 0.12s, border-color 0.12s;
-}
-
-.clear-btn:hover:not(:disabled) {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-
-.clear-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.frame-ul {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: var(--sp-2);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.frame-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: 4px 6px;
-  border-radius: var(--radius-s);
-  border: 1px solid transparent;
-  cursor: pointer;
-}
-
-.frame-item:hover {
-  background: var(--surface-hover);
-}
-
-.frame-item.active {
-  background: var(--accent-dim);
-  border-color: var(--accent-border);
-}
-
-.thumb {
-  width: 40px;
-  height: 40px;
-  flex: none;
-  object-fit: contain;
-  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 10px 10px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-}
-
-.frame-check {
-  flex: none;
-  accent-color: var(--accent);
-}
-
-.item-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.item-name {
-  margin: 0;
-  font-size: var(--fs-body);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.item-body p + p {
-  margin: 0;
-}
-
-.del {
-  opacity: 0;
-  color: var(--text-faint);
-}
-
-.frame-item:hover .del {
-  opacity: 1;
-}
-
-.del:hover {
-  color: var(--danger);
-}
-
-.list-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: var(--text-muted);
-  text-align: center;
-  padding: var(--sp-4);
-}
-
-.list-empty p {
-  margin: 0;
-}
-
-.list-foot {
-  flex: none;
-  padding: 6px var(--sp-4);
-  border-top: 1px solid var(--border);
-  text-align: right;
-}
-</style>

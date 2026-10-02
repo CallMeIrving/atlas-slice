@@ -37,7 +37,7 @@ function channelLabel(count: number): string {
 }
 
 function findingClass(level: 'warn' | 'error'): string {
-  return level === 'error' ? 'finding error' : 'finding warn'
+  return level === 'error' ? 'text-danger' : 'warn'
 }
 
 // 试听互斥：本弹窗占用的播放位 key，关闭时统一让位
@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="modal-backdrop" @click.self="emit('close')">
-    <div class="modal wide">
+    <div class="modal w-[min(860px,calc(100vw-48px))]">
       <header class="modal-head">
         <div>
           <h2>处理结果（{{ outputs.length }}）</h2>
@@ -80,33 +80,33 @@ onBeforeUnmount(() => {
         <button class="modal-close" @click="emit('close')">×</button>
       </header>
 
-      <div ref="body" class="modal-body">
+      <div ref="body" class="modal-body max-h-[min(62vh,640px)] overflow-auto">
         <p v-if="!outputs.length" class="muted">本次没有生成文件。</p>
-        <ul v-else class="output-list">
-          <li v-for="output in outputs" :key="output.id" class="output-row">
-            <div class="output-main">
-              <div class="output-head">
-                <span class="output-name" :title="output.fileName">{{ output.fileName }}</span>
+        <ul v-else class="m-0 flex list-none flex-col gap-3 p-0">
+          <li v-for="output in outputs" :key="output.id" class="flex items-start justify-between gap-3 rounded-sm border border-line bg-raised p-3">
+            <div class="flex min-w-0 flex-col gap-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-body break-all" :title="output.fileName">{{ output.fileName }}</span>
                 <span v-if="output.variantIndex >= 0" class="badge badge-accent">变体 {{ output.variantIndex + 1 }}</span>
                 <span v-else class="badge">主输出</span>
               </div>
-              <div class="output-meta mono faint">
+              <div class="mono faint flex flex-wrap gap-3 text-[11px]">
                 <span>{{ fmtDuration(output.durationSec) }}</span>
                 <span>{{ output.sampleRate }} Hz</span>
                 <span>{{ channelLabel(output.channelCount) }}</span>
                 <span>{{ formatLufs(output.integratedLufs) }}</span>
                 <span>TP {{ formatDb(output.truePeakDb) }}</span>
               </div>
-              <ul v-if="output.findings.length" class="finding-list">
+              <ul v-if="output.findings.length" class="m-0 flex list-none flex-col gap-0.5 p-0 text-[11px]">
                 <li v-for="(finding, i) in output.findings" :key="i" :class="findingClass(finding.level)">
                   {{ finding.message }}
                 </li>
               </ul>
-              <p v-else class="muted small">质检通过</p>
+              <p v-else class="muted text-caption">质检通过</p>
             </div>
-            <div class="output-actions">
+            <div class="flex flex-none items-center gap-2">
               <audio
-                class="player"
+                class="h-[30px] w-[220px]"
                 :src="output.previewUrl"
                 controls
                 preload="none"
@@ -121,12 +121,12 @@ onBeforeUnmount(() => {
         </ul>
       </div>
 
-      <footer class="modal-foot report-foot">
-        <p class="muted small report-note">
+      <footer class="modal-foot flex-wrap">
+        <p class="muted m-0 mr-auto max-w-[46%] text-caption leading-[1.45]">
           报告是本次批量的<strong>处理记录</strong>：每条输出一行，记录源文件、处理链动作与前后 LUFS / 峰值对比。
           CSV 便于用表格核对，JSON 带完整配置、便于脚本二次处理。文件本身用「打包下载 ZIP」取。
         </p>
-        <div class="report-actions">
+        <div class="ml-auto flex items-center gap-2">
           <button class="btn" :disabled="!outputs.length" @click="downloadReport('csv')">报告 CSV</button>
           <button class="btn" :disabled="!outputs.length" @click="downloadReport('json')">报告 JSON</button>
           <button class="btn btn-primary" :disabled="!outputs.length" @click="downloadAll()">打包下载 ZIP</button>
@@ -136,95 +136,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.modal.wide {
-  width: min(860px, calc(100vw - 48px));
-}
-.modal-body {
-  max-height: min(62vh, 640px);
-  overflow: auto;
-}
-.small {
-  font-size: var(--fs-caption);
-}
-.report-foot {
-  flex-wrap: wrap;
-}
-.report-note {
-  margin: 0 auto 0 0;
-  max-width: 46%;
-  line-height: 1.45;
-}
-.report-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-left: auto;
-}
-.output-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
-.output-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--surface-raised);
-}
-.output-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-.output-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
-.output-name {
-  font-size: var(--fs-body);
-  word-break: break-all;
-}
-.output-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
-  font-size: 11px;
-}
-.output-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex: none;
-}
-.player {
-  width: 220px;
-  height: 30px;
-}
-.finding-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 11px;
-}
-.finding.warn {
-  color: #fbbf24;
-}
-.finding.error {
-  color: var(--danger);
-}
-</style>

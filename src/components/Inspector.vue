@@ -55,12 +55,15 @@ function onExport(): void {
 </script>
 
 <template>
-  <div class="inspector">
+  <div class="h-full overflow-y-auto border-l border-line bg-surface">
     <!-- 选中帧信息 -->
     <section class="section">
       <h2 class="section-title">选中帧</h2>
-      <div v-if="!sel" class="muted frame-empty">在画布或列表中选中一帧查看详情</div>
-      <dl v-else class="kv">
+      <div v-if="!sel" class="muted frame-empty py-2 text-caption">在画布或列表中选中一帧查看详情</div>
+      <dl
+        v-else
+        class="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-body [&_dd]:m-0 [&_dd]:min-w-0 [&_dd]:overflow-hidden [&_dd]:text-right [&_dd]:text-ellipsis [&_dd]:whitespace-nowrap [&_dt]:text-faint"
+      >
         <dt>名称</dt>
         <dd class="mono" :title="sel.name">{{ sel.name }}</dd>
         <dt>打包矩形</dt>
@@ -77,7 +80,7 @@ function onExport(): void {
           <span v-else class="badge">元数据</span>
         </dd>
       </dl>
-      <div class="row-actions" v-if="sel">
+      <div class="mt-3" v-if="sel">
         <button class="btn btn-danger" @click="onDeleteSelected()">删除此帧</button>
       </div>
     </section>
@@ -85,7 +88,7 @@ function onExport(): void {
     <!-- 导出设置 -->
     <section class="section">
       <h2 class="section-title">导出设置</h2>
-      <div class="field">
+      <div class="field mb-3">
         <span class="field-label">导出类型</span>
         <select v-model="store.exportTarget" class="select">
           <option value="all">导出全部</option>
@@ -93,18 +96,18 @@ function onExport(): void {
           <option value="spritesheet">导出雪碧图</option>
         </select>
       </div>
-      <div class="field">
+      <div class="field mb-3">
         <span class="field-label">裁切模式</span>
-        <div class="seg seg-wide">
+        <div class="seg w-full">
           <button
-            class="seg-item"
+            class="seg-item flex-1 justify-center"
             :class="{ active: store.mode === 'content' }"
             @click="setMode('content')"
           >
             实际内容
           </button>
           <button
-            class="seg-item"
+            class="seg-item flex-1 justify-center"
             :class="{ active: store.mode === 'frame' }"
             @click="setMode('frame')"
           >
@@ -112,7 +115,7 @@ function onExport(): void {
           </button>
         </div>
       </div>
-      <div class="field">
+      <div class="field mb-3">
         <span class="field-label">留边 padding</span>
         <div class="field-row">
           <input
@@ -126,7 +129,7 @@ function onExport(): void {
           <span class="faint mono">px</span>
         </div>
       </div>
-      <div class="field">
+      <div class="field mb-3">
         <span class="field-label">命名模板</span>
         <input
           v-model="store.pattern"
@@ -135,9 +138,9 @@ function onExport(): void {
           spellcheck="false"
           @change="persistExportSettings()"
         />
-        <p class="hint faint mono">支持 {name} 帧名 · {index} 序号(0001)</p>
+        <p class="hint faint mono mt-1 mb-0">支持 {name} 帧名 · {index} 序号(0001)</p>
       </div>
-      <div class="field">
+      <div class="field mb-3">
         <span class="field-label">目录（ZIP 内层级）</span>
         <input
           v-model="store.folder"
@@ -148,7 +151,7 @@ function onExport(): void {
           @change="persistExportSettings()"
         />
       </div>
-      <div class="check-group">
+      <div class="check-group mt-2 mb-3 flex gap-4">
         <label class="check-row">
           <input v-model="store.withMetaJson" type="checkbox" @change="persistExportSettings()" />
           元数据 JSON
@@ -159,7 +162,7 @@ function onExport(): void {
         </label>
       </div>
       <button
-        class="btn btn-primary export-btn"
+        class="btn btn-primary export-btn h-[34px] w-full justify-center text-title"
         :disabled="!store.source || store.frames.length === 0 || store.busy || (store.exportTarget === 'selected' && store.selectedIds.length === 0)"
         @click="onExport()"
       >
@@ -170,17 +173,17 @@ function onExport(): void {
     <!-- 配置预设 -->
     <section class="section">
       <h2 class="section-title">配置预设</h2>
-      <div v-if="store.presets.length" class="preset-row">
-        <select v-model="presetSelect" class="select preset-select">
+      <div v-if="store.presets.length" class="mb-2 flex gap-2">
+        <select v-model="presetSelect" class="select preset-select min-w-0 flex-1">
           <option v-for="p in store.presets" :key="p.name" :value="p.name">{{ p.name }}</option>
         </select>
         <button class="btn" @click="onLoadPreset()">载入</button>
         <button class="btn btn-danger" @click="onDeletePreset()">删</button>
       </div>
-      <div class="preset-row">
+      <div class="mb-2 flex gap-2">
         <input
           v-model="presetName"
-          class="input preset-select"
+          class="input preset-select min-w-0 flex-1"
           type="text"
           placeholder="预设名称"
           spellcheck="false"
@@ -205,94 +208,3 @@ function onExport(): void {
   <BatchResizeModal v-if="resizeOpen" @close="resizeOpen = false" />
   <SpriteSheetModal v-if="spriteOpen" @close="spriteOpen = false" />
 </template>
-
-<style scoped>
-.inspector {
-  height: 100%;
-  overflow-y: auto;
-  background: var(--surface);
-  border-left: 1px solid var(--border);
-}
-
-.frame-empty {
-  font-size: var(--fs-caption);
-  padding: var(--sp-2) 0;
-}
-
-.kv {
-  margin: 0;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 12px;
-  font-size: var(--fs-body);
-}
-
-.kv dt {
-  color: var(--text-faint);
-}
-
-.kv dd {
-  margin: 0;
-  text-align: right;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row-actions {
-  margin-top: var(--sp-3);
-}
-
-.seg-wide {
-  width: 100%;
-}
-
-.seg-wide .seg-item {
-  flex: 1;
-  justify-content: center;
-}
-
-.field {
-  margin-bottom: var(--sp-3);
-}
-
-.field-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.hint {
-  margin: 4px 0 0;
-  font-size: var(--fs-caption);
-}
-
-.check-group {
-  display: flex;
-  gap: var(--sp-4);
-  margin: var(--sp-2) 0 var(--sp-3);
-}
-
-.check-row {
-  margin: 0;
-}
-
-.export-btn {
-  width: 100%;
-  justify-content: center;
-  height: 34px;
-  font-size: var(--fs-title);
-}
-
-.preset-row {
-  display: flex;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-2);
-}
-
-.preset-select {
-  flex: 1;
-  min-width: 0;
-}
-</style>

@@ -99,7 +99,7 @@ function resetBaseColor(): void {
 </script>
 
 <template>
-  <div class="matte-fields">
+  <div class="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-x-4 gap-y-3 [&>.warn]:col-span-full">
     <label class="field">
       <span class="field-label">抠图方式</span>
       <select v-model="workspace.video.matte.mode" class="select">
@@ -117,12 +117,12 @@ function resetBaseColor(): void {
       </label>
       <label class="field">
         <span class="field-label">颜色容差 {{ workspace.video.matte.tolerance }}</span>
-        <input v-model.number="workspace.video.matte.tolerance" class="range" type="range" min="4" max="60" step="1" />
+        <input v-model.number="workspace.video.matte.tolerance" class="w-full accent-accent" type="range" min="4" max="60" step="1" />
       </label>
       <div class="field">
         <span class="field-label">背景基准色</span>
-        <div class="base-row">
-          <span class="chip" :style="{ background: baseHex }"></span>
+        <div class="flex items-center gap-2">
+          <span class="size-[22px] flex-none rounded-sm border border-line-strong" :style="{ background: baseHex }"></span>
           <span class="mono faint">{{ baseHex }}{{ manualHex ? ' · 手动' : ' · 自动采样' }}</span>
           <button class="btn" :disabled="!workspace.video.matte.baseColor" @click="resetBaseColor">恢复自动</button>
         </div>
@@ -144,35 +144,3 @@ function resetBaseColor(): void {
     </template>
   </div>
 </template>
-
-<style scoped>
-.matte-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-3) var(--sp-4);
-}
-
-/* 提示条横跨两列，避免被网格挤进单个字段格里 */
-.matte-fields > .warn {
-  grid-column: 1 / -1;
-}
-
-.base-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.base-row .chip {
-  width: 22px;
-  height: 22px;
-  flex: none;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-s);
-}
-
-.range {
-  width: 100%;
-  accent-color: var(--accent);
-}
-</style>

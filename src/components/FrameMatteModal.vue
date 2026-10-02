@@ -226,7 +226,7 @@ previewUrl.value = frame.value?.matteUrl ?? ''
 
 <template>
   <div class="modal-backdrop" @click.self="emit('close')">
-    <section class="modal frame-matte" role="dialog" aria-modal="true" aria-labelledby="frame-matte-title">
+    <section class="modal flex max-h-[calc(100vh-48px)] w-[min(840px,calc(100vw-48px))] flex-col" role="dialog" aria-modal="true" aria-labelledby="frame-matte-title">
       <div class="modal-head">
         <div>
           <h2 id="frame-matte-title">帧抠图</h2>
@@ -236,18 +236,18 @@ previewUrl.value = frame.value?.matteUrl ?? ''
         </div>
         <button class="btn-icon modal-close" aria-label="关闭" @click="emit('close')">×</button>
       </div>
-      <div class="modal-body">
-        <div class="matte-compare">
-          <figure class="matte-pane">
-            <figcaption class="faint">原图<template v-if="isSolid"> · 点击背景处吸取基准色</template></figcaption>
-            <div class="matte-stage" :class="{ pickable: isSolid }">
-              <img v-if="frame" ref="sourceImage" :src="frameCleanUrl(frame)" alt="原始帧" @load="onImageLoad" @click="pickBaseColor" />
+      <div class="modal-body flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
+        <div class="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-3">
+          <figure class="m-0 flex flex-col gap-2">
+            <figcaption class="faint text-caption">原图<template v-if="isSolid"> · 点击背景处吸取基准色</template></figcaption>
+            <div class="flex h-[300px] items-center justify-center overflow-hidden rounded-sm border border-line bg-stage p-2" :class="isSolid && '[&_img]:cursor-crosshair'">
+              <img v-if="frame" ref="sourceImage" class="max-h-full max-w-full object-contain" :src="frameCleanUrl(frame)" alt="原始帧" @load="onImageLoad" @click="pickBaseColor" />
             </div>
           </figure>
-          <figure class="matte-pane">
-            <figcaption class="faint">抠图结果 <span v-if="frame?.matteUrl" class="badge badge-accent">已应用</span></figcaption>
-            <div class="matte-stage checker">
-              <img v-if="previewUrl" :src="previewUrl" alt="抠图结果" />
+          <figure class="m-0 flex flex-col gap-2">
+            <figcaption class="faint text-caption">抠图结果 <span v-if="frame?.matteUrl" class="badge badge-accent">已应用</span></figcaption>
+            <div class="flex h-[300px] items-center justify-center overflow-hidden rounded-sm border border-line bg-checker-b p-2 [background-image:linear-gradient(45deg,var(--checker-a)_25%,transparent_25%),linear-gradient(-45deg,var(--checker-a)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--checker-a)_75%),linear-gradient(-45deg,transparent_75%,var(--checker-a)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px]">
+              <img v-if="previewUrl" class="max-h-full max-w-full object-contain" :src="previewUrl" alt="抠图结果" />
               <span v-else class="faint">尚未生成预览</span>
             </div>
           </figure>
@@ -255,7 +255,7 @@ previewUrl.value = frame.value?.matteUrl ?? ''
 
         <MatteSettingsFields :auto-base-hex="autoBaseHex" />
 
-        <p class="modal-help">
+        <p class="modal-help m-0">
           <template v-if="isSolid">
             纯色背景走色相判据：只看色相与饱和度、不看明度，所以光照不均与地面影子都能正确归类，角色身上的白衣服与黑色线稿不会被误伤。
           </template>
@@ -279,7 +279,7 @@ previewUrl.value = frame.value?.matteUrl ?? ''
       </div>
       <div class="modal-foot">
         <button class="btn" :disabled="busy || !frame?.matteUrl" @click="restoreFrame">还原此帧</button>
-        <span class="foot-spacer"></span>
+        <span class="flex-1"></span>
         <button v-if="!isSolid" class="btn" :disabled="busy || !frame" @click="runPreview">生成预览</button>
         <button class="btn" :disabled="busy || !frame" @click="applyToFrame">应用到此帧</button>
         <button v-if="!batch.running" class="btn btn-primary" :disabled="busy || !workspace.video.frames.length" @click="batchApply">
@@ -290,75 +290,3 @@ previewUrl.value = frame.value?.matteUrl ?? ''
     </section>
   </div>
 </template>
-
-<style scoped>
-.frame-matte {
-  width: min(840px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
-  display: flex;
-  flex-direction: column;
-}
-
-.frame-matte .modal-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
-.matte-compare {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-3);
-}
-
-.matte-pane {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.matte-pane figcaption {
-  font-size: var(--fs-caption);
-}
-
-.matte-stage {
-  height: 300px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  padding: var(--sp-2);
-  background: var(--stage);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-}
-
-.matte-stage.checker {
-  background-color: var(--checker-b);
-  background-image: linear-gradient(45deg, var(--checker-a) 25%, transparent 25%), linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--checker-a) 75%), linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
-}
-
-.matte-stage img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.matte-stage.pickable img {
-  cursor: crosshair;
-}
-
-.frame-matte .modal-help {
-  margin: 0;
-}
-
-.foot-spacer {
-  flex: 1;
-}
-</style>

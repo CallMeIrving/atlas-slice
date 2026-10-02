@@ -239,129 +239,29 @@ defineExpose({ next, previous, toggle })
 </script>
 
 <template>
-  <div class="preview-player">
-    <div class="preview-large">
-      <canvas v-if="current" ref="canvasRef" class="preview-canvas"></canvas>
-      <span v-else class="muted">没有可预览的帧</span>
+  <div class="preview-player flex flex-col flex-[1_1_auto] min-h-0">
+    <div class="preview-large flex-1 min-h-0 flex items-center justify-center overflow-hidden p-2 bg-stage">
+      <canvas v-if="current" ref="canvasRef" class="preview-canvas max-w-full max-h-full w-auto h-auto [image-rendering:pixelated]"></canvas>
+      <span v-else class="muted text-faint">没有可预览的帧</span>
     </div>
-    <div class="preview-controls">
+    <div class="preview-controls flex-none min-h-[44px] flex items-center gap-1.5 justify-center p-1.5 border-t border-line">
       <button class="btn btn-icon" :disabled="!frames.length" @click="previous">‹</button>
       <button class="btn" :disabled="!frames.length" @click="toggle">{{ playing ? '暂停' : '播放' }}</button>
       <button class="btn btn-icon" :disabled="!frames.length" @click="next">›</button>
       <span v-if="current" class="badge">{{ index + 1 }} / {{ frames.length }}</span>
       <label class="check-row"><input v-model="loop" type="checkbox" /> 循环</label>
-      <label class="fps-control">FPS <input v-model.number="fps" class="input" min="1" max="60" type="number" /></label>
+      <label class="fps-control flex items-center gap-1 text-faint">FPS <input v-model.number="fps" class="input w-[54px]" min="1" max="60" type="number" /></label>
       <label class="check-row"><input v-model="onion" type="checkbox" /> 洋葱皮</label>
     </div>
-    <div v-if="onion" class="onion-controls">
-      <label class="onion-num">前 <input v-model.number="onionBefore" class="input" type="number" min="0" max="5" @change="clampOnionSettings" /></label>
-      <label class="onion-num">后 <input v-model.number="onionAfter" class="input" type="number" min="0" max="5" @change="clampOnionSettings" /></label>
-      <label class="onion-alpha">
+    <div v-if="onion" class="onion-controls flex-none min-h-9 flex items-center justify-center gap-2.5 py-1 px-2 border-t border-line text-faint text-caption">
+      <label class="onion-num flex items-center gap-1">前 <input v-model.number="onionBefore" class="input w-11" type="number" min="0" max="5" @change="clampOnionSettings" /></label>
+      <label class="onion-num flex items-center gap-1">后 <input v-model.number="onionAfter" class="input w-11" type="number" min="0" max="5" @change="clampOnionSettings" /></label>
+      <label class="onion-alpha flex items-center gap-1.5">
         透明度
-        <input v-model.number="onionAlpha" class="range" type="range" min="0.05" max="0.9" step="0.05" @change="clampOnionSettings" />
-        <span class="mono">{{ Math.round(onionAlpha * 100) }}%</span>
+        <input v-model.number="onionAlpha" class="range w-[90px]" type="range" min="0.05" max="0.9" step="0.05" @change="clampOnionSettings" />
+        <span class="mono min-w-8">{{ Math.round(onionAlpha * 100) }}%</span>
       </label>
-      <span class="onion-hint" title="当前帧为不透明画面时会完全盖住邻居层，洋葱皮只对透明背景的帧（如抠图后的精灵帧）可见">仅对透明帧可见（抠图后）</span>
+      <span class="onion-hint text-faint text-[11px] opacity-[0.85] cursor-help whitespace-nowrap" title="当前帧为不透明画面时会完全盖住邻居层，洋葱皮只对透明背景的帧（如抠图后的精灵帧）可见">仅对透明帧可见（抠图后）</span>
     </div>
   </div>
 </template>
-
-<style scoped>
-.preview-player {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.preview-large {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  padding: 8px;
-  background: var(--stage);
-}
-
-.preview-canvas {
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  image-rendering: pixelated;
-}
-
-.preview-large .muted {
-  color: var(--text-faint);
-}
-
-.preview-controls {
-  flex: none;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: center;
-  padding: 6px;
-  border-top: 1px solid var(--border);
-}
-
-.fps-control {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--text-faint);
-}
-
-.fps-control .input {
-  width: 54px;
-}
-
-.onion-controls {
-  flex: none;
-  min-height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 4px 8px;
-  border-top: 1px solid var(--border);
-  color: var(--text-faint);
-  font-size: var(--fs-caption);
-}
-
-.onion-num {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.onion-num .input {
-  width: 44px;
-}
-
-.onion-alpha {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.onion-alpha .range {
-  width: 90px;
-}
-
-.onion-alpha .mono {
-  min-width: 32px;
-  font-family: var(--font-mono);
-}
-
-.onion-hint {
-  color: var(--text-faint);
-  font-size: 11px;
-  opacity: 0.85;
-  cursor: help;
-  white-space: nowrap;
-}
-</style>

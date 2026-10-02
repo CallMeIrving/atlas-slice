@@ -114,11 +114,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="modal-backdrop" @click.self="emit('close')">
-    <section v-if="layer" class="modal preview-modal" role="dialog" aria-modal="true" aria-labelledby="layer-preview-title">
+    <section v-if="layer" class="modal flex w-[min(880px,calc(100vw-48px))] flex-col" role="dialog" aria-modal="true" aria-labelledby="layer-preview-title">
       <div class="modal-head">
-        <div class="head-text">
+        <div class="min-w-0">
           <h2 id="layer-preview-title">{{ layer.name }}</h2>
-          <p class="faint">
+          <p class="faint mt-0.5 mb-0 overflow-hidden text-ellipsis whitespace-nowrap">
             {{ CATEGORY_LABELS[layer.category] ?? layer.category }} · {{ layer.label }} ·
             置信 {{ layer.score > 0 ? layer.score.toFixed(2) : '—' }} ·
             {{ layer.alphaBbox.w }}×{{ layer.alphaBbox.h }} px ·
@@ -129,9 +129,9 @@ onBeforeUnmount(() => {
         <button class="btn-icon modal-close" aria-label="关闭" @click="emit('close')">×</button>
       </div>
 
-      <div ref="stageRef" class="stage">
+      <div ref="stageRef" class="mx-4 grid h-[56vh] min-h-[200px] place-items-center overflow-auto rounded-sm border border-line bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:16px_16px]">
         <img
-          class="preview"
+          class="flex-none select-none [image-rendering:pixelated]"
           :src="layer.pngUrl"
           :alt="layer.name"
           :style="{ width: `${displaySize.w}px`, height: `${displaySize.h}px` }"
@@ -139,92 +139,26 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="toolbar">
-        <div class="toolbar-group">
+      <div class="flex flex-wrap items-center justify-between gap-3 px-4 pt-3 pb-4">
+        <div class="flex items-center gap-2">
           <button class="btn btn-ghost" title="上一层（←）" @click="step(-1)">← 上一层</button>
           <span class="mono faint">{{ index + 1 }} / {{ layers.length }}</span>
           <button class="btn btn-ghost" title="下一层（→）" @click="step(1)">下一层 →</button>
         </div>
-        <div class="toolbar-group">
+        <div class="flex items-center gap-2">
           <button class="btn btn-ghost" title="缩小" @click="zoomStep(-1)">−</button>
-          <span class="mono zoom-label">{{ Math.round(scale * 100) }}%</span>
+          <span class="mono min-w-11 text-center">{{ Math.round(scale * 100) }}%</span>
           <button class="btn btn-ghost" title="放大" @click="zoomStep(1)">＋</button>
-          <button class="btn btn-ghost" :class="{ active: zoom === null }" @click="zoom = null">适应</button>
-          <button class="btn btn-ghost" :class="{ active: zoom === 1 }" @click="zoom = 1">1:1</button>
+          <button class="btn btn-ghost" :class="zoom === null ? 'border-accent-border text-accent-strong' : ''" @click="zoom = null">适应</button>
+          <button class="btn btn-ghost" :class="zoom === 1 ? 'border-accent-border text-accent-strong' : ''" @click="zoom = 1">1:1</button>
         </div>
-        <div class="toolbar-group">
+        <div class="flex items-center gap-2">
           <button class="btn" :disabled="downloading" @click="download">
             {{ downloading ? '下载中…' : '下载 PNG' }}
           </button>
         </div>
       </div>
-      <p v-if="error" class="warn">{{ error }}</p>
+      <p v-if="error" class="warn mx-4 mt-0 mb-3">{{ error }}</p>
     </section>
   </div>
 </template>
-
-<style scoped>
-.preview-modal {
-  width: min(880px, calc(100vw - 48px));
-  display: flex;
-  flex-direction: column;
-}
-
-.head-text {
-  min-width: 0;
-}
-
-.head-text p {
-  margin: 2px 0 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stage {
-  margin: 0 var(--sp-4);
-  height: 56vh;
-  min-height: 200px;
-  overflow: auto;
-  display: grid;
-  place-items: center;
-  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 16px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-}
-
-.preview {
-  flex: none;
-  image-rendering: pixelated;
-  user-select: none;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4) var(--sp-4);
-  flex-wrap: wrap;
-}
-
-.toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.zoom-label {
-  min-width: 44px;
-  text-align: center;
-}
-
-.toolbar-group .active {
-  color: var(--accent-strong);
-  border-color: var(--accent-border);
-}
-
-.preview-modal .warn {
-  margin: 0 var(--sp-4) var(--sp-3);
-}
-</style>

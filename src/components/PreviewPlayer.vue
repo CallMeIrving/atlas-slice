@@ -137,22 +137,25 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="preview" :class="{ open }">
-    <div class="preview-bar" @click="open = !open">
+  <div class="flex-none border-t border-line bg-surface" :class="{ open }">
+    <div
+      class="flex h-[30px] cursor-pointer items-center gap-3 px-3 text-caption font-semibold tracking-[0.08em] text-faint uppercase hover:bg-hover"
+      @click="open = !open"
+    >
       <span class="preview-toggle">动画预览</span>
       <span class="faint mono" v-if="open && frames.length">{{ index + 1 }} / {{ frames.length }}</span>
-      <span class="spacer"></span>
+      <span class="flex-1"></span>
       <button class="btn btn-icon" title="展开/收起" @click.stop="open = !open">{{ open ? '▾' : '▸' }}</button>
     </div>
-    <div v-if="open" class="preview-body">
-      <div class="preview-stage">
-        <canvas ref="previewRef" class="preview-canvas"></canvas>
-        <div v-if="!current" class="preview-empty faint">
+    <div v-if="open" class="grid max-h-60 grid-cols-[300px_1fr] gap-4 border-t border-line px-4 py-3">
+      <div class="relative h-50 overflow-hidden rounded-sm border border-line bg-stage">
+        <canvas ref="previewRef" class="block h-full w-full"></canvas>
+        <div v-if="!current" class="faint absolute inset-0 grid place-items-center">
           {{ store.frames.length ? '请在帧列表勾选要预览的帧' : '导入帧后在此预览动画' }}
         </div>
       </div>
-      <div class="preview-controls">
-        <div class="play-row">
+      <div class="flex min-w-0 flex-col gap-3">
+        <div class="flex flex-wrap items-center gap-2">
           <button class="btn btn-primary" :disabled="!frames.length" @click="togglePlay()">
             {{ playing ? '暂停' : '播放' }}
           </button>
@@ -162,19 +165,22 @@ onBeforeUnmount(() => {
             <input v-model="loop" type="checkbox" />
             循环
           </label>
-          <span class="spacer"></span>
+          <span class="flex-1"></span>
           <span class="faint">速度</span>
-          <input v-model.number="fps" class="input fps-input" type="number" min="1" max="30" />
+          <input v-model.number="fps" class="input fps-input w-[60px]" type="number" min="1" max="30" />
           <span class="faint mono">fps</span>
         </div>
-        <div class="strip-row">
-          <span class="faint strip-label">帧序（拖拽调整）</span>
-          <ul class="strip">
+        <div class="flex min-h-0 items-center gap-3">
+          <span class="faint strip-label flex-none text-caption">帧序（拖拽调整）</span>
+          <ul class="m-0 flex min-w-0 flex-1 list-none gap-1 overflow-x-auto p-1">
             <li
               v-for="(f, i) in frames"
               :key="f.id"
-              class="strip-item"
-              :class="{ active: i === index, drag: i === dragIdx }"
+              class="flex w-[52px] flex-none cursor-grab flex-col items-center gap-0.5 rounded-sm border p-[3px]"
+              :class="[
+                i === index ? 'border-accent-border bg-accent-dim' : 'border-line bg-raised',
+                i === dragIdx ? 'opacity-40' : '',
+              ]"
               draggable="true"
               @dragstart="onDragStart(i)"
               @dragover.prevent
@@ -182,8 +188,13 @@ onBeforeUnmount(() => {
               @click="index = i"
               :title="f.name"
             >
-              <img :src="thumbOf(f)" alt="" draggable="false" />
-              <span class="mono">{{ i }}</span>
+              <img
+                class="h-11 w-11 rounded-[2px] bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:10px_10px] object-contain pointer-events-none"
+                :src="thumbOf(f)"
+                alt=""
+                draggable="false"
+              />
+              <span class="mono text-[10px] text-faint">{{ i }}</span>
             </li>
           </ul>
           <button class="btn btn-ghost" @click="resetNatural()">自然排序</button>
@@ -192,142 +203,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.preview {
-  flex: none;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.preview-bar {
-  height: 30px;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: 0 var(--sp-3);
-  cursor: pointer;
-  font-size: var(--fs-caption);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.preview-bar:hover {
-  background: var(--surface-hover);
-}
-
-.spacer {
-  flex: 1;
-}
-
-.preview-body {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  gap: var(--sp-4);
-  padding: var(--sp-3) var(--sp-4);
-  border-top: 1px solid var(--border);
-  max-height: 240px;
-}
-
-.preview-stage {
-  position: relative;
-  height: 200px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--stage);
-  overflow: hidden;
-}
-
-.preview-canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.preview-empty {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-}
-
-.preview-controls {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
-
-.play-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
-
-.fps-input {
-  width: 60px;
-}
-
-.strip-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  min-height: 0;
-}
-
-.strip-label {
-  flex: none;
-  font-size: var(--fs-caption);
-}
-
-.strip {
-  flex: 1;
-  min-width: 0;
-  list-style: none;
-  margin: 0;
-  padding: var(--sp-1);
-  display: flex;
-  gap: 4px;
-  overflow-x: auto;
-}
-
-.strip-item {
-  flex: none;
-  width: 52px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  cursor: grab;
-  background: var(--surface-raised);
-}
-
-.strip-item.active {
-  border-color: var(--accent-border);
-  background: var(--accent-dim);
-}
-
-.strip-item.drag {
-  opacity: 0.4;
-}
-
-.strip-item img {
-  width: 44px;
-  height: 44px;
-  object-fit: contain;
-  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 10px 10px;
-  border-radius: 2px;
-  pointer-events: none;
-}
-
-.strip-item span {
-  font-size: 10px;
-  color: var(--text-faint);
-}
-</style>

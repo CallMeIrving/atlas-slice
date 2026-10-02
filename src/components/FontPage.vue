@@ -1070,29 +1070,29 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tool-page">
+  <div class="grid h-full min-h-0 grid-cols-[300px_minmax(0,1fr)_320px]">
     <!-- 隐藏的文件选择控件放在最外层：空状态下顶部栏的「导入字体」也要能用 -->
     <input ref="input" hidden type="file" accept=".ttf,.otf,.woff,.woff2,.ttc" @change="onFileChange" />
     <input ref="scanInput" hidden type="file" accept=".txt,.json,.csv" @change="onScanChange" />
 
     <!-- 左栏：字体来源与字符集（始终显示，未就绪时也要能选来源/填系统字体名） -->
-    <section class="tool-sidebar panel">
+    <section class="panel overflow-auto border-r border-line">
       <div class="section">
-        <h2 class="section-title">字体来源<span class="hint" :title="`支持 TTF / OTF / WOFF / WOFF2 / TTC，单文件 ≤ ${Math.round(MAX_FONT_FILE_SIZE / 1024 / 1024)}MB。上传字体跨设备表现一致，推荐优先使用。`">?</span></h2>
+        <h2 class="section-title">字体来源<span class="ml-1.25 inline-flex size-3.5 flex-none items-center justify-center rounded-full border border-line-strong align-middle text-[10px] leading-none font-normal tracking-normal text-faint hover:border-accent-border hover:bg-hover hover:text-ink" :title="`支持 TTF / OTF / WOFF / WOFF2 / TTC，单文件 ≤ ${Math.round(MAX_FONT_FILE_SIZE / 1024 / 1024)}MB。上传字体跨设备表现一致，推荐优先使用。`">?</span></h2>
         <label class="check-row"><input v-model="state.source" type="radio" value="upload" /> 上传字体文件</label>
-        <label class="check-row mt"><input v-model="state.source" type="radio" value="system" /> 使用系统字体</label>
+        <label class="check-row mt-2"><input v-model="state.source" type="radio" value="system" /> 使用系统字体</label>
 
         <template v-if="state.source === 'upload'">
-          <button class="btn full" @click="input?.click()">{{ fileName ? '更换字体文件' : '选择字体文件' }}</button>
-          <p v-if="fileName" class="muted mono ellipsis" :title="fileName">{{ fileName }}</p>
+          <button class="btn w-full justify-center" @click="input?.click()">{{ fileName ? '更换字体文件' : '选择字体文件' }}</button>
+          <p v-if="fileName" class="muted mono overflow-hidden text-ellipsis whitespace-nowrap" :title="fileName">{{ fileName }}</p>
         </template>
 
         <template v-else>
           <label class="field">
-            <span class="field-label">系统字体名<span class="hint" title="系统字体依赖本机安装，跨设备生成结果可能不一致。">?</span></span>
-            <input v-model="state.systemFamily" class="input full-input" type="text" spellcheck="false" placeholder="例如 PingFang SC / Arial" />
+            <span class="field-label">系统字体名<span class="ml-1.25 inline-flex size-3.5 flex-none items-center justify-center rounded-full border border-line-strong align-middle text-[10px] leading-none font-normal tracking-normal text-faint hover:border-accent-border hover:bg-hover hover:text-ink" title="系统字体依赖本机安装，跨设备生成结果可能不一致。">?</span></span>
+            <input v-model="state.systemFamily" class="input w-full" type="text" spellcheck="false" placeholder="例如 PingFang SC / Arial" />
           </label>
-          <p v-if="systemAvailable === false" class="error-text">未检测到该字体，将回落到默认无衬线字体。</p>
+          <p v-if="systemAvailable === false" class="text-caption text-danger">未检测到该字体，将回落到默认无衬线字体。</p>
           <p v-else-if="systemAvailable" class="muted">已检测到该字体（不同机器安装情况可能不同）。</p>
         </template>
       </div>
@@ -1100,65 +1100,65 @@ onBeforeUnmount(() => {
       <div class="section">
         <h2 class="section-title">字符集</h2>
         <label class="check-row"><input v-model="state.charset.ascii" type="checkbox" /> ASCII 可打印（32–126）</label>
-        <label class="check-row mt"><input v-model="state.charset.latin1" type="checkbox" /> Latin-1 补充（160–255）</label>
-        <label class="check-row mt"><input v-model="state.charset.digits" type="checkbox" /> 数字与常用标点</label>
+        <label class="check-row mt-2"><input v-model="state.charset.latin1" type="checkbox" /> Latin-1 补充（160–255）</label>
+        <label class="check-row mt-3"><input v-model="state.charset.digits" type="checkbox" /> 数字与常用标点</label>
 
-        <span class="field-label mt">CJK / 全角预设<span class="hint" title="可叠加多个预设；已选中的预设再次点击即取消。">?</span></span>
-        <div class="preset-grid">
+        <span class="field-label mt-3">CJK / 全角预设<span class="ml-1.25 inline-flex size-3.5 flex-none items-center justify-center rounded-full border border-line-strong align-middle text-[10px] leading-none font-normal tracking-normal text-faint hover:border-accent-border hover:bg-hover hover:text-ink" title="可叠加多个预设；已选中的预设再次点击即取消。">?</span></span>
+        <div class="mt-2 grid grid-cols-2 gap-2">
           <button
             v-for="preset in CHARSET_PRESETS"
             :key="preset.id"
-            class="btn btn-ghost preset-btn"
-            :class="{ active: isPresetActive(preset.ranges) }"
+            class="btn btn-ghost h-auto min-h-7.5 min-w-0 justify-start px-2 py-1 text-left text-[11px] leading-[1.3] whitespace-normal [word-break:break-word]"
+            :class="isPresetActive(preset.ranges) ? 'border-accent-border bg-accent-dim text-accent-strong' : ''"
             :aria-pressed="isPresetActive(preset.ranges)"
             :title="preset.heavy ? `${preset.ranges}；字符量很大，会被 6000 上限截断，建议改用「扫描文本」；再次点击可取消` : `${preset.ranges}；再次点击可取消`"
             @click="applyPreset(preset.ranges)"
           >{{ preset.label }}</button>
         </div>
 
-        <label class="field mt">
+        <label class="field mt-3">
           <span class="field-label">自定义字符</span>
-          <textarea v-model="state.charset.custom" class="input textarea" spellcheck="false" rows="3" placeholder="可直接粘贴中文或任意字符"></textarea>
+          <textarea v-model="state.charset.custom" class="input h-auto resize-y p-2 font-mono text-caption leading-normal" spellcheck="false" rows="3" placeholder="可直接粘贴中文或任意字符"></textarea>
         </label>
-        <label class="field mt">
-          <span class="field-label">Unicode 范围<span class="hint" title="十六进制码点，支持「起-止」与「U+」前缀，逗号或空格分隔；单次生成上限 6000 个字符。">?</span></span>
-          <input v-model="state.charset.ranges" class="input full-input mono" type="text" spellcheck="false" placeholder="4E00-4E20, 3000-303F" />
+        <label class="field mt-3">
+          <span class="field-label">Unicode 范围<span class="ml-1.25 inline-flex size-3.5 flex-none items-center justify-center rounded-full border border-line-strong align-middle text-[10px] leading-none font-normal tracking-normal text-faint hover:border-accent-border hover:bg-hover hover:text-ink" title="十六进制码点，支持「起-止」与「U+」前缀，逗号或空格分隔；单次生成上限 6000 个字符。">?</span></span>
+          <input v-model="state.charset.ranges" class="input mono w-full" type="text" spellcheck="false" placeholder="4E00-4E20, 3000-303F" />
         </label>
-        <button class="btn full mt" title="只保留文本里实际出现的字符，适合按项目文案生成最小字符集。" @click="scanInput?.click()">扫描文本提取用字（TXT / JSON / CSV）</button>
+        <button class="btn mt-3 w-full justify-center" title="只保留文本里实际出现的字符，适合按项目文案生成最小字符集。" @click="scanInput?.click()">扫描文本提取用字（TXT / JSON / CSV）</button>
         <p v-if="charCount" class="badge badge-accent">当前 {{ charCount }} 个字符</p>
-        <p v-else class="error-text">当前 0 个字符：请至少勾选一项预设，或填写自定义字符 / Unicode 范围</p>
+        <p v-else class="text-caption text-danger">当前 0 个字符：请至少勾选一项预设，或填写自定义字符 / Unicode 范围</p>
       </div>
 
       <div class="section">
-        <h2 class="section-title">覆盖率与排除<span class="hint" title="生成前逐字比对目标字体与兜底字体的度量，标出实际没有字形的字符。">?</span></h2>
-        <button class="btn full" :disabled="!ready || !charCount" @click="runCoverage">检测字体覆盖率</button>
+        <h2 class="section-title">覆盖率与排除<span class="ml-1.25 inline-flex size-3.5 flex-none items-center justify-center rounded-full border border-line-strong align-middle text-[10px] leading-none font-normal tracking-normal text-faint hover:border-accent-border hover:bg-hover hover:text-ink" title="生成前逐字比对目标字体与兜底字体的度量，标出实际没有字形的字符。">?</span></h2>
+        <button class="btn w-full justify-center" :disabled="!ready || !charCount" @click="runCoverage">检测字体覆盖率</button>
         <template v-if="coverage && coverageFresh">
           <p class="badge" :class="{ 'badge-accent': coverage.ratio === 1 }">
             覆盖 {{ coverage.supported }} / {{ coverage.total }}（{{ Math.round(coverage.ratio * 100) }}%）
           </p>
           <p v-if="coverage.missing.length" class="warn">
             缺失 {{ coverage.missing.length }} 个字符，将由系统字体兜底：
-            <span class="mono missing-list">{{ coverage.missing.join('') }}</span>
+            <span class="mono break-all">{{ coverage.missing.join('') }}</span>
           </p>
           <p v-else class="muted">全部字符都有对应字形。</p>
-          <label class="check-row mt"><input v-model="state.excludeMissing" type="checkbox" /> 生成时自动排除缺失字符</label>
+          <label class="check-row mt-3"><input v-model="state.excludeMissing" type="checkbox" /> 生成时自动排除缺失字符</label>
         </template>
         <p v-else-if="coverage" class="muted">字符集或字号已改变，请重新检测。</p>
 
-        <label class="field mt">
-          <span class="field-label">手动排除的字符<span class="hint" title="排除的字符不进入图集，也不会影响其它字形的度量。">?</span></span>
-          <textarea v-model="state.excluded" class="input textarea" spellcheck="false" rows="2" placeholder="粘贴要跳过的字符"></textarea>
+        <label class="field mt-3">
+          <span class="field-label">手动排除的字符<span class="ml-1.25 inline-flex size-3.5 flex-none items-center justify-center rounded-full border border-line-strong align-middle text-[10px] leading-none font-normal tracking-normal text-faint hover:border-accent-border hover:bg-hover hover:text-ink" title="排除的字符不进入图集，也不会影响其它字形的度量。">?</span></span>
+          <textarea v-model="state.excluded" class="input h-auto resize-y p-2 font-mono text-caption leading-normal" spellcheck="false" rows="2" placeholder="粘贴要跳过的字符"></textarea>
         </label>
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
+    <main class="relative flex min-h-0 min-w-0 flex-col">
+      <div class="flex h-16 flex-none items-center justify-between gap-4 border-b border-line px-6">
         <div>
-          <h2>位图字体工作区</h2>
-          <p>{{ ready ? `${activeFamily} · ${state.sizePx}px · ${modeLabel}` : '上传字体文件或指定系统字体后自动生成' }}</p>
+          <h2 class="m-0 text-head">位图字体工作区</h2>
+          <p class="mt-0.5 mb-0 text-faint">{{ ready ? `${activeFamily} · ${state.sizePx}px · ${modeLabel}` : '上传字体文件或指定系统字体后自动生成' }}</p>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-3">
           <span v-if="state.pageCount" class="badge">{{ state.glyphCount }} 字形 · {{ state.pageCount }} 页</span>
           <button class="btn" :disabled="!ready || generating" @click="runBuild">重新生成</button>
           <!-- 空状态下也要能从这里导入，故不加 disabled -->
@@ -1166,58 +1166,58 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="tool-body">
+      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6">
         <div v-if="!ready" class="empty-state">
           <span class="big">Aa</span>
           <strong>还没有可用的字体</strong>
           <span>上传一份 TTF / OTF / WOFF / WOFF2 / TTC 字体文件（≤ {{ Math.round(MAX_FONT_FILE_SIZE / 1024 / 1024) }}MB），或填写已安装的系统字体名</span>
-          <div class="empty-actions">
+          <div class="mt-3 flex gap-2">
             <button class="btn btn-primary" @click="input?.click()">选择字体文件</button>
             <button class="btn" @click="state.source = 'system'">改用系统字体</button>
           </div>
         </div>
 
         <template v-else>
-          <section class="preview-block">
-            <div class="preview-head">
-              <h3 class="faint">文本效果预览</h3>
-              <label class="check-row small"><input v-model="state.showMetrics" type="checkbox" /> 基线与行高辅助线</label>
+          <section class="flex flex-col gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <h3 class="faint m-0 text-caption font-medium">文本效果预览</h3>
+              <label class="check-row text-[11px]"><input v-model="state.showMetrics" type="checkbox" /> 基线与行高辅助线</label>
             </div>
-            <textarea v-model="state.previewText" class="input preview-textarea" spellcheck="false" rows="2" placeholder="输入预览文本，支持换行"></textarea>
-            <div class="preview-stage">
-              <canvas ref="previewCanvas" class="preview-canvas"></canvas>
+            <textarea v-model="state.previewText" class="input h-auto resize-y p-2 leading-normal" spellcheck="false" rows="2" placeholder="输入预览文本，支持换行"></textarea>
+            <div class="flex items-center justify-center overflow-auto rounded-sm border border-line bg-stage p-3 [background-image:linear-gradient(45deg,rgb(255_255_255/5%)_25%,transparent_25%,transparent_75%,rgb(255_255_255/5%)_75%),linear-gradient(45deg,rgb(255_255_255/5%)_25%,transparent_25%,transparent_75%,rgb(255_255_255/5%)_75%)] [background-position:0_0,8px_8px] [background-size:16px_16px]">
+              <canvas ref="previewCanvas" class="block max-w-full"></canvas>
             </div>
             <p class="muted">按当前生成结果逐字拼绘（含字间距、字距调整、描边与阴影），与引擎依 BMFont 度量排版的结果一致。</p>
             <p v-if="isDistanceFieldMode(state.mode)" class="muted">距离场模式此处按阈值近似着色；引擎里由 shader 采样距离场，缩放更平滑。</p>
           </section>
 
-          <section v-if="state.scene !== 'none'" class="preview-block">
-            <div class="preview-head">
-              <h3 class="faint">场景预览（{{ SCENES.find((item) => item.value === state.scene)?.label }}）</h3>
+          <section v-if="state.scene !== 'none'" class="flex flex-col gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <h3 class="faint m-0 text-caption font-medium">场景预览（{{ SCENES.find((item) => item.value === state.scene)?.label }}）</h3>
             </div>
-            <div class="preview-stage">
-              <canvas ref="sceneCanvas" class="scene-canvas"></canvas>
+            <div class="flex items-center justify-center overflow-auto rounded-sm border border-line bg-stage p-3 [background-image:linear-gradient(45deg,rgb(255_255_255/5%)_25%,transparent_25%,transparent_75%,rgb(255_255_255/5%)_75%),linear-gradient(45deg,rgb(255_255_255/5%)_25%,transparent_25%,transparent_75%,rgb(255_255_255/5%)_75%)] [background-position:0_0,8px_8px] [background-size:16px_16px]">
+              <canvas ref="sceneCanvas" class="block max-w-full rounded-sm"></canvas>
             </div>
             <p v-if="sceneMissing.length" class="muted">样本文案缺字（不在当前字符集内，已跳过）：{{ sceneMissing.join(' ') }}</p>
             <p class="muted">用生成的字形与度量拼出游戏内常见排版，用来核对字号、行高与可读性。</p>
           </section>
 
-          <section class="preview-block">
-            <div class="preview-head">
-              <h3 class="faint">图集预览（{{ state.pageUrls[state.activePage] ? `${built?.pages[state.activePage]?.width}×${built?.pages[state.activePage]?.height}` : '未生成' }}）</h3>
-              <div class="preview-tools">
+          <section class="flex flex-col gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <h3 class="faint m-0 text-caption font-medium">图集预览（{{ state.pageUrls[state.activePage] ? `${built?.pages[state.activePage]?.width}×${built?.pages[state.activePage]?.height}` : '未生成' }}）</h3>
+              <div class="flex flex-wrap items-center gap-2">
                 <span v-if="built" class="badge">占用率 本页 {{ pageOccupancy }}% · 整体 {{ totalOccupancy }}%</span>
-                <span v-if="built" class="muted small">生成耗时 {{ buildMs }}ms</span>
-                <div v-if="state.pageCount > 1" class="page-tabs">
+                <span v-if="built" class="muted text-[11px]">生成耗时 {{ buildMs }}ms</span>
+                <div v-if="state.pageCount > 1" class="flex flex-wrap gap-1">
                   <button
                     v-for="index in state.pageCount"
                     :key="index"
-                    class="page-tab"
-                    :class="{ active: state.activePage === index - 1 }"
+                    class="min-w-6 h-[22px] rounded-sm border px-1.5 py-0 font-mono text-[11px] leading-[normal]"
+                    :class="state.activePage === index - 1 ? 'border-accent-border bg-accent-dim text-accent-strong' : 'border-line text-muted hover:bg-hover hover:text-ink'"
                     @click="state.activePage = index - 1"
                   >{{ index }}</button>
                 </div>
-                <div v-if="state.pageUrls[state.activePage]" class="seg zoom-seg">
+                <div v-if="state.pageUrls[state.activePage]" class="seg [&_.seg-item]:min-w-[34px] [&_.seg-item]:cursor-pointer [&_.seg-item]:justify-center">
                   <button
                     v-for="option in ATLAS_ZOOMS"
                     :key="String(option.value)"
@@ -1228,22 +1228,22 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-            <div ref="atlasStage" class="preview-stage atlas-stage">
-              <canvas v-show="hasAtlasPage" ref="atlasCanvas" class="atlas-canvas"></canvas>
+            <div ref="atlasStage" class="flex h-[min(52vh,480px)] min-h-40 items-center justify-center overflow-auto rounded-sm border border-line bg-stage p-3 [background-image:linear-gradient(45deg,rgb(255_255_255/5%)_25%,transparent_25%,transparent_75%,rgb(255_255_255/5%)_75%),linear-gradient(45deg,rgb(255_255_255/5%)_25%,transparent_25%,transparent_75%,rgb(255_255_255/5%)_75%)] [background-position:0_0,8px_8px] [background-size:16px_16px]">
+              <canvas v-show="hasAtlasPage" ref="atlasCanvas" class="m-auto block flex-none"></canvas>
               <p v-if="!hasAtlasPage" class="muted">{{ atlasPlaceholder }}</p>
             </div>
           </section>
 
-          <section v-if="built" class="preview-block">
-            <div class="preview-head">
-              <h3 class="faint">字形列表（{{ visibleGlyphs.total }} 个）</h3>
-              <div class="preview-tools">
-                <input v-model="glyphFilter" class="input glyph-search" type="text" spellcheck="false" placeholder="搜索字符 / 码点 / U+41" />
+          <section v-if="built" class="flex flex-col gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <h3 class="faint m-0 text-caption font-medium">字形列表（{{ visibleGlyphs.total }} 个）</h3>
+              <div class="flex flex-wrap items-center gap-2">
+                <input v-model="glyphFilter" class="input w-50" type="text" spellcheck="false" placeholder="搜索字符 / 码点 / U+41" />
                 <button class="btn btn-ghost" :disabled="!overrideCount" @click="resetAllOverrides">重置微调（{{ overrideCount }}）</button>
               </div>
             </div>
-            <div class="glyph-table">
-              <div class="glyph-row glyph-head">
+            <div class="max-h-80 divide-y divide-line overflow-auto rounded-sm border border-line">
+              <div class="sticky top-0 z-1 grid grid-cols-[46px_56px_1fr_1fr_1fr_30px_30px] items-center gap-1 bg-surface px-1.5 py-0.5 text-[11px] text-faint">
                 <span>字符</span>
                 <span>码点</span>
                 <span>xoffset</span>
@@ -1251,14 +1251,14 @@ onBeforeUnmount(() => {
                 <span>xadvance</span>
                 <span></span>
               </div>
-              <div v-for="glyph in visibleGlyphs.items" :key="glyph.code" class="glyph-row">
-                <span class="mono glyph-char">{{ glyph.char === ' ' ? '␠' : glyph.char }}</span>
+              <div v-for="glyph in visibleGlyphs.items" :key="glyph.code" class="grid grid-cols-[46px_56px_1fr_1fr_1fr_30px_30px] items-center gap-1 px-1.5 py-0.5">
+                <span class="mono text-center text-[15px]">{{ glyph.char === ' ' ? '␠' : glyph.char }}</span>
                 <span class="mono faint">{{ glyph.code }}</span>
-                <input class="input metric-input" type="number" :value="glyph.xoffset" @change="setGlyphMetric(glyph.code, 'xoffset', inputValue($event))" />
-                <input class="input metric-input" type="number" :value="glyph.yoffset" @change="setGlyphMetric(glyph.code, 'yoffset', inputValue($event))" />
-                <input class="input metric-input" type="number" :value="glyph.xadvance" @change="setGlyphMetric(glyph.code, 'xadvance', inputValue($event))" />
-                <button class="glyph-action" title="重置该字形微调" @click="resetGlyph(glyph.code)">↺</button>
-                <button class="glyph-action" title="从字符集中排除该字形" @click="excludeGlyph(glyph)">✕</button>
+                <input class="input h-6 px-1 py-0 text-right font-mono text-[11px]" type="number" :value="glyph.xoffset" @change="setGlyphMetric(glyph.code, 'xoffset', inputValue($event))" />
+                <input class="input h-6 px-1 py-0 text-right font-mono text-[11px]" type="number" :value="glyph.yoffset" @change="setGlyphMetric(glyph.code, 'yoffset', inputValue($event))" />
+                <input class="input h-6 px-1 py-0 text-right font-mono text-[11px]" type="number" :value="glyph.xadvance" @change="setGlyphMetric(glyph.code, 'xadvance', inputValue($event))" />
+                <button class="grid size-5.5 place-items-center rounded-sm border border-line text-[12px] text-muted hover:bg-hover hover:text-ink" title="重置该字形微调" @click="resetGlyph(glyph.code)">↺</button>
+                <button class="grid size-5.5 place-items-center rounded-sm border border-line text-[12px] text-muted hover:bg-hover hover:text-ink" title="从字符集中排除该字形" @click="excludeGlyph(glyph)">✕</button>
               </div>
             </div>
             <p v-if="visibleGlyphs.total > GLYPH_LIST_LIMIT" class="muted">仅显示前 {{ GLYPH_LIST_LIMIT }} 个，用搜索缩小范围。</p>
@@ -1266,19 +1266,19 @@ onBeforeUnmount(() => {
         </template>
       </div>
 
-      <div v-if="generating" class="loading-veil">
-        <div class="loading-card">
-          <span class="spinner"></span>
+      <div v-if="generating" class="absolute inset-0 z-20 grid place-items-center bg-[rgb(13_15_19/0.55)]">
+        <div class="flex items-center gap-4 rounded-md border border-line-strong bg-surface px-6 py-5 shadow-popover">
+          <span class="size-5.5 flex-none animate-spin rounded-full border-2 border-line-strong border-t-accent"></span>
           <div>
-            <strong>正在生成字形图集</strong>
-            <p v-if="progress.total" class="muted small mono">{{ progress.done }}/{{ progress.total }}</p>
+            <strong class="text-body">正在生成字形图集</strong>
+            <p v-if="progress.total" class="muted mono mt-0.5 mb-0 text-[11px]">{{ progress.done }}/{{ progress.total }}</p>
           </div>
         </div>
       </div>
     </main>
 
     <!-- 右栏：渲染参数与导出 -->
-    <section class="tool-sidepanel panel">
+    <section class="panel overflow-auto border-l border-line">
       <div class="section">
         <h2 class="section-title">位图字体生成</h2>
         <p class="muted">本地处理，不上传素材</p>
@@ -1286,7 +1286,7 @@ onBeforeUnmount(() => {
 
       <div class="section">
         <h2 class="section-title">渲染参数</h2>
-        <div class="field-row">
+        <div class="field-row gap-3 [&_.field]:min-w-0 [&_.field]:flex-1 [&_.input]:w-full">
           <label class="field">
             <span class="field-label">字号（px）</span>
             <input v-model.number="state.sizePx" class="input" type="number" min="6" max="256" />
@@ -1296,9 +1296,9 @@ onBeforeUnmount(() => {
             <input v-model.number="state.padding" class="input" type="number" min="0" max="8" />
           </label>
         </div>
-        <label class="field mt">
+        <label class="field mt-3">
           <span class="field-label">字形表示</span>
-          <select v-model="state.mode" class="select full-input">
+          <select v-model="state.mode" class="select w-full">
             <option value="bitmap">位图（覆盖度 alpha）</option>
             <option value="sdf">SDF 距离场（单通道）</option>
             <option value="msdf">MSDF（RGB 三通道，保尖角）</option>
@@ -1306,7 +1306,7 @@ onBeforeUnmount(() => {
           </select>
         </label>
         <template v-if="isDistanceFieldMode(state.mode)">
-          <div class="field-row mt">
+          <div class="field-row mt-3 gap-3 [&_.field]:min-w-0 [&_.field]:flex-1 [&_.input]:w-full">
             <label class="field">
               <span class="field-label">Distance Range（px）</span>
               <input v-model.number="state.sdfSpread" class="input" type="number" min="1" max="32" />
@@ -1320,7 +1320,7 @@ onBeforeUnmount(() => {
         </template>
         <p v-else class="muted">位图模式边缘最锐利，但只适合按生成字号 1:1 使用。</p>
 
-        <div class="field-row mt">
+        <div class="field-row mt-3 gap-3 [&_.field]:min-w-0 [&_.field]:flex-1 [&_.input]:w-full">
           <label class="field">
             <span class="field-label">字间距（px）</span>
             <input v-model.number="state.letterSpacing" class="input" type="number" min="-8" max="16" />
@@ -1335,7 +1335,7 @@ onBeforeUnmount(() => {
 
       <div v-if="metrics" class="section">
         <h2 class="section-title">字体度量</h2>
-        <div class="metric-grid">
+        <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-caption [&_.mono]:text-right">
           <span class="faint">Ascent</span><span class="mono">{{ metrics.ascent }}px</span>
           <span class="faint">Descent</span><span class="mono">{{ metrics.descent }}px</span>
           <span class="faint">Base</span><span class="mono">{{ metrics.base }}px</span>
@@ -1349,33 +1349,33 @@ onBeforeUnmount(() => {
         <h2 class="section-title">图集尺寸</h2>
         <label class="field">
           <span class="field-label">单页最大边长</span>
-          <select v-model.number="state.maxAtlasSize" class="select full-input">
+          <select v-model.number="state.maxAtlasSize" class="select w-full">
             <option :value="512">512</option>
             <option :value="1024">1024</option>
             <option :value="2048">2048</option>
             <option :value="4096">4096</option>
           </select>
         </label>
-        <label class="check-row mt"><input v-model="state.powerOfTwo" type="checkbox" /> 宽高取 2 的幂</label>
+        <label class="check-row mt-3"><input v-model="state.powerOfTwo" type="checkbox" /> 宽高取 2 的幂</label>
         <p class="muted">放不下的字形自动溢出到下一页，各页尺寸保持一致。</p>
       </div>
 
       <div class="section">
         <h2 class="section-title">字形效果</h2>
         <template v-if="state.mode === 'bitmap'">
-          <div class="field-row">
+          <div class="field-row gap-3 [&_.field]:min-w-0 [&_.field]:flex-1 [&_.input]:w-full">
             <label class="field">
               <span class="field-label">描边宽度（px）</span>
               <input v-model.number="state.strokeWidth" class="input" type="number" min="0" max="8" />
             </label>
             <label class="field">
               <span class="field-label">描边颜色</span>
-              <input v-model="state.strokeColor" class="input color-input" type="color" />
+              <input v-model="state.strokeColor" class="input h-7.5 w-full p-0.5" type="color" />
             </label>
           </div>
-          <label class="check-row mt"><input v-model="state.shadowEnabled" type="checkbox" /> 启用投影</label>
+          <label class="check-row mt-3"><input v-model="state.shadowEnabled" type="checkbox" /> 启用投影</label>
           <template v-if="state.shadowEnabled">
-            <div class="field-row mt">
+            <div class="field-row mt-3 gap-3 [&_.field]:min-w-0 [&_.field]:flex-1 [&_.input]:w-full">
               <label class="field">
                 <span class="field-label">偏移 X / Y</span>
                 <input v-model.number="state.shadowX" class="input" type="number" min="-8" max="8" />
@@ -1385,9 +1385,9 @@ onBeforeUnmount(() => {
                 <input v-model.number="state.shadowY" class="input" type="number" min="-8" max="8" />
               </label>
             </div>
-            <label class="field mt">
+            <label class="field mt-3">
               <span class="field-label">投影颜色</span>
-              <input v-model="state.shadowColor" class="input color-input" type="color" />
+              <input v-model="state.shadowColor" class="input h-7.5 w-full p-0.5" type="color" />
             </label>
           </template>
           <p class="muted">描边与阴影在图集生成前绘制进字形像素，引擎无需再处理。</p>
@@ -1400,22 +1400,22 @@ onBeforeUnmount(() => {
         <label class="check-row"><input v-model="state.kerning" type="checkbox" /> 自动计算常见字距对</label>
         <p class="muted">按逐行墨迹范围求最小水平间隙，只对前 512 个字符计算，最多产出 4000 对。</p>
         <p v-if="built" class="badge">当前生效 {{ kernBadge.total }} 对（手动 {{ kernBadge.manual }} 对）</p>
-        <div class="kern-add">
-          <input v-model="newKern.first" class="input kern-char" type="text" maxlength="2" placeholder="A" />
-          <input v-model="newKern.second" class="input kern-char" type="text" maxlength="2" placeholder="V" />
-          <input v-model.number="newKern.amount" class="input kern-amount" type="number" min="-32" max="0" />
+        <div class="mt-2 grid grid-cols-[1fr_1fr_1fr_auto] gap-1">
+          <input v-model="newKern.first" class="input px-1 py-0 text-center font-mono" type="text" maxlength="2" placeholder="A" />
+          <input v-model="newKern.second" class="input px-1 py-0 text-center font-mono" type="text" maxlength="2" placeholder="V" />
+          <input v-model.number="newKern.amount" class="input px-1 py-0 font-mono" type="number" min="-32" max="0" />
           <button class="btn" @click="addKernPair">添加</button>
         </div>
-        <div v-if="state.kerningPairs.length" class="kern-list">
-          <div v-for="(pair, index) in state.kerningPairs" :key="`${pair.first}-${pair.second}`" class="kern-row">
+        <div v-if="state.kerningPairs.length" class="mt-2 max-h-45 divide-y divide-line overflow-auto">
+          <div v-for="(pair, index) in state.kerningPairs" :key="`${pair.first}-${pair.second}`" class="grid grid-cols-[1fr_1fr_22px] items-center gap-1 py-0.5">
             <span class="mono">{{ charOf(pair.first) }}{{ charOf(pair.second) }}</span>
             <input
-              class="input kern-amount"
+              class="input px-1 py-0 font-mono"
               type="number"
               :value="pair.amount"
               @change="pair.amount = Math.round(Number(inputValue($event)))"
             />
-            <button class="glyph-action" title="删除该字距对" @click="removeKernPair(index)">✕</button>
+            <button class="grid size-5.5 place-items-center rounded-sm border border-line text-[12px] text-muted hover:bg-hover hover:text-ink" title="删除该字距对" @click="removeKernPair(index)">✕</button>
           </div>
         </div>
       </div>
@@ -1424,7 +1424,7 @@ onBeforeUnmount(() => {
         <h2 class="section-title">场景预览</h2>
         <label class="field">
           <span class="field-label">模板</span>
-          <select v-model="state.scene" class="select full-input">
+          <select v-model="state.scene" class="select w-full">
             <option v-for="item in SCENES" :key="item.value" :value="item.value">{{ item.label }}</option>
           </select>
         </label>
@@ -1433,136 +1433,24 @@ onBeforeUnmount(() => {
       <div class="section">
         <h2 class="section-title">导出</h2>
         <label class="check-row"><input v-model="state.withFnt" type="checkbox" /> BMFont 文本（.fnt）</label>
-        <label class="check-row mt"><input v-model="state.withXml" type="checkbox" /> BMFont XML（.xml）</label>
-        <label class="check-row mt"><input v-model="state.withJson" type="checkbox" /> JSON 元数据（.json）</label>
-        <label class="field mt">
+        <label class="check-row mt-2"><input v-model="state.withXml" type="checkbox" /> BMFont XML（.xml）</label>
+        <label class="check-row mt-3"><input v-model="state.withJson" type="checkbox" /> JSON 元数据（.json）</label>
+        <label class="field mt-3">
           <span class="field-label">文件名</span>
-          <input v-model="state.name" class="input full-input mono" type="text" spellcheck="false" placeholder="font" />
+          <input v-model="state.name" class="input mono w-full" type="text" spellcheck="false" placeholder="font" />
         </label>
         <p class="muted">输出内容：图集 PNG + 勾选的元数据，统一打包为 ZIP。字距对写进 .fnt / .xml 的 kernings 段与 JSON。</p>
       </div>
 
-      <div class="section actions">
-        <button class="btn btn-primary full" :disabled="!built || exporting" @click="exportFont">
+      <div class="section flex flex-col gap-2">
+        <button class="btn btn-primary w-full justify-center" :disabled="!built || exporting" @click="exportFont">
           {{ exporting ? '打包中…' : '导出字体 ZIP' }}
         </button>
-        <button class="btn btn-ghost full" :disabled="!ready" @click="resetAll">重置</button>
-        <p v-if="errorText" class="error-text">{{ errorText }}</p>
+        <button class="btn btn-ghost w-full justify-center" :disabled="!ready" @click="resetAll">重置</button>
+        <p v-if="errorText" class="text-caption text-danger">{{ errorText }}</p>
         <p v-else-if="warnText" class="warn">{{ warnText }}</p>
-        <p v-if="infoText" class="muted small">{{ infoText }}</p>
+        <p v-if="infoText" class="muted text-[11px]">{{ infoText }}</p>
       </div>
     </section>
   </div>
 </template>
-
-<style scoped>
-/* 三栏骨架：左栏来源与字符集 + 中间预览 + 右栏参数导出 */
-.tool-page { display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.tool-main { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: var(--fs-head); }
-.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 24px; }
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-.full { width: 100%; justify-content: center; }
-.full-input { width: 100%; }
-.actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-.mt { margin-top: var(--sp-3); }
-.section > p + .field, .section > .field + .field { margin-top: var(--sp-3); }
-.field-row { display: flex; gap: var(--sp-3); }
-.field-row .field { flex: 1; min-width: 0; }
-.field-row .input { width: 100%; }
-.textarea { height: auto; padding: var(--sp-2); line-height: 1.5; resize: vertical; font-family: var(--font-mono); font-size: var(--fs-caption); }
-.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.section-title + .check-row + .check-row { margin-top: var(--sp-2); }
-.color-input { width: 100%; height: 30px; padding: 2px; }
-/* 预设按钮两列等宽：minmax(0, 1fr) 让列可收缩，避免长标签把 300px 左栏撑出横向滚动条 */
-.preset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); margin-top: var(--sp-2); }
-.preset-btn {
-  min-width: 0; height: auto; min-height: 30px; justify-content: flex-start; padding: 4px 8px;
-  font-size: 11px; line-height: 1.3; text-align: left;
-  /* 覆盖 .btn 的 nowrap：标签过长时换行，而不是撑破栏宽 */
-  white-space: normal; word-break: break-word;
-}
-.preset-btn.active { color: var(--accent-strong); background: var(--accent-dim); border-color: var(--accent-border); }
-/* 说明文案收进「?」徽标，鼠标经过用原生 title 展示（左栏是滚动容器，CSS 气泡会被裁掉）。
-   光标保持默认箭头，避免 hover 时指针变形 */
-.hint {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 14px; height: 14px; margin-left: 5px; flex: none;
-  border: 1px solid var(--border-strong); border-radius: 50%;
-  color: var(--text-faint); font-size: 10px; font-weight: 400; line-height: 1; letter-spacing: 0;
-  vertical-align: middle;
-}
-.hint:hover { color: var(--text); border-color: var(--accent-border); background: var(--surface-hover); }
-.missing-list { word-break: break-all; }
-/* 预览区：棋盘底衬托字形透明边缘 */
-.preview-block { display: flex; flex-direction: column; gap: var(--sp-2); }
-.preview-block h3 { margin: 0; font-size: var(--fs-caption); font-weight: 500; }
-.preview-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
-.preview-tools { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-.zoom-seg .seg-item { min-width: 34px; justify-content: center; cursor: pointer; }
-.preview-textarea { height: auto; padding: var(--sp-2); line-height: 1.5; resize: vertical; }
-.empty-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); }
-.preview-stage {
-  display: flex; align-items: center; justify-content: center; padding: var(--sp-3);
-  border: 1px solid var(--border); border-radius: var(--radius-s); overflow: auto;
-  background-color: var(--stage);
-  background-image: linear-gradient(45deg, rgb(255 255 255 / 5%) 25%, transparent 25%, transparent 75%, rgb(255 255 255 / 5%) 75%),
-    linear-gradient(45deg, rgb(255 255 255 / 5%) 25%, transparent 25%, transparent 75%, rgb(255 255 255 / 5%) 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 8px 8px;
-}
-.preview-canvas { display: block; max-width: 100%; }
-.scene-canvas { display: block; max-width: 100%; border-radius: var(--radius-s); }
-/* 图集框给定高度：让「适应」能把整页图集等比缩进框内，不再下半页被视口切掉；
-   固定倍率时画布超出框，靠 margin:auto 居中、溢出后改为顶/左对齐，框内可滚动查看 */
-.atlas-stage { min-height: 160px; height: min(52vh, 480px); }
-.atlas-canvas { display: block; flex: none; margin: auto; }
-.page-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
-.page-tab {
-  min-width: 24px; height: 22px; padding: 0 6px;
-  border: 1px solid var(--border); border-radius: var(--radius-s);
-  color: var(--text-muted); font: 11px var(--font-mono);
-}
-.page-tab:hover { color: var(--text); background: var(--surface-hover); }
-.page-tab.active { color: var(--accent-strong); background: var(--accent-dim); border-color: var(--accent-border); }
-/* 字形列表：紧凑表格，逐字改度量 */
-.glyph-search { width: 200px; }
-.glyph-table { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-s); }
-.glyph-row { display: grid; grid-template-columns: 46px 56px 1fr 1fr 1fr 30px 30px; align-items: center; gap: 4px; padding: 2px 6px; }
-.glyph-row + .glyph-row { border-top: 1px solid var(--border); }
-.glyph-head { position: sticky; top: 0; z-index: 1; background: var(--surface); color: var(--text-faint); font-size: 11px; }
-.glyph-char { font-size: 15px; text-align: center; }
-.metric-input { height: 24px; padding: 0 4px; font: 11px var(--font-mono); text-align: right; }
-.glyph-action {
-  height: 22px; width: 22px; display: grid; place-items: center;
-  border: 1px solid var(--border); border-radius: var(--radius-s); color: var(--text-muted); font-size: 12px;
-}
-.glyph-action:hover { color: var(--text); background: var(--surface-hover); }
-/* 字距编辑 */
-.kern-add { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 4px; margin-top: var(--sp-2); }
-.kern-char { text-align: center; padding: 0 4px; font-family: var(--font-mono); }
-.kern-amount { padding: 0 4px; font-family: var(--font-mono); }
-.kern-list { margin-top: var(--sp-2); max-height: 180px; overflow: auto; }
-.kern-row { display: grid; grid-template-columns: 1fr 1fr 22px; align-items: center; gap: 4px; padding: 2px 0; }
-.kern-row + .kern-row { border-top: 1px solid var(--border); }
-/* 度量面板 */
-.metric-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3); font-size: var(--fs-caption); }
-.metric-grid .mono { text-align: right; }
-.small { font-size: 11px; }
-/* 加载遮罩 */
-.loading-veil { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(13, 15, 19, 0.55); }
-.loading-card { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border: 1px solid var(--border-strong); border-radius: var(--radius-m); background: var(--surface); box-shadow: var(--shadow-pop); }
-.loading-card strong { font-size: var(--fs-body); }
-.loading-card p { margin: 2px 0 0; }
-.spinner { width: 22px; height: 22px; flex: none; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.error-text { color: var(--danger, #e8463a); font-size: var(--fs-caption); }
-/* 中栏信息密度高，窄屏时压缩右栏与左栏 */
-@media (max-width: 1280px) {
-  .tool-page { grid-template-columns: 260px minmax(0, 1fr) 290px; }
-}
-</style>

@@ -161,7 +161,7 @@ async function apply(): Promise<void> {
 
 <template>
   <div class="modal-backdrop" @click.self="emit('close')">
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="spritesheet-title">
+    <section class="modal w-[min(620px,calc(100vw-48px))] max-h-[calc(100vh-48px)] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="spritesheet-title">
       <div class="modal-head">
         <div>
           <h2 id="spritesheet-title">导出雪碧图</h2>
@@ -169,8 +169,8 @@ async function apply(): Promise<void> {
         </div>
         <button class="btn-icon modal-close" aria-label="关闭" @click="emit('close')">×</button>
       </div>
-      <div class="modal-body">
-        <div class="form-grid">
+      <div class="modal-body [&_.field]:min-w-0">
+        <div class="grid grid-cols-2 gap-x-4 gap-y-3">
           <label class="field">
             <span class="field-label">导出范围</span>
             <select v-model="scope" class="select">
@@ -220,31 +220,31 @@ async function apply(): Promise<void> {
             <div class="field-row"><input v-model.number="margin" class="input" type="number" min="0" step="1" /><span class="faint mono">px</span></div>
           </label>
         </div>
-        <div class="preview-panel">
-          <div class="preview-label">
+        <div class="mt-4">
+          <div class="mb-2 flex justify-between text-caption text-muted">
             <span>布局预览</span>
             <span class="faint mono">{{ sheetW }}×{{ sheetH }} px</span>
           </div>
-          <div class="preview-canvas-wrap">
-            <canvas ref="previewRef" class="preview-canvas"></canvas>
-            <span v-if="!frames.length" class="preview-empty faint">当前范围没有帧</span>
+          <div class="relative h-[220px] overflow-hidden rounded-sm border border-line bg-stage">
+            <canvas ref="previewRef" class="block h-full w-full"></canvas>
+            <span v-if="!frames.length" class="faint absolute inset-0 grid place-items-center">当前范围没有帧</span>
           </div>
         </div>
-        <div class="summary">
+        <div class="my-4 flex flex-wrap gap-4 rounded-sm border border-line p-3 font-mono text-caption text-muted">
           <span>{{ layout === 'grid' ? `单元格 ${cellW}×${cellH}` : '按实际尺寸紧凑排列' }}</span>
           <span>{{ rowCount }} 行 × {{ Math.max(1, Math.round(columns)) }} 列</span>
           <span>背景：透明</span>
         </div>
-        <label class="field filename-field">
+        <label class="field mb-3">
           <span class="field-label">文件名</span>
           <input v-model="filename" class="input" type="text" spellcheck="false" />
         </label>
-        <div class="check-group">
+        <div class="flex gap-4">
           <label class="check-row"><input v-model="withMetaJson" type="checkbox" /> JSON 坐标</label>
           <label class="check-row"><input v-model="withMetaPlist" type="checkbox" /> plist 坐标</label>
         </div>
-        <p v-if="!frames.length" class="hint error-hint">当前范围没有可导出的帧，请先勾选帧或切换为全部帧。</p>
-        <p v-else-if="layout === 'grid' && !fits" class="hint error-hint">单元格尺寸小于至少一帧，请增大宽度或高度。</p>
+        <p v-if="!frames.length" class="hint text-danger">当前范围没有可导出的帧，请先勾选帧或切换为全部帧。</p>
+        <p v-else-if="layout === 'grid' && !fits" class="hint text-danger">单元格尺寸小于至少一帧，请增大宽度或高度。</p>
       </div>
       <div class="modal-foot">
         <button class="btn" @click="emit('close')">取消</button>
@@ -253,19 +253,3 @@ async function apply(): Promise<void> {
     </section>
   </div>
 </template>
-
-<style scoped>
-/* 雪碧图弹窗需要在共用外壳基础上加宽，选择器提高一级特异性以稳定覆盖 base.css */
-section.modal { width: min(620px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow-y: auto; }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3) var(--sp-4); }
-.field { min-width: 0; }
-.preview-panel { margin-top: var(--sp-4); }
-.preview-label { display: flex; justify-content: space-between; margin-bottom: var(--sp-2); font-size: var(--fs-caption); color: var(--text-muted); }
-.preview-canvas-wrap { position: relative; height: 220px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.preview-canvas { display: block; width: 100%; height: 100%; }
-.preview-empty { position: absolute; inset: 0; display: grid; place-items: center; }
-.summary { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin: var(--sp-4) 0; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-s); color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; }
-.filename-field { margin-bottom: var(--sp-3); }
-.check-group { display: flex; gap: var(--sp-4); }
-.error-hint { color: var(--danger); }
-</style>

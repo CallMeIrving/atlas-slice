@@ -572,8 +572,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="stage-shell" @dragover.prevent @drop.prevent="onDrop">
-    <div class="stage-toolbar">
+  <div class="flex h-full min-h-0 flex-col bg-stage" @dragover.prevent @drop.prevent="onDrop">
+    <div class="flex flex-none items-center gap-2 border-b border-line bg-surface px-3 py-2">
       <div class="seg">
         <button
           class="seg-item"
@@ -591,24 +591,24 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <button class="btn" :disabled="!store.source" @click="autoFit()">自动贴合</button>
-      <span class="toolbar-hint faint" v-if="store.viewMode === 'box'">
+      <span class="toolbar-hint faint ml-2 text-caption" v-if="store.viewMode === 'box'">
         <span class="kbd">F</span> 贴合 · <span class="kbd">方向键</span> 微调 · <span class="kbd">Del</span> 删除 · 拖拽框选 ·
         空格 / 右键 平移
       </span>
-      <span class="toolbar-hint faint" v-else>
+      <span class="toolbar-hint faint ml-2 text-caption" v-else>
         点击选中 · 拖拽控制点调整边框 · <span class="kbd">方向键</span> 微调 · 拖拽平移
       </span>
-      <span class="spacer"></span>
+      <span class="flex-1"></span>
       <button class="btn btn-icon" title="缩小" :disabled="!store.source" @click="setZoom(store.zoom / 1.25)">−</button>
-      <button class="btn btn-icon zoom-label" title="适配窗口" :disabled="!store.source" @click="zoomFit()">
+      <button class="btn btn-icon w-[58px] font-mono" title="适配窗口" :disabled="!store.source" @click="zoomFit()">
         {{ Math.round(store.zoom * 100) }}%
       </button>
       <button class="btn btn-icon" title="放大" :disabled="!store.source" @click="setZoom(store.zoom * 1.25)">+</button>
     </div>
-    <div ref="viewportRef" class="stage-viewport">
+    <div ref="viewportRef" class="relative min-h-0 flex-1 overflow-hidden">
       <canvas
         ref="canvasRef"
-        class="stage-canvas"
+        class="absolute inset-0 block h-full w-full"
         :style="{ cursor }"
         @mousedown="onDown"
         @mousemove="onMove"
@@ -617,83 +617,18 @@ onBeforeUnmount(() => {
         @wheel="onWheel"
         @contextmenu.prevent
       ></canvas>
-      <div v-if="!store.source" class="empty-state stage-empty">
+      <div v-if="!store.source" class="empty-state absolute inset-0">
         <p class="big">拖入图集图片开始</p>
         <p class="faint">支持 PNG / WebP / JPEG · 单文件 ≤ 10MB</p>
         <p class="faint">再导入 TexturePacker JSON / plist / XML 元数据，或直接「自动识别」</p>
       </div>
     </div>
-    <div class="stage-status">
+    <div class="flex flex-none items-center gap-4 border-t border-line bg-surface px-3 py-1 text-caption">
       <span class="mono faint" v-if="store.hover">光标 {{ store.hover.x }}, {{ store.hover.y }}</span>
       <span v-else class="faint">悬停查看坐标</span>
-      <span class="spacer"></span>
+      <span class="flex-1"></span>
       <span class="mono faint" v-if="store.source">{{ store.source.width }} × {{ store.source.height }}</span>
       <span class="mono faint" v-else>未载入图像</span>
     </div>
   </div>
 </template>
-
-<style scoped>
-.stage-shell {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--stage);
-}
-
-.stage-toolbar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-}
-
-.spacer {
-  flex: 1;
-}
-
-.toolbar-hint {
-  font-size: var(--fs-caption);
-  margin-left: var(--sp-2);
-}
-
-.zoom-label {
-  font-family: var(--font-mono);
-  width: 58px;
-}
-
-.stage-viewport {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  overflow: hidden;
-}
-
-.stage-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.stage-empty {
-  position: absolute;
-  inset: 0;
-}
-
-.stage-status {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-  padding: 4px var(--sp-3);
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  font-size: var(--fs-caption);
-}
-</style>

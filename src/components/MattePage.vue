@@ -447,71 +447,71 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tool-page" :class="{ 'no-list': !workspace.matte.sourceUrl }">
+  <div class="grid h-full min-h-0" :class="workspace.matte.sourceUrl ? 'grid-cols-[280px_minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)_320px]'">
     <!-- 左栏：已导入源图列表，未导入时整栏不显示 -->
-    <section v-if="workspace.matte.sourceUrl" class="tool-sidebar panel">
+    <section v-if="workspace.matte.sourceUrl" class="panel overflow-auto border-r border-line">
       <div class="section">
         <h2 class="section-title">图集列表</h2>
-        <ul class="asset-list">
-          <li class="asset-row">
-            <img class="asset-thumb" :src="workspace.matte.sourceUrl" :alt="workspace.matte.fileName" draggable="false" />
-            <span class="asset-name" :title="workspace.matte.fileName">{{ workspace.matte.fileName }}</span>
+        <ul class="m-0 flex list-none flex-col gap-2 p-0">
+          <li class="flex items-center gap-2">
+            <img class="size-10 flex-none rounded-sm border border-line bg-stage object-contain" :src="workspace.matte.sourceUrl" :alt="workspace.matte.fileName" draggable="false" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="workspace.matte.fileName">{{ workspace.matte.fileName }}</span>
             <!-- 尺寸取工作区预览 img 元素的自然尺寸 -->
             <span v-if="image?.naturalWidth" class="mono faint">{{ image?.naturalWidth }}×{{ image?.naturalHeight }}</span>
-            <button class="btn btn-icon btn-danger" title="移除" @click="removeSource">×</button>
+            <button class="btn btn-icon btn-danger ml-auto text-faint" title="移除" @click="removeSource">×</button>
           </li>
         </ul>
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
-        <div><h2>抠图工作区</h2><p>{{ workspace.matte.fileName || '导入一张图片开始处理' }}</p></div>
-        <div class="header-actions">
+    <main class="flex min-h-0 min-w-0 flex-col">
+      <div class="flex h-16 flex-none items-center justify-between gap-4 border-b border-line px-6">
+        <div><h2 class="m-0 text-head">抠图工作区</h2><p class="mt-0.5 mb-0 text-faint">{{ workspace.matte.fileName || '导入一张图片开始处理' }}</p></div>
+        <div class="flex items-center gap-3">
           <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="load(($event.target as HTMLInputElement).files?.[0])" />
           <button class="btn btn-primary" @click="openFile">导入图片</button>
-          <div class="canvas-header-actions">
-            <div v-if="workspace.matte.sourceUrl" class="zoom-controls" aria-label="画布缩放控制">
-              <button class="zoom-button" type="button" title="缩小" aria-label="缩小" :disabled="zoomLevel <= 0.2" @click="zoomOut">−</button>
-              <output class="zoom-value" aria-live="polite">{{ zoomPercent }}</output>
-              <button class="zoom-button" type="button" title="放大" aria-label="放大" :disabled="zoomLevel >= 8" @click="zoomIn">+</button>
-              <button class="fit-button" type="button" title="完整适配画布" @click="resetView">适应画布</button>
+          <div class="flex items-center gap-4">
+            <div v-if="workspace.matte.sourceUrl" class="flex items-center gap-1.5 border-r border-line pr-3.5" aria-label="画布缩放控制">
+              <button class="h-[30px] w-[30px] cursor-pointer rounded-sm border border-line bg-raised text-[17px] leading-none text-ink disabled:cursor-default disabled:opacity-40 enabled:hover:border-accent enabled:hover:text-accent" type="button" title="缩小" aria-label="缩小" :disabled="zoomLevel <= 0.2" @click="zoomOut">−</button>
+              <output class="min-w-[46px] text-center font-mono text-[12px] text-muted" aria-live="polite">{{ zoomPercent }}</output>
+              <button class="h-[30px] w-[30px] cursor-pointer rounded-sm border border-line bg-raised text-[17px] leading-none text-ink disabled:cursor-default disabled:opacity-40 enabled:hover:border-accent enabled:hover:text-accent" type="button" title="放大" aria-label="放大" :disabled="zoomLevel >= 8" @click="zoomIn">+</button>
+              <button class="h-[30px] cursor-pointer rounded-sm border border-line bg-raised px-2.5 text-[12px] text-ink hover:border-accent hover:text-accent" type="button" title="完整适配画布" @click="resetView">适应画布</button>
             </div>
             <div class="seg"><button v-for="item in backgroundOptions" :key="item.value" class="seg-item" :class="{ active: workspace.matte.background === item.value }" @click="setBackground(item.value)">{{ item.label }}</button></div>
           </div>
         </div>
       </div>
-      <div ref="canvasRef" class="matte-canvas" :class="{ dragging: isDragging, 'can-pan': canPanImage, 'is-panning': !!panPointer }" :style="backgroundStyle" @dragover.prevent="isDragging = true" @dragleave="isDragging = false" @drop="handleDrop" @click="sampleColor" @wheel.prevent="zoomAtPointer" @pointerdown="onPanStart" @pointermove="onPanMove" @pointerup="onPanEnd" @pointercancel="onPanEnd">
-        <div v-if="!workspace.matte.sourceUrl" class="drop-hint" @click="openFile"><span class="big">＋</span><strong>拖入图片</strong><span>PNG / JPG / WebP</span></div>
+      <div ref="canvasRef" class="relative m-6 grid min-h-0 flex-1 place-items-center overflow-hidden border" :class="[isDragging ? 'border-accent' : 'border-line', panPointer ? 'cursor-grabbing select-none' : (canPanImage ? 'cursor-grab' : '')]" :style="backgroundStyle" @dragover.prevent="isDragging = true" @dragleave="isDragging = false" @drop="handleDrop" @click="sampleColor" @wheel.prevent="zoomAtPointer" @pointerdown="onPanStart" @pointermove="onPanMove" @pointerup="onPanEnd" @pointercancel="onPanEnd">
+        <div v-if="!workspace.matte.sourceUrl" class="flex cursor-pointer flex-col items-center gap-2 text-faint" @click="openFile"><span class="text-[36px] text-accent">＋</span><strong class="text-ink">拖入图片</strong><span>PNG / JPG / WebP</span></div>
         <template v-else>
-          <img ref="image" :class="{ sampling }" :style="imageViewStyle" :src="workspace.matte.resultUrl || workspace.matte.sourceUrl" alt="预览" draggable="false" @load="fitImageToCanvas(true)" />
+          <img ref="image" class="h-auto max-h-[calc(100%-2px)] w-auto max-w-[calc(100%-2px)] origin-center object-contain" :class="{ 'cursor-crosshair': sampling }" :style="imageViewStyle" :src="workspace.matte.resultUrl || workspace.matte.sourceUrl" alt="预览" draggable="false" @load="fitImageToCanvas(true)" />
         </template>
       </div>
     </main>
 
     <!-- 右栏：处理方式、模型状态与导出配置 -->
-    <section class="tool-sidepanel panel">
+    <section class="panel overflow-auto border-l border-line">
       <div class="section"><h2 class="section-title">抠图工具</h2><p class="muted">本地处理，不上传素材</p></div>
       <div class="section">
-        <div class="method-title-row">
+        <div class="flex items-start justify-between gap-2">
           <h2 class="section-title">处理方式</h2>
-          <button ref="helpButton" class="help-button" type="button" aria-label="查看处理方式说明和推荐" title="处理方式说明和推荐" @click="openHelp">?</button>
+          <button ref="helpButton" class="-mt-[3px] grid size-[21px] flex-none cursor-pointer place-items-center rounded-full border border-line-strong bg-transparent font-sans font-semibold text-[12px] leading-none text-muted hover:border-accent hover:text-accent focus-visible:outline-none" type="button" aria-label="查看处理方式说明和推荐" title="处理方式说明和推荐" @click="openHelp">?</button>
         </div>
-        <select v-model="workspace.matte.mode" class="select full">
+        <select v-model="workspace.matte.mode" class="select w-full justify-center">
           <option v-for="option in modeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
         <template v-if="workspace.matte.mode === 'color'">
-          <button class="btn full" :class="{ 'btn-primary': sampling }" @click="sampling = !sampling">{{ sampling ? '请点击图片取色' : '吸取背景颜色' }}</button>
-          <div v-if="workspace.matte.sampledColor" class="sampled-color"><span class="color-chip" :style="{ background: workspace.matte.sampledColor }"></span><span>已取色 {{ workspace.matte.sampledColor }}</span><button class="btn-icon" title="清除取色" @click="workspace.matte.sampledColor = ''">×</button></div>
+          <button class="btn w-full justify-center" :class="{ 'btn-primary': sampling }" @click="sampling = !sampling">{{ sampling ? '请点击图片取色' : '吸取背景颜色' }}</button>
+          <div v-if="workspace.matte.sampledColor" class="flex items-center gap-2 font-mono text-[12px] text-muted"><span class="size-[18px] rounded-[3px] border border-line-strong" :style="{ background: workspace.matte.sampledColor }"></span><span>已取色 {{ workspace.matte.sampledColor }}</span><button class="btn-icon ml-auto text-faint" title="清除取色" @click="workspace.matte.sampledColor = ''">×</button></div>
         </template>
         <template v-if="workspace.matte.mode === 'color' || workspace.matte.mode === 'solid'">
-          <label class="field"><span class="field-label">颜色容差 {{ workspace.matte.tolerance }}</span><input v-model.number="workspace.matte.tolerance" class="range" type="range" min="1" max="100" /></label>
+          <label class="field"><span class="field-label">颜色容差 {{ workspace.matte.tolerance }}</span><input v-model.number="workspace.matte.tolerance" class="w-full accent-accent" type="range" min="1" max="100" /></label>
           <p v-if="workspace.matte.mode === 'solid'" class="muted">自动采样图像边缘主色作为背景基准，适合纯色背景</p>
         </template>
         <template v-if="isAiMode">
           <div v-if="workspace.matte.mode === 'rmbg'" class="warn">⚠️ RMBG 仅供评估，不可商用</div>
           <label v-if="workspace.matte.mode === 'imgly'" class="field"><span class="field-label">模型</span>
-            <select v-model="workspace.matte.imglyModel" class="select">
+            <select v-model="workspace.matte.imglyModel" class="select w-full">
               <option value="isnet_fp16">ISNet FP16（推荐）</option>
               <option value="isnet">ISNet 原版</option>
               <option value="isnet_quint8">ISNet 量化（最快）</option>
@@ -523,24 +523,24 @@ onBeforeUnmount(() => {
               <input v-model="workspace.matte.rmbgModelId" class="input" type="text" />
             </label>
             <label class="field"><span class="field-label">精度</span>
-              <select v-model="workspace.matte.aiDtype" class="select" title="FP16 是推荐默认值，可降低浏览器内存占用；FP32 最吃内存；Q8 仅适用于模型提供量化权重的情况（本模型没有的精度不会列出）">
+              <select v-model="workspace.matte.aiDtype" class="select w-full" title="FP16 是推荐默认值，可降低浏览器内存占用；FP32 最吃内存；Q8 仅适用于模型提供量化权重的情况（本模型没有的精度不会列出）">
                 <option v-for="option in dtypeChoices" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
             </label>
           </template>
           <label class="field"><span class="field-label">模型源</span>
-            <select v-model="workspace.matte.aiModelHost" class="select">
+            <select v-model="workspace.matte.aiModelHost" class="select w-full">
               <option value="huggingface.co">HuggingFace（默认）</option>
               <option value="hf-mirror.com">国内镜像 hf-mirror.com</option>
             </select>
           </label>
           <label class="field"><span class="field-label">运行设备</span>
-            <select v-model="workspace.matte.aiDevice" class="select">
+            <select v-model="workspace.matte.aiDevice" class="select w-full">
               <option v-for="option in deviceChoices" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
           <label class="field"><span class="field-label">最大边长</span>
-            <select v-model.number="workspace.matte.aiMaxSide" class="select">
+            <select v-model.number="workspace.matte.aiMaxSide" class="select w-full">
               <option v-for="option in AI_MAX_SIDE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
@@ -550,42 +550,42 @@ onBeforeUnmount(() => {
       </div>
       <div class="section">
         <h2 class="section-title">模型状态</h2>
-        <div v-for="engine in AI_ENGINES" :key="engine.key" class="model-row">
-          <span :title="`${engine.label} ${engine.size} · ${engine.description}`">{{ engine.label }} <span class="muted">{{ engine.size }}</span></span>
-          <span class="badge" :class="{ 'badge-accent': workspace.matte.mode === engine.key }">{{ workspace.matte.mode === engine.key ? modelStateLabel(modelStateForEngine(engine.key)) : engine.license }}</span>
+        <div v-for="engine in AI_ENGINES" :key="engine.key" class="flex min-h-8 items-center justify-between gap-2 text-muted">
+          <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" :title="`${engine.label} ${engine.size} · ${engine.description}`">{{ engine.label }} <span class="muted">{{ engine.size }}</span></span>
+          <span class="badge flex-none whitespace-nowrap" :class="{ 'badge-accent': workspace.matte.mode === engine.key }">{{ workspace.matte.mode === engine.key ? modelStateLabel(modelStateForEngine(engine.key)) : engine.license }}</span>
         </div>
-        <button v-if="isAiMode" class="btn full preload-button" :disabled="selectedModelState === 'loading' || selectedModelState === 'ready'" @click="preloadSelectedModel">{{ selectedModelState === 'ready' ? '模型已加载' : '预加载当前模型' }}</button>
-        <p v-if="isAiMode" class="muted model-state-hint">“未加载”表示当前页面还没初始化模型；预加载会优先复用浏览器缓存或本地模型目录。</p>
-        <div v-if="workspace.matte.aiStatus" class="ai-status">
-          <p class="muted">{{ workspace.matte.aiStatus }}</p>
-          <div v-if="workspace.matte.aiProgress >= 0" class="progress-track"><div class="progress-fill" :style="{ width: workspace.matte.aiProgress + '%' }"></div></div>
+        <button v-if="isAiMode" class="btn mt-2 w-full justify-center" :disabled="selectedModelState === 'loading' || selectedModelState === 'ready'" @click="preloadSelectedModel">{{ selectedModelState === 'ready' ? '模型已加载' : '预加载当前模型' }}</button>
+        <p v-if="isAiMode" class="muted mt-2 mb-0 leading-normal">“未加载”表示当前页面还没初始化模型；预加载会优先复用浏览器缓存或本地模型目录。</p>
+        <div v-if="workspace.matte.aiStatus" class="mt-2">
+          <p class="muted mt-0 mb-1 text-[12px] break-all">{{ workspace.matte.aiStatus }}</p>
+          <div v-if="workspace.matte.aiProgress >= 0" class="h-1.5 overflow-hidden rounded-[3px] bg-line"><div class="h-full bg-accent [transition:width_0.2s_ease]" :style="{ width: workspace.matte.aiProgress + '%' }"></div></div>
         </div>
       </div>
-      <div class="section actions">
-        <button class="btn btn-primary full" :disabled="runDisabled" @click="runMatte">{{ workspace.matte.status === 'processing' ? '处理中…' : '开始抠图' }}</button>
-        <button class="btn full" :disabled="!workspace.matte.resultUrl" @click="download">导出透明 PNG</button>
-        <button class="btn full" :disabled="!workspace.matte.resultUrl" @click="exportPackage">导出 PNG + 配置 ZIP</button>
-        <button class="btn btn-ghost full" :disabled="!workspace.matte.sourceUrl || workspace.matte.status === 'processing'" @click="resetMatte">重置抠图</button>
+      <div class="section flex flex-col gap-2">
+        <button class="btn btn-primary w-full justify-center" :disabled="runDisabled" @click="runMatte">{{ workspace.matte.status === 'processing' ? '处理中…' : '开始抠图' }}</button>
+        <button class="btn w-full justify-center" :disabled="!workspace.matte.resultUrl" @click="download">导出透明 PNG</button>
+        <button class="btn w-full justify-center" :disabled="!workspace.matte.resultUrl" @click="exportPackage">导出 PNG + 配置 ZIP</button>
+        <button class="btn btn-ghost w-full justify-center" :disabled="!workspace.matte.sourceUrl || workspace.matte.status === 'processing'" @click="resetMatte">重置抠图</button>
       </div>
     </section>
-    <div v-if="helpOpen" class="help-backdrop" @click.self="closeHelp">
-      <section class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="matte-help-title" aria-describedby="matte-help-intro">
-        <header class="help-head">
+    <div v-if="helpOpen" class="fixed inset-0 z-30 grid place-items-center bg-[rgb(8_10_14_/_0.72)] p-6" @click.self="closeHelp">
+      <section class="flex max-h-[min(760px,calc(100vh-32px))] w-[min(820px,calc(100vw-32px))] flex-col overflow-hidden rounded-md border border-line-strong bg-surface shadow-popover" role="dialog" aria-modal="true" aria-labelledby="matte-help-title" aria-describedby="matte-help-intro">
+        <header class="flex items-center justify-between gap-4 border-b border-line px-5 py-4">
           <div>
-            <h2 id="matte-help-title">处理方式说明与推荐</h2>
-            <p id="matte-help-intro">按背景特点和目标精度选择；这些抠图均在本地浏览器处理。</p>
+            <h2 id="matte-help-title" class="m-0 text-head">处理方式说明与推荐</h2>
+            <p id="matte-help-intro" class="mt-1 mb-0 text-caption text-muted">按背景特点和目标精度选择；这些抠图均在本地浏览器处理。</p>
           </div>
-          <button ref="helpCloseButton" class="btn-icon help-close" type="button" aria-label="关闭说明" @click="closeHelp">×</button>
+          <button ref="helpCloseButton" class="btn-icon ml-auto text-[22px] text-faint" type="button" aria-label="关闭说明" @click="closeHelp">×</button>
         </header>
-        <div class="help-content">
-          <article v-for="item in methodHelp" :key="item.title" class="help-card">
-            <div class="help-card-title"><h3>{{ item.title }}</h3><span class="help-kind">{{ item.kind }}</span></div>
-            <p>{{ item.description }}</p>
-            <p><strong>适用场景：</strong>{{ item.scene }}</p>
-            <p class="help-recommend"><strong>推荐：</strong>{{ item.recommendation }}</p>
+        <div class="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-3 overflow-y-auto px-5 py-4">
+          <article v-for="item in methodHelp" :key="item.title" class="min-w-0 rounded-sm border border-line bg-raised p-3">
+            <div class="mb-2 flex items-center justify-between gap-2"><h3 class="m-0 text-[14px]">{{ item.title }}</h3><span class="flex-none rounded-full bg-hover px-1.5 py-0.5 text-[10px] text-muted">{{ item.kind }}</span></div>
+            <p class="mt-1.5 mb-0 text-[12px] leading-[1.55] text-muted">{{ item.description }}</p>
+            <p class="mt-1.5 mb-0 text-[12px] leading-[1.55] text-muted"><strong class="font-semibold text-ink">适用场景：</strong>{{ item.scene }}</p>
+            <p class="mt-1.5 mb-0 text-[12px] leading-[1.55] text-ink"><strong class="font-semibold text-ink">推荐：</strong>{{ item.recommendation }}</p>
           </article>
         </div>
-        <footer class="help-foot">
+        <footer class="flex items-center justify-between gap-4 border-t border-line px-5 py-4 text-[12px] text-faint">
           <span>快速建议：纯色背景试“纯色背景”；一般图片试 ISNet；细节较多时试 RMBG-1.4。</span>
           <button class="btn btn-primary" type="button" @click="closeHelp">知道了</button>
         </footer>
@@ -593,62 +593,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* 页面骨架：左栏源图列表 + 中间工作区 + 右栏参数配置（与九宫格页同构的三栏布局）；未导入时左栏隐藏 */
-.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
-.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.method-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.method-title-row .section-title { margin-bottom: var(--sp-2); }
-.help-button { display: grid; place-items: center; width: 21px; height: 21px; flex: none; margin-top: -3px; border: 1px solid var(--border-strong); border-radius: 50%; background: transparent; color: var(--text-muted); font: 600 12px/1 var(--font-sans); cursor: pointer; }
-.help-button:hover, .help-button:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
-.help-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; background: rgba(8, 10, 14, .72); }
-.help-dialog { display: flex; flex-direction: column; width: min(820px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 32px)); overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-m); background: var(--surface); box-shadow: var(--shadow-pop); }
-.help-head, .help-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; }
-.help-head { border-bottom: 1px solid var(--border); }
-.help-head h2 { margin: 0; font-size: var(--fs-head); }
-.help-head p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--fs-caption); }
-.help-close { color: var(--text-muted); font-size: 22px; }
-.help-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px 20px; overflow-y: auto; }
-.help-card { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised, var(--surface)); }
-.help-card-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.help-card h3 { margin: 0; font-size: 14px; }
-.help-kind { flex: none; padding: 2px 6px; border-radius: 999px; background: var(--surface-hover, var(--border)); color: var(--text-muted); font-size: 10px; }
-.help-card p { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
-.help-card strong { color: var(--text); font-weight: 600; }
-.help-card .help-recommend { color: var(--text); }
-.help-foot { border-top: 1px solid var(--border); color: var(--text-faint); font-size: 12px; }
-@media (max-width: 640px) { .help-backdrop { padding: 10px; }.help-content { grid-template-columns: 1fr; padding: 12px; }.help-foot { align-items: flex-start; flex-direction: column; }.help-dialog { max-height: calc(100vh - 20px); } }
-.tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: 16px; }.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-.canvas-header-actions { display: flex; align-items: center; gap: 16px; }
-/* 左栏源图列表条目：缩略图 + 名称 + 尺寸 + 移除 */
-.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
-.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-.zoom-controls { display: flex; align-items: center; gap: 6px; padding-right: 14px; border-right: 1px solid var(--border); }
-.zoom-button, .fit-button { height: 30px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised); color: var(--text); cursor: pointer; }
-.zoom-button { width: 30px; font-size: 17px; line-height: 1; }.zoom-button:disabled { opacity: .4; cursor: default; }
-.zoom-value { min-width: 46px; color: var(--text-muted); font: 12px var(--font-mono); text-align: center; }
-.fit-button { padding: 0 10px; font-size: 12px; }.fit-button:hover, .zoom-button:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
-.matte-canvas { flex: 1; min-height: 0; margin: 24px; display: grid; place-items: center; border: 1px solid var(--border); overflow: hidden; position: relative; }.matte-canvas.dragging { border-color: var(--accent); }.matte-canvas img { width: auto; height: auto; max-width: calc(100% - 2px); max-height: calc(100% - 2px); object-fit: contain; image-rendering: auto; transform-origin: center center; }.matte-canvas.can-pan { cursor: grab; }.matte-canvas.is-panning { cursor: grabbing; user-select: none; }.matte-canvas img.sampling { cursor: crosshair; }
-.drop-hint { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text-faint); cursor: pointer; }.drop-hint .big { font-size: 36px; color: var(--accent); }.drop-hint strong { color: var(--text); }
-.full { width: 100%; justify-content: center; }.model-row { display: flex; align-items: center; gap: 8px; min-height: 32px; color: var(--text-muted); justify-content: space-between; }.model-row > span:first-child { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }.model-row .badge { flex: none; white-space: nowrap; }.range { width: 100%; accent-color: var(--accent); }.actions { display: flex; flex-direction: column; gap: 8px; }
-.preload-button { margin-top: 8px; }
-.model-state-hint { margin: 8px 0 0; line-height: 1.5; }
-.sampling { cursor: crosshair; }.sampled-color { display:flex; align-items:center; gap:8px; color:var(--text-muted); font:12px var(--font-mono); }.color-chip { width:18px; height:18px; border:1px solid var(--border-strong); border-radius:3px; }.btn-icon { margin-left:auto; color:var(--text-faint); }
-
-.select { width: 100%; }
-.ai-status { margin-top: 8px; }.ai-status p { margin: 0 0 4px; font-size: 12px; word-break: break-all; }
-.progress-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }.progress-fill { height: 100%; background: var(--accent); transition: width 0.2s ease; }
-/* 窄屏适配：三栏收窄 */
-@media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
-  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
-}
-</style>

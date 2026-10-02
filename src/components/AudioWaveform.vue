@@ -141,8 +141,8 @@ watch(() => props.selectable, draw)
 <template>
   <canvas
     ref="canvas"
-    class="waveform"
-    :class="{ selectable: props.selectable, dragging }"
+    class="block w-full"
+    :class="props.selectable && (dragging ? 'cursor-ew-resize touch-none' : 'cursor-crosshair touch-none')"
     :style="{ height: `${props.height}px` }"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
@@ -150,17 +150,3 @@ watch(() => props.selectable, draw)
     @pointercancel="onPointerUp"
   ></canvas>
 </template>
-
-<style scoped>
-.waveform {
-  display: block;
-  width: 100%;
-}
-.waveform.selectable {
-  cursor: crosshair;
-  touch-action: none;
-}
-.waveform.selectable.dragging {
-  cursor: ew-resize;
-}
-</style>

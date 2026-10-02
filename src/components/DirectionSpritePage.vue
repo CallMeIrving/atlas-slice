@@ -297,26 +297,26 @@ function resetAll(): void {
 </script>
 
 <template>
-  <div class="tool-page" :class="{ 'no-list': !state.groups.length }">
+  <div class="grid h-full min-h-0" :class="state.groups.length ? 'grid-cols-[280px_minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)_320px]'">
     <!-- 左栏：基准帧组列表，没有帧组时整栏不显示 -->
-    <section v-if="state.groups.length" class="tool-sidebar panel">
+    <section v-if="state.groups.length" class="panel border-r border-line overflow-auto">
       <div class="section">
         <h2 class="section-title">基准帧组</h2>
-        <p class="muted hint">每组导入同一方向、同一动作的逐帧序列；如正面组派生左/下，背面组派生上。建议命名 walk_00.png。</p>
+        <p class="muted mt-2 mb-0 text-caption">每组导入同一方向、同一动作的逐帧序列；如正面组派生左/下，背面组派生上。建议命名 walk_00.png。</p>
         <input ref="input" hidden multiple type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
-        <div v-for="(group, gi) in state.groups" :key="group.id" class="group-card">
-          <div class="group-head">
+        <div v-for="(group, gi) in state.groups" :key="group.id" class="mt-3 p-2 border border-line rounded-md flex flex-col gap-2">
+          <div class="flex items-center gap-2">
             <span class="mono faint">{{ gi + 1 }}</span>
-            <input v-model="group.name" class="input group-name" type="text" placeholder="帧组名称" />
+            <input v-model="group.name" class="input flex-1 min-w-0" type="text" placeholder="帧组名称" />
             <span class="mono faint">{{ group.frames.length }} 帧</span>
             <button class="btn btn-icon btn-danger" title="删除帧组" @click="removeGroup(group.id)">×</button>
           </div>
-          <button class="btn btn-ghost full" @click="pickFiles(group.id)">导入帧（可多选）</button>
-          <ul v-if="group.frames.length" class="frame-list">
-            <li v-for="(frame, index) in group.frames" :key="frame.id" class="frame-row">
+          <button class="btn btn-ghost w-full justify-center" @click="pickFiles(group.id)">导入帧（可多选）</button>
+          <ul v-if="group.frames.length" class="list-none m-0 p-0 flex flex-col gap-1 max-h-[220px] overflow-auto">
+            <li v-for="(frame, index) in group.frames" :key="frame.id" class="flex items-center gap-2">
               <span class="mono faint">{{ String(index).padStart(2, '0') }}</span>
-              <img class="frame-thumb" :src="frame.url" :alt="frame.name" draggable="false" />
-              <span class="frame-name" :title="frame.name">{{ frame.name }}</span>
+              <img class="w-[26px] h-[26px] flex-none object-contain border border-line rounded-sm bg-stage" :src="frame.url" :alt="frame.name" draggable="false" />
+              <span class="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="frame.name">{{ frame.name }}</span>
               <button class="btn btn-icon btn-danger" title="移除" @click="removeFrame(group.id, frame.id)">×</button>
             </li>
           </ul>
@@ -325,11 +325,11 @@ function resetAll(): void {
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
+    <main class="min-w-0 min-h-0 flex flex-col">
+      <div class="h-16 flex-none flex items-center justify-between gap-4 px-6 border-b border-line">
         <div>
-          <h2>方向工作区</h2>
-          <p>
+          <h2 class="m-0 text-head">方向工作区</h2>
+          <p class="mt-0.5 mb-0 text-faint">
             <template v-if="state.groups.length">
               {{ state.groups.length }} 个帧组 · {{ activeCount }} 个方向 · {{ activeColumns }} 帧
               <span v-if="activeCount < state.slots.length"> · {{ state.slots.length - activeCount }} 个方向未生成</span>
@@ -337,13 +337,13 @@ function resetAll(): void {
             <template v-else>添加帧组并导入单方向帧开始合成</template>
           </p>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-3">
           <button class="btn btn-primary" @click="addGroup">添加帧组</button>
           <span v-if="previewUrl" class="badge badge-accent">已合成</span>
         </div>
       </div>
 
-      <div class="tool-body">
+      <div class="flex-1 min-h-0 overflow-auto flex flex-col gap-5 p-6">
         <div v-if="!state.groups.length" class="empty-state">
           <span class="big">⊹</span>
           <strong>还没有可合成的帧</strong>
@@ -351,34 +351,35 @@ function resetAll(): void {
         </div>
 
         <template v-else>
-          <section class="ds-block">
-            <h3 class="ds-block-title">方向 × 帧 预览</h3>
-            <div class="ds-table-wrap">
-              <table class="ds-table">
+          <section class="flex flex-col gap-3">
+            <h3 class="m-0 text-caption font-semibold tracking-[0.06em] uppercase text-faint">方向 × 帧 预览</h3>
+            <div class="overflow-auto border border-line rounded-md">
+              <table class="border-collapse [&_tr.off_.ds-dir]:text-faint">
                 <thead>
                   <tr>
-                    <th class="ds-corner">方向</th>
-                    <th v-for="index in activeColumns" :key="index" class="mono">{{ String(index - 1).padStart(2, '0') }}</th>
+                    <th class="border border-line p-1 text-center sticky top-0 left-0 z-2 bg-surface text-faint text-caption">方向</th>
+                    <th v-for="index in activeColumns" :key="index" class="mono border border-line p-1 text-center sticky top-0 bg-surface text-faint text-caption">{{ String(index - 1).padStart(2, '0') }}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="slot in state.slots" :key="slot.key" :class="{ off: !slot.source }">
-                    <th class="ds-dir">{{ slot.label }}<span v-if="!slot.source" class="ds-tag">未生成</span></th>
+                    <th class="ds-dir border border-line text-center py-1 px-2 sticky left-0 z-1 bg-surface font-medium whitespace-nowrap">{{ slot.label }}<span v-if="!slot.source" class="block text-[10px] text-faint font-normal">未生成</span></th>
                     <template v-if="slot.source">
-                      <td v-for="index in activeColumns" :key="index" class="ds-cell">
+                      <td v-for="index in activeColumns" :key="index" class="border border-line p-1 text-center w-14 h-14 bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:10px_10px]">
                         <img
                           v-if="slotFrames(slot)[index - 1]"
+                          class="max-w-12 max-h-12 object-contain"
                           :src="slotFrames(slot)[index - 1].url"
                           :alt="slotFrames(slot)[index - 1].name"
                           :style="{ transform: CSS_TRANSFORM[slot.transform] }"
                           draggable="false"
                         />
-                        <span v-else class="ds-empty">—</span>
+                        <span v-else class="text-faint">—</span>
                       </td>
                     </template>
                     <template v-else>
-                      <td v-for="index in activeColumns" :key="index" class="ds-cell">
-                        <span class="ds-empty">—</span>
+                      <td v-for="index in activeColumns" :key="index" class="border border-line p-1 text-center w-14 h-14 bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:10px_10px]">
+                        <span class="text-faint">—</span>
                       </td>
                     </template>
                   </tr>
@@ -387,10 +388,10 @@ function resetAll(): void {
             </div>
           </section>
 
-          <section class="ds-block">
-            <h3 class="ds-block-title">合成结果</h3>
-            <div class="ds-atlas">
-              <img v-if="previewUrl" :src="previewUrl" alt="方向图集预览" draggable="false" />
+          <section class="flex flex-col gap-3">
+            <h3 class="m-0 text-caption font-semibold tracking-[0.06em] uppercase text-faint">合成结果</h3>
+            <div class="grid place-items-center min-h-[180px] p-3 border border-dashed border-line rounded-sm bg-stage">
+              <img v-if="previewUrl" class="max-w-full max-h-[56vh] object-contain [image-rendering:pixelated]" :src="previewUrl" alt="方向图集预览" draggable="false" />
               <p v-else class="muted">至少为一个方向指定来源帧组后即可预览</p>
             </div>
           </section>
@@ -399,7 +400,7 @@ function resetAll(): void {
     </main>
 
     <!-- 右栏：配置、参数与导出 -->
-    <section class="tool-sidepanel panel">
+    <section class="panel border-l border-line overflow-auto">
       <div class="section">
         <h2 class="section-title">多方向精灵</h2>
         <p class="muted">多组单方向帧 → 镜像/旋转派生多方向</p>
@@ -409,25 +410,25 @@ function resetAll(): void {
         <h2 class="section-title">方向集</h2>
         <label class="field">
           <span class="field-label">方向数量</span>
-          <select :value="state.directionSet" class="select" @change="onDirectionSetChange">
+          <select :value="state.directionSet" class="select w-full" @change="onDirectionSetChange">
             <option :value="2">2 向（右 / 左）</option>
             <option :value="4">4 向（下 / 左 / 右 / 上）</option>
             <option :value="8">8 向（含四对角）</option>
           </select>
         </label>
-        <p class="muted hint">切换方向集会重建配置：首个组派生右=原样、左=水平镜像，其余方向默认为「未生成」。</p>
+        <p class="muted mt-2 mb-0 text-caption">切换方向集会重建配置：首个组派生右=原样、左=水平镜像，其余方向默认为「未生成」。</p>
       </div>
 
-      <div class="section">
+      <div class="section [&_.slot-row+.slot-row]:mt-2 [&_.slot-row.off_.slot-dir]:text-faint">
         <h2 class="section-title">方向配置</h2>
-        <div v-for="slot in state.slots" :key="slot.key" class="slot-row" :class="{ off: !slot.source }">
-          <span class="slot-dir">{{ slot.label }}</span>
-          <select class="select slot-group" :value="slotSource(slot)" @change="onSlotSourceChange(slot, $event)">
+        <div v-for="slot in state.slots" :key="slot.key" class="slot-row flex items-center gap-2" :class="{ off: !slot.source }">
+          <span class="slot-dir w-11 flex-none text-body">{{ slot.label }}</span>
+          <select class="select w-full flex-1 min-w-0" :value="slotSource(slot)" @change="onSlotSourceChange(slot, $event)">
             <option value="">未生成</option>
             <option v-for="group in state.groups" :key="group.id" :value="group.id">{{ group.name }}</option>
           </select>
           <select
-            class="select slot-transform"
+            class="select w-full flex-1 min-w-0"
             :value="slot.transform"
             :disabled="!slot.source"
             @change="onSlotTransformChange(slot, $event)"
@@ -437,96 +438,31 @@ function resetAll(): void {
             </option>
           </select>
         </div>
-        <p class="muted hint">每个方向从所选帧组取帧再做变换：镜像/旋转适合对称素材，角色上/下方向请配正面、背面两组帧。</p>
+        <p class="muted mt-2 mb-0 text-caption">每个方向从所选帧组取帧再做变换：镜像/旋转适合对称素材，角色上/下方向请配正面、背面两组帧。</p>
       </div>
 
       <div class="section">
         <h2 class="section-title">单元格</h2>
-        <div class="field-row">
-          <label class="field">
+        <div class="field-row gap-3 mt-3">
+          <label class="field flex-1 min-w-0">
             <span class="field-label">留白</span>
-            <input v-model.number="state.padding" class="input" type="number" min="0" />
+            <input v-model.number="state.padding" class="input w-full" type="number" min="0" />
           </label>
-          <label class="field">
+          <label class="field flex-1 min-w-0">
             <span class="field-label">边长（0 自动）</span>
-            <input v-model.number="state.cellSize" class="input" type="number" min="0" />
+            <input v-model.number="state.cellSize" class="input w-full" type="number" min="0" />
           </label>
         </div>
       </div>
 
-      <div class="section actions">
-        <button class="btn btn-primary full" :disabled="!totalFrames || !activeCount || exporting" @click="exportZip">
+      <div class="section flex flex-col gap-2">
+        <button class="btn btn-primary w-full justify-center" :disabled="!totalFrames || !activeCount || exporting" @click="exportZip">
           {{ exporting ? '导出中…' : `导出方向图集（${activeCount} 方向 × ${activeColumns} 帧）` }}
         </button>
-        <button class="btn btn-ghost full" :disabled="!state.groups.length" @click="resetAll">重置</button>
-        <p v-if="state.error" class="error-text">{{ state.error }}</p>
+        <button class="btn btn-ghost w-full justify-center" :disabled="!state.groups.length" @click="resetAll">重置</button>
+        <p v-if="state.error" class="text-danger text-caption">{{ state.error }}</p>
       </div>
     </section>
 
   </div>
 </template>
-
-<style scoped>
-/* 页面骨架与雪碧图页同构：左栏帧组列表 + 中间工作区 + 右栏参数配置；没有帧组时左栏隐藏 */
-.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
-.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: var(--fs-head); }
-.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-5); padding: 24px; }
-.full { width: 100%; justify-content: center; }
-.actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-.hint { margin: var(--sp-2) 0 0; font-size: var(--fs-caption); }
-.section > .field + .field, .section > .field-row + .field { margin-top: var(--sp-3); }
-.section > p + .field, .section > p + .field-row { margin-top: var(--sp-3); }
-.field-row { display: flex; gap: var(--sp-3); margin-top: var(--sp-3); }
-.field-row .field { flex: 1; min-width: 0; }
-.field-row .input { width: 100%; }
-.select { width: 100%; }
-.error-text { color: var(--danger); font-size: var(--fs-caption); }
-
-/* 帧组卡片 */
-.group-card { margin-top: var(--sp-3); padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-m); display: flex; flex-direction: column; gap: var(--sp-2); }
-.group-head { display: flex; align-items: center; gap: var(--sp-2); }
-.group-name { flex: 1; min-width: 0; }
-
-/* 帧列表 */
-.frame-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); max-height: 220px; overflow: auto; }
-.frame-row { display: flex; align-items: center; gap: var(--sp-2); }
-.frame-thumb { width: 26px; height: 26px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.frame-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-
-/* 方向槽：来源组 + 变换 双下拉 */
-.slot-row { display: flex; align-items: center; gap: var(--sp-2); }
-.slot-row + .slot-row { margin-top: var(--sp-2); }
-.slot-row.off .slot-dir { color: var(--text-faint); }
-.slot-dir { width: 44px; flex: none; font-size: var(--fs-body); }
-.slot-group { flex: 1; min-width: 0; }
-.slot-transform { flex: 1; min-width: 0; }
-
-/* 预览表格 */
-.ds-block { display: flex; flex-direction: column; gap: var(--sp-3); }
-.ds-block-title { margin: 0; font-size: var(--fs-caption); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); }
-.ds-table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-m); }
-.ds-table { border-collapse: collapse; }
-.ds-table th, .ds-table td { border: 1px solid var(--border); padding: 4px; text-align: center; }
-.ds-table thead th { color: var(--text-faint); font-size: var(--fs-caption); position: sticky; top: 0; background: var(--surface); }
-.ds-corner { position: sticky; left: 0; z-index: 2; }
-.ds-dir { position: sticky; left: 0; z-index: 1; background: var(--surface); font-weight: 500; white-space: nowrap; padding: 4px 8px; }
-.ds-tag { display: block; font-size: 10px; color: var(--text-faint); font-weight: 400; }
-.ds-table tr.off .ds-dir { color: var(--text-faint); }
-.ds-cell { width: 56px; height: 56px; background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 10px 10px; }
-.ds-cell img { max-width: 48px; max-height: 48px; object-fit: contain; }
-.ds-empty { color: var(--text-faint); }
-.ds-atlas { display: grid; place-items: center; min-height: 180px; padding: var(--sp-3); border: 1px dashed var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.ds-atlas img { max-width: 100%; max-height: 56vh; object-fit: contain; image-rendering: pixelated; }
-
-@media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
-  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
-}
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-</style>

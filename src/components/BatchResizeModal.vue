@@ -32,7 +32,7 @@ function apply(): void {
         <p class="modal-help">
           以每帧中心为锚点调整矩形。尺寸不足的帧会补充透明边缘，较小目标尺寸可能裁剪内容。
         </p>
-        <div class="size-fields">
+        <div class="grid grid-cols-2 gap-4">
           <label class="field">
             <span class="field-label">宽度</span>
             <div class="field-row">
@@ -57,11 +57,3 @@ function apply(): void {
     </section>
   </div>
 </template>
-
-<style scoped>
-.size-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-4);
-}
-</style>

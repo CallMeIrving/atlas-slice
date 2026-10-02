@@ -230,7 +230,7 @@ onUnmounted(() => {
 
 <template>
   <div class="modal-backdrop" @click.self="emit('close')">
-    <section class="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="model-manager-title">
+    <section class="modal w-[min(880px,calc(100vw-48px))]" role="dialog" aria-modal="true" aria-labelledby="model-manager-title">
       <div class="modal-head">
         <div>
           <h2 id="model-manager-title">模型管理</h2>
@@ -239,30 +239,30 @@ onUnmounted(() => {
         <button class="btn-icon modal-close" aria-label="关闭" @click="emit('close')">×</button>
       </div>
 
-      <div class="modal-body">
-        <div class="manager-bar">
-          <span class="muted">模型源 <span class="mono">{{ commandHost }}</span></span>
+      <div class="modal-body flex max-h-[min(72vh,760px)] flex-col gap-3 overflow-y-auto">
+        <div class="flex flex-wrap items-center gap-2 border-b border-line pb-3">
+          <span class="muted mr-auto text-caption">模型源 <span class="mono">{{ commandHost }}</span></span>
           <button class="btn" :disabled="checking" @click="checkLocal">{{ checking ? '检测中…' : '重新检测本地文件' }}</button>
           <button class="btn" @click="copy(downloadCommand(undefined, commandHost), 'all')">复制全部下载命令</button>
-          <span v-if="copied" class="copy-hint" :class="{ fail: !copied.ok }">{{ copied.ok ? '已复制到剪贴板' : '复制失败，请手动选中下方命令' }}</span>
+          <span v-if="copied" class="text-caption" :class="copied.ok ? 'text-accent-strong' : 'text-danger'">{{ copied.ok ? '已复制到剪贴板' : '复制失败，请手动选中下方命令' }}</span>
         </div>
 
-        <code v-if="copied && !copied.ok" class="cmd-fallback">{{ copied.text }}</code>
+        <code v-if="copied && !copied.ok" class="block select-all break-all rounded-sm border border-dashed border-line-strong bg-raised px-2.5 py-2 font-mono text-[11px] text-muted">{{ copied.text }}</code>
 
-        <div v-if="downloading || downloadText" class="load-status" :class="{ 'download-error': !downloadOk }">
-          <p class="faint">{{ downloadText }}</p>
-          <div class="load-track"><div class="load-fill" :class="{ done: downloadOk && !downloading }" style="width: 100%"></div></div>
+        <div v-if="downloading || downloadText" class="flex flex-col gap-1 text-caption">
+          <p class="faint m-0" :class="!downloadOk && 'text-danger'">{{ downloadText }}</p>
+          <div class="h-1.5 overflow-hidden rounded-[3px] bg-line"><div class="h-full transition-[width] duration-200 ease-[ease]" :class="downloadOk && !downloading ? 'bg-accent-strong' : 'bg-accent'" style="width: 100%"></div></div>
         </div>
 
-        <article v-for="row in rows" :key="row.engine" class="model-card">
-          <header class="card-head">
-            <div class="card-title">
+        <article v-for="row in rows" :key="row.engine" class="flex flex-col gap-2 rounded-md border border-line bg-raised px-4 py-3">
+          <header class="flex flex-wrap items-center gap-3">
+            <div class="mr-auto flex items-center gap-2 text-body">
               <strong>{{ row.label }}</strong>
               <span class="badge">{{ row.license }}</span>
               <span class="faint">{{ row.size }}</span>
             </div>
-            <div class="card-actions">
-              <span class="badge" :class="{ 'badge-accent': row.state === 'ready', 'badge-error': row.state === 'error' }">{{ modelStateLabel(row.state) }}</span>
+            <div class="flex items-center gap-2">
+              <span class="badge" :class="row.state === 'ready' ? 'badge-accent' : row.state === 'error' ? 'bg-[rgb(248_113_113/0.14)] text-danger' : ''">{{ modelStateLabel(row.state) }}</span>
               <button class="btn" :disabled="!canLoad(row)" @click="load(row.engine)">{{ loadLabel(row) }}</button>
               <button
                 class="btn"
@@ -275,60 +275,60 @@ onUnmounted(() => {
             </div>
           </header>
 
-          <p class="card-meta muted">{{ row.description }} · 加载方式 {{ DTYPE_TEXT[row.dtype] }} · {{ row.device === 'gpu' ? 'GPU / WebGPU' : 'CPU' }}（在「抠图」页或一键处理弹窗中切换）</p>
+          <p class="muted m-0 text-caption leading-[1.6]">{{ row.description }} · 加载方式 {{ DTYPE_TEXT[row.dtype] }} · {{ row.device === 'gpu' ? 'GPU / WebGPU' : 'CPU' }}（在「抠图」页或一键处理弹窗中切换）</p>
 
-          <p v-if="row.state === 'error'" class="card-error">{{ errorText(row) }}</p>
+          <p v-if="row.state === 'error'" class="m-0 text-caption text-danger">{{ errorText(row) }}</p>
 
-          <div v-if="progress[row.engine]" class="load-status">
-            <p class="faint">{{ progress[row.engine].text }}</p>
-            <div class="load-track"><div class="load-fill" :style="{ width: progress[row.engine].percent >= 0 ? progress[row.engine].percent + '%' : '100%' }"></div></div>
+          <div v-if="progress[row.engine]" class="flex flex-col gap-1 text-caption">
+            <p class="faint m-0">{{ progress[row.engine].text }}</p>
+            <div class="h-1.5 overflow-hidden rounded-[3px] bg-line"><div class="h-full bg-accent transition-[width] duration-200 ease-[ease]" :style="{ width: progress[row.engine].percent >= 0 ? progress[row.engine].percent + '%' : '100%' }"></div></div>
           </div>
 
           <template v-if="row.engine === 'imgly'">
-            <div class="file-head">
-              <span class="mono">{{ IMGLY_MIRROR_PATH }}</span>
+            <div class="flex items-center gap-2 text-caption">
+              <span class="mono mr-auto text-muted">{{ IMGLY_MIRROR_PATH }}</span>
               <button v-if="isElectron" class="btn btn-ghost" :disabled="downloading" @click="download()">{{ downloading ? '下载中…' : '直接下载镜像' }}</button>
               <button class="btn btn-ghost" @click="copy(IMGLY_MIRROR_COMMAND, 'imgly-mirror')">复制镜像命令</button>
-              <span v-if="copied?.key === 'imgly-mirror'" class="copy-hint" :class="{ fail: !copied.ok }">{{ copied.ok ? '已复制' : '复制失败' }}</span>
+              <span v-if="copied?.key === 'imgly-mirror'" class="text-caption" :class="copied.ok ? 'text-accent-strong' : 'text-danger'">{{ copied.ok ? '已复制' : '复制失败' }}</span>
             </div>
-            <p class="card-meta faint">
+            <p class="faint m-0 text-caption leading-[1.6]">
               权重来自 IMG.LY 官方 CDN（staticimgly.com）。运行时按「资源地址里填写的地址 → 上面的本地镜像目录 → 官方 CDN」的顺序取资源，
               镜像就位时不会访问 CDN。
-              <span class="net-tip">该网址在国内通常需要代理才能访问</span>，没有代理就无法完成首次下载（会提示「无法下载 ISNet 模型资源」）。
+              <span class="text-accent-strong">该网址在国内通常需要代理才能访问</span>，没有代理就无法完成首次下载（会提示「无法下载 ISNet 模型资源」）。
             </p>
-            <p class="card-meta faint">
+            <p class="faint m-0 text-caption leading-[1.6]">
               镜像方法：在终端执行 <span class="mono">{{ IMGLY_MIRROR_COMMAND }}</span>（挂在代理下执行一次即可，脚本会跳过已下载且字节数正确的分片，可重复运行）；
               换镜像源可加 <span class="mono">--source=&lt;可访问的地址&gt;</span>，临时验证可加 <span class="mono">--out=&lt;目录&gt;</span>。
             </p>
-            <p class="card-meta faint">
+            <p class="faint m-0 text-caption leading-[1.6]">
               官方 CDN 按「精度 + 推理设备」分别下载权重（切换其中任一项都是另一份文件，需要单独下载一次）；
               镜像命令会把 resources.json 里的全部分片一次性落到本地，之后由 Service Worker 持久缓存，刷新或重启浏览器都不会重新下载。
               但 ONNX 会话本身在页面内存里，刷新后仍需重新加载到内存。imgly 运行时不提供卸载接口。
             </p>
           </template>
 
-          <div v-else-if="row.repo" class="file-list">
-            <div class="file-head">
-              <span class="mono">{{ row.repo.id }}</span>
+          <div v-else-if="row.repo" class="flex flex-col gap-1 border-t border-dashed border-line pt-2">
+            <div class="flex items-center gap-2 text-caption">
+              <span class="mono mr-auto text-muted">{{ row.repo.id }}</span>
               <span v-if="!checked" class="faint">未检测</span>
-              <span v-else-if="row.local?.ready" class="ok">基础文件已就位</span>
-              <span v-else class="miss">缺 {{ row.local?.missing.length ?? 0 }} 个文件</span>
+              <span v-else-if="row.local?.ready" class="text-accent-strong">基础文件已就位</span>
+              <span v-else class="text-danger">缺 {{ row.local?.missing.length ?? 0 }} 个文件</span>
               <button v-if="isElectron" class="btn btn-ghost" :disabled="downloading" @click="download(row.repo.id)">{{ downloading ? '下载中…' : '直接下载' }}</button>
               <button class="btn btn-ghost" @click="copy(downloadCommand(row.repo.id, commandHost), row.repo.id)">复制下载命令</button>
-              <span v-if="copied?.key === row.repo.id" class="copy-hint" :class="{ fail: !copied.ok }">{{ copied.ok ? '已复制' : '复制失败' }}</span>
+              <span v-if="copied?.key === row.repo.id" class="text-caption" :class="copied.ok ? 'text-accent-strong' : 'text-danger'">{{ copied.ok ? '已复制' : '复制失败' }}</span>
             </div>
-            <ul v-if="row.local" class="file-items">
-              <li v-for="file in row.local.files" :key="file.file">
-                <span class="mono">{{ file.file }}</span>
+            <ul v-if="row.local" class="m-0 flex list-none flex-col gap-0.5 p-0">
+              <li v-for="file in row.local.files" :key="file.file" class="flex items-center gap-2 text-[11px]">
+                <span class="mono mr-auto text-faint">{{ file.file }}</span>
                 <span class="faint">{{ formatBytes(file.size) }}</span>
                 <span v-if="file.tier === 'extra'" class="badge">可选精度</span>
-                <span class="file-state" :class="file.state">{{ fileStateText(file) }}</span>
+                <span :class="file.state === 'ok' ? 'text-accent-strong' : 'text-danger'">{{ fileStateText(file) }}</span>
               </li>
             </ul>
-            <p class="card-meta faint">
+            <p class="faint m-0 text-caption leading-[1.6]">
               <template v-if="row.local?.ready">权重已落在仓库根 models/ 下，刷新页面不会重新下载，只需重新加载到内存。</template>
               <template v-else>浏览器没有文件系统写权限，这些权重必须执行上面的命令下载到 models/ 下（命令会跳过已存在的文件，可重复运行续传）。</template>
-              <span v-if="workspace.matte.aiModelHost === 'huggingface.co'" class="net-tip">
+              <span v-if="workspace.matte.aiModelHost === 'huggingface.co'" class="text-accent-strong">
                 当前托管源 huggingface.co 国内需代理，建议改选 hf-mirror.com（国内可直连）；下载命令已默认使用 hf-mirror.com。
               </span>
             </p>
@@ -345,190 +345,3 @@ onUnmounted(() => {
     </section>
   </div>
 </template>
-
-<style scoped>
-.model-modal {
-  width: min(880px, calc(100vw - 48px));
-}
-
-.model-modal .modal-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  max-height: min(72vh, 760px);
-  overflow-y: auto;
-}
-
-.manager-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding-bottom: var(--sp-3);
-  border-bottom: 1px solid var(--border);
-}
-
-.manager-bar .muted {
-  margin-right: auto;
-  font-size: var(--fs-caption);
-}
-
-.copy-hint {
-  font-size: var(--fs-caption);
-  color: var(--accent-strong);
-}
-
-.copy-hint.fail {
-  color: var(--danger);
-}
-
-/* 剪贴板不可用时的兜底：命令原文可整体选中，用户复制到终端即可 */
-.cmd-fallback {
-  display: block;
-  padding: 8px 10px;
-  background: var(--surface-raised);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-s);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  word-break: break-all;
-  user-select: all;
-}
-
-.net-tip {
-  color: var(--accent-strong);
-}
-
-.model-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-}
-
-.card-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-}
-
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-right: auto;
-  font-size: var(--fs-body);
-}
-
-.card-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.card-meta {
-  margin: 0;
-  font-size: var(--fs-caption);
-  line-height: 1.6;
-}
-
-.card-error {
-  margin: 0;
-  font-size: var(--fs-caption);
-  color: var(--danger);
-}
-
-.badge-error {
-  background: rgba(248, 113, 113, 0.14);
-  color: var(--danger);
-}
-
-.load-status {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  font-size: var(--fs-caption);
-}
-
-.load-status p {
-  margin: 0;
-}
-
-.load-track {
-  height: 6px;
-  background: var(--border);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.load-fill {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.2s ease;
-}
-
-.load-fill.done {
-  background: var(--accent-strong);
-}
-
-.download-error p {
-  color: var(--danger);
-}
-
-.file-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  padding-top: var(--sp-2);
-  border-top: 1px dashed var(--border);
-}
-
-.file-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-caption);
-}
-
-.file-head .mono {
-  margin-right: auto;
-  color: var(--text-muted);
-}
-
-.file-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.file-items li {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: 11px;
-}
-
-.file-items .mono {
-  margin-right: auto;
-  color: var(--text-faint);
-}
-
-.file-state.ok,
-.ok {
-  color: var(--accent-strong);
-}
-
-.file-state.missing,
-.file-state.mismatch,
-.miss {
-  color: var(--danger);
-}
-</style>

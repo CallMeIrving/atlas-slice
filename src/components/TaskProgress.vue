@@ -36,64 +36,21 @@ const width = computed(() => {
 </script>
 
 <template>
-  <div class="task-progress">
-    <p v-if="props.error" class="task-error">{{ props.error }}</p>
+  <div class="flex flex-col gap-2 text-caption">
+    <p v-if="props.error" class="m-0 text-danger">{{ props.error }}</p>
     <template v-else>
-      <div class="task-row">
-        <span class="task-text">{{ props.text }}</span>
-        <span v-if="props.total" class="task-count mono">{{ props.done }}/{{ props.total }}</span>
-        <span v-if="props.percent >= 0" class="task-count mono">{{ props.percent }}%</span>
-        <span class="task-spacer"></span>
+      <div class="flex items-center gap-2">
+        <span class="text-muted">{{ props.text }}</span>
+        <span v-if="props.total" class="mono text-faint">{{ props.done }}/{{ props.total }}</span>
+        <span v-if="props.percent >= 0" class="mono text-faint">{{ props.percent }}%</span>
+        <span class="flex-1"></span>
         <button v-if="props.running" class="btn btn-danger" :disabled="props.cancelling" @click="$emit('cancel')">
           {{ props.cancelling ? '取消中…' : '取消' }}
         </button>
       </div>
-      <div class="task-track"><div class="task-fill" :style="{ width }"></div></div>
+      <div class="h-1.5 overflow-hidden rounded-[3px] bg-line">
+        <div class="h-full bg-accent transition-[width] duration-200 ease-[ease]" :style="{ width }"></div>
+      </div>
     </template>
   </div>
 </template>
-
-<style scoped>
-.task-progress {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  font-size: var(--fs-caption);
-}
-
-.task-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
-.task-text {
-  color: var(--text-muted);
-}
-
-.task-count {
-  color: var(--text-faint);
-}
-
-.task-spacer {
-  flex: 1;
-}
-
-.task-error {
-  margin: 0;
-  color: var(--danger);
-}
-
-.task-track {
-  height: 6px;
-  background: var(--border);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.task-fill {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.2s ease;
-}
-</style>

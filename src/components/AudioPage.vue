@@ -229,47 +229,53 @@ watch(
 
 <template>
   <div
-    class="tool-page"
-    :class="{ 'no-list': !hasAssets }"
+    class="relative grid h-full min-h-0"
+    :class="hasAssets ? 'grid-cols-[300px_minmax(0,1fr)_340px]' : 'grid-cols-[minmax(0,1fr)_340px]'"
     @dragenter="onFileDragEnter"
     @dragover="onFileDragOver"
     @dragleave="onFileDragLeave"
     @drop="onFileDrop"
   >
-    <div v-if="fileDragOver" class="drop-overlay">
-      <span>松开导入，视频自动提取音轨</span>
+    <div
+      v-if="fileDragOver"
+      class="pointer-events-none absolute inset-2 z-50 grid place-items-center rounded-md border-2 border-dashed border-accent-border bg-accent-dim"
+    >
+      <span class="text-head text-accent-strong">松开导入，视频自动提取音轨</span>
     </div>
     <!-- 左栏：素材库 -->
-    <section v-if="hasAssets" class="tool-sidebar panel">
+    <section v-if="hasAssets" class="panel flex flex-col overflow-auto border-r border-line">
       <div class="section">
         <h2 class="section-title">素材库（{{ audioState.assets.length }}）</h2>
-        <button class="btn full" :disabled="busy" @click="input?.click()">＋ 导入</button>
-        <div class="select-bar">
+        <button class="btn w-full justify-center" :disabled="busy" @click="input?.click()">＋ 导入</button>
+        <div class="mt-2 flex items-center justify-between gap-2">
           <label class="check-row">
             <input type="checkbox" :checked="allSelected" @change="onToggleAll" />
             <span>{{ allSelected ? '取消全选' : '全选' }}</span>
           </label>
-          <span class="muted small">已选 {{ selectedCount }} / {{ audioState.assets.length }}</span>
+          <span class="muted text-caption">已选 {{ selectedCount }} / {{ audioState.assets.length }}</span>
         </div>
-        <p class="muted small drag-tip">勾选的素材才会被「批量编辑」处理；拖到中间音轨可参与合成</p>
+        <p class="m-0 mt-2 text-caption muted">勾选的素材才会被「批量编辑」处理；拖到中间音轨可参与合成</p>
       </div>
-      <ul class="asset-list">
+      <ul class="m-0 flex list-none flex-col gap-3 px-4 pt-2 pb-4">
         <li
           v-for="asset in audioState.assets"
           :key="asset.id"
-          class="asset-item"
-          :class="{
-            active: asset.id === activeAsset?.id,
-            playing: playingAssetId === asset.id,
-            selected: isAssetSelected(asset.id),
-          }"
+          class="flex cursor-grab flex-col gap-2 rounded-sm border p-3 active:cursor-grabbing"
+          :class="[
+            isAssetSelected(asset.id) && playingAssetId !== asset.id
+              ? 'border-line-strong'
+              : asset.id === activeAsset?.id || playingAssetId === asset.id
+                ? 'border-accent-border'
+                : 'border-line',
+            asset.id === activeAsset?.id ? 'bg-accent-dim' : 'bg-raised',
+          ]"
           draggable="true"
           @click="setActiveAsset(asset.id)"
           @dragstart="onAssetDragStart($event, asset.id)"
         >
-          <div class="asset-head">
+          <div class="flex items-center gap-2">
             <input
-              class="asset-check"
+              class="m-0 flex-none cursor-pointer"
               type="checkbox"
               title="勾选后参与批量编辑"
               :checked="isAssetSelected(asset.id)"
@@ -277,35 +283,35 @@ watch(
               @change="toggleAssetSelected(asset.id)"
             />
             <button
-              class="btn btn-icon play-btn"
-              :class="{ playing: playingAssetId === asset.id }"
+              class="btn btn-icon h-[26px] w-[26px] flex-none text-[11px] leading-none"
+              :class="playingAssetId === asset.id && 'border-accent-border bg-accent-dim text-accent-strong'"
               :title="playingAssetId === asset.id ? '停止试听' : '试听'"
               @click.stop="toggleAssetPlay(asset)"
             >
               {{ playingAssetId === asset.id ? '⏸' : '▶' }}
             </button>
-            <span class="asset-name" :title="asset.fileName">{{ asset.fileName }}</span>
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="asset.fileName">{{ asset.fileName }}</span>
             <button class="btn btn-icon btn-danger" title="移除" @click.stop="onRemoveAsset(asset.id)">×</button>
           </div>
           <AudioWaveform :peaks="asset.peaks" :height="28" :color="asset.id === activeAsset?.id ? '#e8a23d' : '#6a7080'" />
-          <div class="asset-meta mono faint">
+          <div class="mono faint flex flex-wrap items-center gap-2 text-[11px]">
             <span class="badge">{{ asset.container }}</span>
             <span>{{ fmtDuration(asset.durationSec) }}</span>
             <span>{{ asset.sampleRate }} Hz</span>
             <span>{{ channelLabel(asset.channelCount) }}</span>
           </div>
-          <div v-if="asset.nameIssue" class="asset-issue">⚠ {{ asset.nameIssue }}</div>
-          <div v-if="asset.duplicateOf" class="asset-issue">⚠ 与「{{ asset.duplicateOf }}」高度相似</div>
+          <div v-if="asset.nameIssue" class="text-[11px] text-[#fbbf24]">⚠ {{ asset.nameIssue }}</div>
+          <div v-if="asset.duplicateOf" class="text-[11px] text-[#fbbf24]">⚠ 与「{{ asset.duplicateOf }}」高度相似</div>
         </li>
       </ul>
     </section>
 
     <!-- 中间：多音轨编辑器 -->
-    <main class="tool-main">
-      <div class="tool-header">
+    <main class="flex min-h-0 min-w-0 flex-col">
+      <div class="flex h-16 flex-none items-center justify-between gap-4 border-b border-line px-6">
         <div>
-          <h2>多音轨编辑器</h2>
-          <p>
+          <h2 class="m-0 text-head">多音轨编辑器</h2>
+          <p class="mt-0.5 mb-0 text-faint">
             {{
               hasAssets
                 ? `已勾选 ${selectedCount} 条素材 · 批量编辑预期输出 ${expectedCount} 个 · 本地处理不上传`
@@ -313,7 +319,7 @@ watch(
             }}
           </p>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-3">
           <input
             ref="input"
             hidden
@@ -340,12 +346,12 @@ watch(
         </div>
       </div>
 
-      <div class="tool-body">
+      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-6 pt-4 pb-6">
         <div v-if="!hasAssets" class="empty-state">
           <span class="big">♪</span>
           <strong>还没有素材</strong>
           <span>音频 WAV/MP3/OGG/FLAC/M4A，视频 MP4/MOV/WebM 自动提取音轨</span>
-          <div class="empty-actions">
+          <div class="flex items-center gap-3">
             <button class="btn btn-primary" @click="input?.click()">选择文件或拖到此处</button>
             <button class="btn" @click="openSynthModal()">或生成一个音效</button>
           </div>
@@ -355,62 +361,62 @@ watch(
     </main>
 
     <!-- 右栏：合成导出（只针对时间轴混音结果，与批量编辑的导出设置分开） -->
-    <section class="tool-sidepanel panel">
+    <section class="panel overflow-auto border-l border-line">
       <div class="section">
         <h2 class="section-title">合成导出</h2>
-        <p class="muted small">
+        <p class="muted text-caption">
           把时间轴上的多轨混音导出成<strong>一个文件</strong>；这里的格式只影响这份合成结果，批量编辑的导出格式在批量弹窗里单独设置。
         </p>
 
-        <label class="field"><span class="field-label">格式</span>
-          <select v-model="audioState.mixExport.format" class="select">
+        <label class="field mt-3"><span class="field-label">格式</span>
+          <select v-model="audioState.mixExport.format" class="select w-full">
             <option v-for="format in AUDIO_FORMATS" :key="format.format" :value="format.format" :disabled="!format.available">
               {{ format.label }}{{ format.available ? '' : `（${format.hint}）` }}
             </option>
           </select></label>
         <p v-if="mixIssue" class="warn">{{ mixIssue }}</p>
 
-        <label v-if="audioState.mixExport.format === 'wav'" class="field">
+        <label v-if="audioState.mixExport.format === 'wav'" class="field mt-3">
           <span class="field-label">WAV 位深</span>
-          <select v-model="audioState.mixExport.wavEncoding" class="select">
+          <select v-model="audioState.mixExport.wavEncoding" class="select w-full">
             <option v-for="item in WAV_ENCODINGS" :key="item.value" :value="item.value">{{ item.label }}</option>
           </select>
         </label>
-        <label v-else-if="audioState.mixExport.format === 'mp3'" class="field">
+        <label v-else-if="audioState.mixExport.format === 'mp3'" class="field mt-3">
           <span class="field-label">MP3 码率</span>
-          <select v-model.number="audioState.mixExport.mp3Bitrate" class="select">
+          <select v-model.number="audioState.mixExport.mp3Bitrate" class="select w-full">
             <option v-for="rate in MP3_BITRATES" :key="rate" :value="rate">{{ rate }} kbps</option>
           </select>
         </label>
-        <label v-else-if="audioState.mixExport.format === 'ogg'" class="field">
+        <label v-else-if="audioState.mixExport.format === 'ogg'" class="field mt-3">
           <span class="field-label">OGG 质量（0-10）</span>
           <input v-model.number="audioState.mixExport.oggQuality" class="input" type="number" min="0" max="10" />
         </label>
 
-        <label class="field">
+        <label class="field mt-3">
           <span class="field-label">文件名</span>
-          <input v-model="audioState.mixFileName" class="input template-input" type="text" spellcheck="false" placeholder="mix" />
+          <input v-model="audioState.mixFileName" class="input w-full font-mono text-caption" type="text" spellcheck="false" placeholder="mix" />
         </label>
-        <p class="muted small">
+        <p class="muted text-caption">
           导出为 <span class="mono">{{ audioState.mixFileName || 'mix' }}.{{ AUDIO_FORMATS.find((item) => item.format === audioState.mixExport.format)?.extension ?? 'wav' }}</span>
           （{{ mixFormatLabel }}）
         </p>
 
-        <div class="actions">
-          <button class="btn btn-primary full" :disabled="busy || !canExportMix || !!mixIssue" :title="mixIssue" @click="exportMixdown()">
+        <div class="mt-2 flex flex-col gap-2">
+          <button class="btn btn-primary w-full justify-center" :disabled="busy || !canExportMix || !!mixIssue" :title="mixIssue" @click="exportMixdown()">
             导出合成音频
           </button>
-          <button class="btn full" :disabled="busy || !canExportMix" @click="onMixToAsset">合成到素材库并勾选</button>
+          <button class="btn w-full justify-center" :disabled="busy || !canExportMix" @click="onMixToAsset">合成到素材库并勾选</button>
         </div>
-        <p class="muted small">
+        <p class="muted text-caption">
           「导出合成音频」直接下载一份文件；要走批处理链路（处理链 / 变体 / 多格式）请用「合成到素材库」，
           它会把合成结果设为唯一勾选项，避免把参与混音的原始素材又处理一遍。
         </p>
       </div>
 
-      <div class="section actions">
-        <p v-if="audioState.notice" class="muted small">{{ audioState.notice }}</p>
-        <button class="btn btn-ghost full" :disabled="busy || (!hasAssets && !hasOutputs)" @click="onClear">清空素材与结果</button>
+      <div class="section mt-2 flex flex-col gap-2">
+        <p v-if="audioState.notice" class="muted text-caption">{{ audioState.notice }}</p>
+        <button class="btn btn-ghost w-full justify-center" :disabled="busy || (!hasAssets && !hasOutputs)" @click="onClear">清空素材与结果</button>
       </div>
     </section>
 
@@ -431,12 +437,12 @@ watch(
       @ended="onAssetPlayerStop"
     ></audio>
 
-    <div v-if="audioState.loading.active" class="loading-veil">
-      <div class="loading-card">
-        <span class="spinner"></span>
+    <div v-if="audioState.loading.active" class="fixed inset-0 z-60 grid place-items-center bg-[rgb(13_15_19_/_0.55)]">
+      <div class="flex items-center gap-4 rounded-md border border-line-strong bg-surface px-6 py-5 shadow-popover">
+        <span class="h-[22px] w-[22px] flex-none animate-spin rounded-full border-2 border-line-strong border-t-accent"></span>
         <div>
-          <strong>{{ audioState.loading.text }}</strong>
-          <p v-if="audioState.loading.total > 1" class="muted small mono">
+          <strong class="text-body">{{ audioState.loading.text }}</strong>
+          <p v-if="audioState.loading.total > 1" class="muted mono mt-0.5 mb-0 text-caption">
             {{ audioState.loading.done }}/{{ audioState.loading.total }}
           </p>
         </div>
@@ -444,64 +450,10 @@ watch(
     </div>
 
     <div v-if="audioState.error" class="toast-wrap">
-      <div class="toast toast-error">
+      <div class="toast toast-error flex items-center gap-3">
         <span>{{ audioState.error }}</span>
-        <button class="toast-close" @click="dismissAudioError()">×</button>
+        <button class="text-base leading-none opacity-70 hover:opacity-100" @click="dismissAudioError()">×</button>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.tool-page { position: relative; display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; height: 100%; min-height: 0; }
-.drop-overlay { position: absolute; inset: 8px; z-index: 50; display: grid; place-items: center; border: 2px dashed var(--accent-border); border-radius: var(--radius-m); background: var(--accent-dim); pointer-events: none; }
-.drop-overlay span { font-size: var(--fs-head); color: var(--accent-strong); }
-.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 340px; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; display: flex; flex-direction: column; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: var(--fs-head); }
-.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 16px 24px 24px; }
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-.empty-actions { display: flex; align-items: center; gap: var(--sp-3); }
-.full { width: 100%; justify-content: center; }
-.small { font-size: var(--fs-caption); }
-.actions { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }
-.section > .field + .field, .section > .field + .check-row, .section > .check-row + .field { margin-top: var(--sp-3); }
-.section > p + .field, .section > .check-row + .field { margin-top: var(--sp-3); }
-.field-row { display: flex; align-items: flex-end; gap: var(--sp-3); }
-.field-row .btn { flex: 1; justify-content: center; }
-.section .select { width: 100%; }
-.template-input { width: 100%; font-family: var(--font-mono); font-size: var(--fs-caption); }
-
-/* 素材库 */
-.drag-tip { margin: var(--sp-2) 0 0; }
-.asset-list { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-4) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
-.asset-item { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised); cursor: grab; }
-.asset-item.active { border-color: var(--accent-border); background: var(--accent-dim); }
-.asset-item:active { cursor: grabbing; }
-.select-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-top: var(--sp-2); }
-.asset-check { flex: none; margin: 0; cursor: pointer; }
-.asset-item.selected { border-color: var(--border-strong); }
-.asset-head { display: flex; align-items: center; gap: var(--sp-2); }
-.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-.asset-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: 11px; }
-.asset-issue { color: #fbbf24; font-size: 11px; }
-.play-btn { flex: none; width: 26px; height: 26px; font-size: 11px; line-height: 1; }
-.play-btn.playing { border-color: var(--accent-border); background: var(--accent-dim); color: var(--accent-strong); }
-.asset-item.playing { border-color: var(--accent-border); }
-
-/* 加载遮罩 */
-.loading-veil { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(13, 15, 19, 0.55); }
-.loading-card { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border: 1px solid var(--border-strong); border-radius: var(--radius-m); background: var(--surface); box-shadow: var(--shadow-pop); }
-.loading-card strong { font-size: var(--fs-body); }
-.loading-card p { margin: 2px 0 0; }
-.spinner { width: 22px; height: 22px; flex: none; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.toast { display: flex; align-items: center; gap: var(--sp-3); }
-.toast-close { color: inherit; font-size: 16px; line-height: 1; opacity: 0.7; }
-.toast-close:hover { opacity: 1; }
-</style>

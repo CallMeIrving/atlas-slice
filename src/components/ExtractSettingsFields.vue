@@ -18,7 +18,7 @@ const estimatedMb = computed(() => Math.round(expectedCount.value * Math.max(1, 
 </script>
 
 <template>
-  <div class="extract-fields">
+  <div class="flex flex-col gap-4">
     <div class="field">
       <span class="field-label">抽帧模式</span>
       <select v-model="workspace.video.mode" class="select">
@@ -36,13 +36,13 @@ const estimatedMb = computed(() => Math.round(expectedCount.value * Math.max(1, 
     </div>
     <div class="field">
       <span class="field-label">时间区间（秒）</span>
-      <div class="inline">
-        <input v-model.number="workspace.video.start" class="input" min="0" :max="workspace.video.duration" type="number" />
+      <div class="flex items-center gap-2">
+        <input v-model.number="workspace.video.start" class="input w-25" min="0" :max="workspace.video.duration" type="number" />
         <span>—</span>
-        <input v-model.number="workspace.video.end" class="input" min="0" :max="workspace.video.duration" type="number" />
+        <input v-model.number="workspace.video.end" class="input w-25" min="0" :max="workspace.video.duration" type="number" />
       </div>
     </div>
-    <div v-if="rangeError" class="range-error">{{ rangeError }}</div>
+    <div v-if="rangeError" class="text-caption text-danger">{{ rangeError }}</div>
     <label class="check-row"><input v-model="workspace.video.flipX" type="checkbox" /> 左右翻转</label>
     <div class="field">
       <span class="field-label">旋转</span>
@@ -53,51 +53,10 @@ const estimatedMb = computed(() => Math.round(expectedCount.value * Math.max(1, 
         <option :value="270">270°</option>
       </select>
     </div>
-    <div class="estimate">
+    <div class="flex flex-col gap-0.75 border border-line bg-raised p-3">
       <span>预计帧数</span>
-      <strong>{{ expectedCount }}</strong>
-      <small>{{ workspace.video.width }} × {{ workspace.video.height }} · {{ estimatedMb }} MB</small>
+      <strong class="font-mono text-[20px] leading-[normal] font-normal text-accent">{{ expectedCount }}</strong>
+      <small class="text-faint">{{ workspace.video.width }} × {{ workspace.video.height }} · {{ estimatedMb }} MB</small>
     </div>
   </div>
 </template>
-
-<style scoped>
-.extract-fields {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
-.inline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.inline .input {
-  width: 100px;
-}
-
-.range-error {
-  color: var(--danger);
-  font-size: var(--fs-caption);
-}
-
-.estimate {
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-}
-
-.estimate strong {
-  font: 20px var(--font-mono);
-  color: var(--accent);
-}
-
-.estimate small {
-  color: var(--text-faint);
-}
-</style>

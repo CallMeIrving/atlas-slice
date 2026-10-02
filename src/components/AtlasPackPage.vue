@@ -362,16 +362,16 @@ function resetAll(): void {
 </script>
 
 <template>
-  <div class="tool-page" @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
+  <div class="relative grid h-full min-h-0 grid-cols-[280px_minmax(0,1fr)_320px]" @dragenter.prevent="onDragEnter" @dragover.prevent @dragleave="onDragLeave" @drop.prevent="onDrop">
     <!-- 左栏：仅展示图集素材列表 -->
-    <section class="tool-sidebar panel">
+    <section class="panel overflow-auto border-r border-line">
       <div class="section">
         <h2 class="section-title">图集列表</h2>
-        <p class="muted hint">素材按导入顺序参与打包，可单独移除</p>
-        <ul v-if="state.items.length" class="pack-list">
-          <li v-for="item in state.items" :key="item.id" class="pack-row">
-            <img class="pack-thumb" :src="item.url" :alt="item.name" draggable="false" />
-            <span class="pack-name" :title="item.name">{{ item.name }}</span>
+        <p class="muted hint mt-1 mb-0 text-caption">素材按导入顺序参与打包，可单独移除</p>
+        <ul v-if="state.items.length" class="mt-2 mb-0 flex list-none flex-col gap-1 p-0">
+          <li v-for="item in state.items" :key="item.id" class="flex items-center gap-2">
+            <img class="size-6.5 flex-none rounded-sm border border-line bg-stage object-contain" :src="item.url" :alt="item.name" draggable="false" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="item.name">{{ item.name }}</span>
             <span class="mono faint">{{ item.width }}×{{ item.height }}</span>
             <button class="btn btn-icon btn-danger" title="移除" @click="removeItem(item.id)">×</button>
           </li>
@@ -380,18 +380,18 @@ function resetAll(): void {
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
+    <main class="flex min-h-0 min-w-0 flex-col">
+      <div class="flex h-16 flex-none items-center justify-between gap-4 border-b border-line px-6">
         <div>
-          <h2>雪碧图工作区</h2>
-          <p>
+          <h2 class="m-0 text-head">雪碧图工作区</h2>
+          <p class="mt-0.5 mb-0 text-faint">
             <template v-if="state.result">
               {{ state.items.length }} 张素材 → {{ state.result.length }} 页图集 · 共 {{ totalPlacements }} 处落位
             </template>
             <template v-else>导入多张素材后点击「开始打包」</template>
           </p>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-3">
           <input ref="input" hidden multiple type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
           <input ref="atlasInput" hidden multiple type="file" accept="image/png,image/jpeg,image/webp,.json,application/json" @change="onAtlasFileChange" />
           <button class="btn btn-primary" @click="input?.click()">导入图片</button>
@@ -402,7 +402,7 @@ function resetAll(): void {
         </div>
       </div>
 
-      <div class="tool-body">
+      <div class="relative flex min-h-0 flex-1 flex-col items-center gap-4 overflow-auto p-6">
         <div v-if="!state.previewUrls.length" class="empty-state">
           <span class="big">▤</span>
           <strong>还没有可打包的素材</strong>
@@ -410,27 +410,27 @@ function resetAll(): void {
         </div>
 
         <template v-else>
-          <div v-if="state.previewUrls.length > 1" class="page-tabs">
+          <div v-if="state.previewUrls.length > 1" class="flex flex-wrap justify-center gap-2">
             <button
               v-for="(url, index) in state.previewUrls"
               :key="url"
-              class="page-tab"
-              :class="{ active: index === activePage }"
+              class="cursor-pointer rounded-full border border-line bg-transparent px-[14px] py-1 text-ink"
+              :class="index === activePage && 'border-accent bg-accent-dim text-accent'"
               @click="state.activePage = index"
             >
               第 {{ index + 1 }} 页
             </button>
           </div>
 
-          <div class="pack-preview-wrap">
-            <div class="pack-preview">
-              <img class="pack-image" :src="state.previewUrls[activePage]" alt="打包结果" draggable="false" />
-              <div class="pack-overlay">
+          <div class="flex flex-col items-center gap-2">
+            <div class="relative inline-block rounded-sm border border-line bg-stage leading-0">
+              <img class="block max-h-[56vh] max-w-full object-contain" :src="state.previewUrls[activePage]" alt="打包结果" draggable="false" />
+              <div class="absolute inset-0">
                 <div
                   v-for="placement in activeResult?.placements ?? []"
                   :key="placement.id"
-                  class="pack-cell"
-                  :class="{ active: hoverId === placement.id }"
+                  class="absolute border border-transparent transition-[background,border-color] duration-100 hover:border-accent hover:bg-accent-dim"
+                  :class="hoverId === placement.id && 'border-accent bg-accent-dim'"
                   :style="placementStyle(placement)"
                   :title="`${placement.name} · ${placement.sourceSize.w}×${placement.sourceSize.h}${placement.rotated ? ' · 已旋转' : ''}`"
                   @mouseenter="hoverId = placement.id"
@@ -450,8 +450,14 @@ function resetAll(): void {
           />
         </template>
 
-        <transition name="fade">
-          <div v-if="dragDepth > 0" class="drag-mask">
+        <transition
+          name="fade"
+          enter-active-class="transition-opacity duration-150"
+          leave-active-class="transition-opacity duration-150"
+          enter-from-class="opacity-0"
+          leave-to-class="opacity-0"
+        >
+          <div v-if="dragDepth > 0" class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-sm border-2 border-dashed border-accent bg-accent-dim text-head text-accent">
             <span>松开以导入图片</span>
           </div>
         </transition>
@@ -459,18 +465,18 @@ function resetAll(): void {
     </main>
 
     <!-- 右栏：导入、布局参数与导出配置 -->
-    <section class="tool-sidepanel panel">
-      <div class="section">
+    <section class="panel overflow-auto border-l border-line">
+      <div class="section [&>p+.check-row]:mt-3">
         <h2 class="section-title">雪碧图打包</h2>
         <p class="muted">MaxRects / 网格装箱，放不下自动分页，本地处理不上传</p>
         <label class="check-row"><input v-model="showAnim" type="checkbox" /> 动画预览（右下角悬浮）</label>
       </div>
 
-      <div class="section">
+      <div class="section [&>.field+.field]:mt-3 [&>.check-row+.check-row]:mt-3 [&>.check-row+.field]:mt-3 [&>p+.field]:mt-3 [&>p+.check-row]:mt-3">
         <h2 class="section-title">布局参数</h2>
         <label class="field">
           <span class="field-label">布局方式</span>
-          <select v-model="state.settings.layout" class="select">
+          <select v-model="state.settings.layout" class="select w-full">
             <option value="compact">紧凑装箱（MaxRects）</option>
             <option value="grid">固定网格</option>
             <option value="strip-h">横向条带（单行）</option>
@@ -480,7 +486,7 @@ function resetAll(): void {
         <template v-if="state.settings.layout === 'compact'">
           <label class="field">
             <span class="field-label">装箱启发式</span>
-            <select v-model="state.settings.heuristic" class="select">
+            <select v-model="state.settings.heuristic" class="select w-full">
               <option value="bssf">残留最小边（BSSF）</option>
               <option value="bl">底左（BL）</option>
               <option value="contact">接触周长（Contact）</option>
@@ -489,7 +495,7 @@ function resetAll(): void {
           <label class="check-row"><input v-model="state.settings.allowRotate" type="checkbox" /> 允许 90° 旋转以提升紧凑度</label>
         </template>
         <template v-else-if="state.settings.layout === 'grid'">
-          <div class="field-row">
+          <div class="field-row gap-3 mt-3 [&_.field]:min-w-0 [&_.field]:flex-1 [&_.input]:w-full">
             <label class="field">
               <span class="field-label">列数（0 自动）</span>
               <input v-model.number="state.settings.gridColumns" class="input" type="number" min="0" />
@@ -499,19 +505,19 @@ function resetAll(): void {
               <input v-model.number="state.settings.gridCell" class="input" type="number" min="0" />
             </label>
           </div>
-          <p class="muted hint">网格模式按固定单元格排布，不旋转，适合帧动画序列。</p>
+          <p class="muted hint mt-1 mb-0 text-caption">网格模式按固定单元格排布，不旋转，适合帧动画序列。</p>
         </template>
-        <p v-else class="muted hint">条带模式按导入顺序单行/单列排布，不旋转，放不下自动分页。</p>
+        <p v-else class="muted hint mt-1 mb-0 text-caption">条带模式按导入顺序单行/单列排布，不旋转，放不下自动分页。</p>
         <label class="check-row"><input v-model="state.settings.mergeDuplicate" type="checkbox" /> 合并相同帧（Alias 去重）</label>
         <label class="field">
           <span class="field-label">边缘外扩（extrude）</span>
-          <select v-model.number="state.settings.extrude" class="select">
+          <select v-model.number="state.settings.extrude" class="select w-full">
             <option :value="0">不外扩</option>
             <option :value="1">1 px</option>
             <option :value="2">2 px</option>
           </select>
         </label>
-        <div class="field-row">
+        <div class="field-row gap-3 mt-3 [&_.field]:min-w-0 [&_.field]:flex-1 [&_.input]:w-full">
           <label class="field">
             <span class="field-label">素材留白</span>
             <input v-model.number="state.settings.padding" class="input" type="number" min="0" />
@@ -523,7 +529,7 @@ function resetAll(): void {
         </div>
         <label class="field">
           <span class="field-label">最大边长</span>
-          <select v-model.number="state.settings.maxSize" class="select">
+          <select v-model.number="state.settings.maxSize" class="select w-full">
             <option :value="512">512 px</option>
             <option :value="1024">1024 px</option>
             <option :value="2048">2048 px</option>
@@ -533,27 +539,27 @@ function resetAll(): void {
         <label class="check-row"><input v-model="state.settings.trim" type="checkbox" /> 裁掉透明边（trim）</label>
         <label v-if="state.settings.trim" class="field">
           <span class="field-label">裁剪 alpha 阈值 {{ state.settings.alphaThreshold }}</span>
-          <input v-model.number="state.settings.alphaThreshold" class="range" type="range" min="1" max="64" />
+          <input v-model.number="state.settings.alphaThreshold" class="w-full accent-accent" type="range" min="1" max="64" />
         </label>
         <label class="check-row"><input v-model="state.settings.powerOfTwo" type="checkbox" /> 宽高取 2 的幂</label>
       </div>
 
-      <div class="section">
+      <div class="section [&>.field+.field]:mt-3 [&>.check-row+.check-row]:mt-3 [&>.check-row+.field]:mt-3 [&>p+.field]:mt-3 [&>p+.check-row]:mt-3">
         <h2 class="section-title">导出</h2>
         <label class="field">
           <span class="field-label">图片格式</span>
-          <select v-model="state.settings.imageFormat" class="select">
+          <select v-model="state.settings.imageFormat" class="select w-full">
             <option value="png">PNG</option>
             <option value="webp">WebP</option>
           </select>
         </label>
         <label v-if="state.settings.imageFormat === 'webp'" class="field">
           <span class="field-label">WebP 质量 {{ state.settings.webpQuality }}</span>
-          <input v-model.number="state.settings.webpQuality" class="range" type="range" min="10" max="100" />
+          <input v-model.number="state.settings.webpQuality" class="w-full accent-accent" type="range" min="10" max="100" />
         </label>
         <label class="field">
           <span class="field-label">锚点（Pivot，写入元数据）</span>
-          <select v-model="state.settings.pivotMode" class="select">
+          <select v-model="state.settings.pivotMode" class="select w-full">
             <option value="center">中心</option>
             <option value="topleft">左上</option>
             <option value="topcenter">上中</option>
@@ -583,71 +589,19 @@ function resetAll(): void {
         <label class="check-row"><input v-model="state.settings.withCss" type="checkbox" /> 附带 CSS sprites 样式表</label>
       </div>
 
-      <div class="section actions">
-        <button class="btn btn-primary full" :disabled="!state.items.length || packing" @click="pack">
+      <div class="section flex flex-col gap-2">
+        <button class="btn btn-primary w-full justify-center" :disabled="!state.items.length || packing" @click="pack">
           {{ packing ? '打包中…' : '开始打包' }}
         </button>
-        <button class="btn full" :disabled="state.status !== 'packed' || exporting" @click="exportZip">
+        <button class="btn w-full justify-center" :disabled="state.status !== 'packed' || exporting" @click="exportZip">
           {{ exporting ? '导出中…' : '导出 ZIP' }}
         </button>
-        <button class="btn btn-ghost full" :disabled="!state.items.length && !state.previewUrls.length" @click="resetAll">重置</button>
-        <p v-if="state.error" class="error-text">{{ state.error }}</p>
-        <p v-for="(warning, index) in state.warnings" :key="index" class="warning-text">{{ warning }}</p>
+        <button class="btn btn-ghost w-full justify-center" :disabled="!state.items.length && !state.previewUrls.length" @click="resetAll">重置</button>
+        <p v-if="state.error" class="text-caption text-danger">{{ state.error }}</p>
+        <p v-for="(warning, index) in state.warnings" :key="index" class="text-caption text-faint">{{ warning }}</p>
       </div>
     </section>
   </div>
 </template>
 
-<style scoped>
-/* 页面骨架：左栏图集列表 + 中间工作区 + 右栏参数配置（与精灵图页同构的三栏布局） */
-.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; position: relative; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: var(--fs-head); }
-.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); padding: 24px; position: relative; }
-.full { width: 100%; justify-content: center; }
-.actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-.hint { margin: var(--sp-1) 0 0; font-size: var(--fs-caption); }
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-/* 只给直接堆叠在 section 下的字段加间距，网格/行内布局由 gap 控制，避免误加 margin 造成错位 */
-.section > .field + .field, .section > .check-row + .check-row, .section > .check-row + .field { margin-top: var(--sp-3); }
-.section > p + .field, .section > p + .check-row { margin-top: var(--sp-3); }
-.field-row { display: flex; gap: var(--sp-3); margin-top: var(--sp-3); }
-.field-row .field { flex: 1; min-width: 0; }
-.field-row .input { width: 100%; }
-.range { width: 100%; accent-color: var(--accent); }
-.select { width: 100%; }
-.error-text { color: var(--danger); font-size: var(--fs-caption); }
-.warning-text { color: var(--text-faint); font-size: var(--fs-caption); }
 
-/* 素材列表（左栏整列展示，滚动交给侧栏容器） */
-.pack-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
-.pack-row { display: flex; align-items: center; gap: var(--sp-2); }
-.pack-thumb { width: 26px; height: 26px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.pack-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-
-/* 多页切换标签 */
-.page-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: center; }
-.page-tab { padding: 4px 14px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text); cursor: pointer; }
-.page-tab.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
-
-/* 结果预览：img 与 overlay 共用同一盒模型，落位按百分比定位 */
-.pack-preview-wrap { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
-.pack-preview { position: relative; display: inline-block; line-height: 0; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.pack-image { display: block; max-width: 100%; max-height: 56vh; object-fit: contain; }
-.pack-overlay { position: absolute; inset: 0; }
-.pack-cell { position: absolute; border: 1px solid transparent; transition: background 0.1s, border-color 0.1s; }
-.pack-cell:hover, .pack-cell.active { border-color: var(--accent); background: var(--accent-dim); }
-
-/* 拖拽高亮遮罩 */
-.drag-mask { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: var(--radius-s); background: var(--accent-dim); color: var(--accent); font-size: var(--fs-head); pointer-events: none; }
-.fade-enter-active, .fade-leave-active { transition: opacity 0.15s; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
-
-@media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
-}
-</style>

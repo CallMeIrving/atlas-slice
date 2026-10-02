@@ -257,15 +257,15 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
 </script>
 
 <template>
-  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+  <div class="grid h-full min-h-0" :class="hasSource ? 'grid-cols-[280px_minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)_320px]'">
     <!-- 左栏：已导入 tileset 列表，未导入时整栏不显示 -->
-    <section v-if="hasSource" class="tool-sidebar panel">
+    <section v-if="hasSource" class="panel overflow-auto border-r border-line">
       <div class="section">
         <h2 class="section-title">图集列表</h2>
-        <ul class="asset-list">
-          <li class="asset-row">
-            <img class="asset-thumb" :src="state.sourceUrl" :alt="state.fileName" draggable="false" />
-            <span class="asset-name" :title="state.fileName">{{ state.fileName }}</span>
+        <ul class="m-0 flex list-none flex-col gap-2 p-0">
+          <li class="flex items-center gap-2">
+            <img class="size-10 flex-none rounded-sm border border-line bg-stage object-contain" :src="state.sourceUrl" :alt="state.fileName" draggable="false" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="state.fileName">{{ state.fileName }}</span>
             <span class="mono faint">{{ state.image?.width }}×{{ state.image?.height }}</span>
             <button class="btn btn-icon btn-danger" title="移除" @click="resetAll">×</button>
           </li>
@@ -273,25 +273,25 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
+    <main class="flex min-h-0 min-w-0 flex-col">
+      <div class="flex h-16 flex-none items-center justify-between gap-4 border-b border-line px-6">
         <div>
-          <h2>Tilemap 工作区</h2>
-          <p>
+          <h2 class="m-0 text-head">Tilemap 工作区</h2>
+          <p class="mt-0.5 mb-0 text-faint">
             <template v-if="state.image">
               {{ state.image.width }}×{{ state.image.height }} px · {{ columns }} 列 × {{ rows }} 行
             </template>
             <template v-else>导入一张 tileset 图开始切分</template>
           </p>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-3">
           <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
           <button class="btn btn-primary" @click="input?.click()">导入 tileset</button>
           <span v-if="keptTiles.length" class="badge badge-accent">{{ keptTiles.length }} 块已切出</span>
         </div>
       </div>
 
-      <div class="tool-body">
+      <div class="flex min-h-0 flex-1 flex-col gap-5 overflow-auto p-6">
         <div v-if="!hasSource" class="empty-state">
           <span class="big">▦</span>
           <strong>还没有可切分的 tileset</strong>
@@ -299,25 +299,25 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
         </div>
 
         <template v-else>
-          <section class="tm-block">
-            <h3 class="tm-block-title">网格预览</h3>
-            <div class="tm-stage-wrap">
-              <div class="tm-stage">
-                <img class="tm-img" :src="state.sourceUrl" alt="tileset 源图" draggable="false" />
-                <canvas ref="gridCanvas" class="tm-grid"></canvas>
+          <section class="flex flex-col gap-3">
+            <h3 class="m-0 text-caption font-semibold tracking-[0.06em] text-faint uppercase">网格预览</h3>
+            <div class="flex justify-center">
+              <div class="relative rounded-sm border border-line bg-stage outline-none">
+                <img class="block max-h-[56vh] max-w-full object-contain select-none [image-rendering:pixelated]" :src="state.sourceUrl" alt="tileset 源图" draggable="false" />
+                <canvas ref="gridCanvas" class="pointer-events-none absolute inset-0 size-full"></canvas>
               </div>
             </div>
             <p v-if="!tiles.length" class="muted">当前参数无法排出完整的整块网格，请调小单块尺寸或外边距。</p>
           </section>
 
-          <section v-if="previews.length" class="tm-block">
-            <h3 class="tm-block-title">
+          <section v-if="previews.length" class="flex flex-col gap-3">
+            <h3 class="m-0 text-caption font-semibold tracking-[0.06em] text-faint uppercase">
               切片预览（前 {{ previews.length }} / {{ keptTiles.length }}）
             </h3>
-            <div class="tm-tiles">
-              <figure v-for="tile in previews" :key="tile.name" class="tm-tile">
-                <img :src="tile.url" :alt="tile.name" draggable="false" />
-                <figcaption class="mono">{{ tile.name }}</figcaption>
+            <div class="grid max-h-[42vh] gap-2 overflow-auto rounded-md border border-line bg-stage p-2 [grid-template-columns:repeat(auto-fill,minmax(88px,1fr))]">
+              <figure v-for="tile in previews" :key="tile.name" class="m-0 flex min-w-0 flex-col items-center gap-1">
+                <img class="size-14 rounded-sm border border-line bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:10px_10px] object-contain [image-rendering:pixelated]" :src="tile.url" :alt="tile.name" draggable="false" />
+                <figcaption class="mono max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-faint">{{ tile.name }}</figcaption>
               </figure>
             </div>
             <p v-if="keptTiles.length > previews.length" class="muted">
@@ -329,7 +329,7 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
     </main>
 
     <!-- 右栏：配置、参数与导出 -->
-    <section class="tool-sidepanel panel">
+    <section class="panel overflow-auto border-l border-line">
       <div class="section">
         <h2 class="section-title">Tilemap 切片</h2>
         <p class="muted">本地处理，不上传素材</p>
@@ -337,7 +337,7 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
 
       <div class="section">
         <h2 class="section-title">网格参数</h2>
-        <div class="param-grid">
+        <div class="grid grid-cols-2 gap-x-3 gap-y-2 [&_.input]:w-full">
           <label class="field">
             <span class="field-label">单块宽</span>
             <input v-model.number="state.options.tileW" class="input" type="number" min="1" :disabled="!hasSource" />
@@ -363,10 +363,10 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
             <input v-model.number="state.options.offsetY" class="input" type="number" min="0" :disabled="!hasSource" />
           </label>
         </div>
-        <p class="muted hint">列数 = ⌊(图宽 − 外边距×2 − 偏移 + 间距) / (单块宽 + 间距)⌋，行数同理。</p>
+        <p class="muted hint mt-3 mb-0 text-caption">列数 = ⌊(图宽 − 外边距×2 − 偏移 + 间距) / (单块宽 + 间距)⌋，行数同理。</p>
       </div>
 
-      <div class="section">
+      <div class="section [&>.check-row+.field]:mt-3 [&>.field+.field]:mt-3 [&>label+.muted]:mt-2 [&>.check-row+.muted]:mt-2 [&>p+.field]:mt-3">
         <h2 class="section-title">空白处理</h2>
         <label class="check-row"><input v-model="state.options.skipEmpty" type="checkbox" :disabled="!hasSource" /> 跳过全透明 tile</label>
         <label class="field">
@@ -378,118 +378,19 @@ onBeforeUnmount(() => window.clearTimeout(computeTimer))
 
       <div class="section">
         <h2 class="section-title">命名模板</h2>
-        <input v-model="state.options.pattern" class="input mono pattern-input" type="text" spellcheck="false" :disabled="!hasSource" placeholder="{name}_{index}.png" />
+        <input v-model="state.options.pattern" class="input mono w-full text-caption" type="text" spellcheck="false" :disabled="!hasSource" placeholder="{name}_{index}.png" />
         <p class="muted">占位符：{name} 基准名 · {index} 三位序号 · {seq} 序号 · {col} / {row} 行列号。重名会自动补序号。</p>
       </div>
 
-      <div class="section actions">
-        <button class="btn btn-primary full" :disabled="!keptTiles.length || exporting" @click="exportZip">
+      <div class="section flex flex-col gap-2">
+        <button class="btn btn-primary w-full justify-center" :disabled="!keptTiles.length || exporting" @click="exportZip">
           {{ exporting ? '打包中…' : `导出 ZIP（${keptTiles.length} 块 + Tiled JSON）` }}
         </button>
-        <button class="btn btn-ghost full" :disabled="!hasSource" @click="resetAll">重置</button>
-        <p v-if="state.error" class="error-text">{{ state.error }}</p>
+        <button class="btn btn-ghost w-full justify-center" :disabled="!hasSource" @click="resetAll">重置</button>
+        <p v-if="state.error" class="text-caption text-danger">{{ state.error }}</p>
       </div>
     </section>
 
   </div>
 </template>
 
-<style scoped>
-/* 页面骨架与雪碧图页同构：左栏图集列表 + 中间工作区 + 右栏参数配置；未导入时左栏隐藏 */
-.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
-.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: var(--fs-head); }
-.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-5); padding: 24px; }
-.full { width: 100%; justify-content: center; }
-.actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-.hint { margin: var(--sp-3) 0 0; font-size: var(--fs-caption); }
-/* 只给直接堆叠在 section 下的字段加间距；网格与行内布局由 gap 控制，避免误加 margin 造成错位 */
-.section > .field + .field, .section > .check-row + .field { margin-top: var(--sp-3); }
-.section > p + .field { margin-top: var(--sp-3); }
-.section > label + .muted, .section > .check-row + .muted { margin-top: var(--sp-2); }
-/* field 作为 flex 项时允许收缩，否则 number 输入的固有宽度会把侧栏撑出横向滚动条 */
-.field-row .field { flex: 1; min-width: 0; }
-.param-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-2) var(--sp-3);
-}
-/* 数值框覆盖全局 76px 固定宽，填满列宽与标签左缘对齐 */
-.param-grid .input { width: 100%; }
-.pattern-input { width: 100%; font-size: var(--fs-caption); }
-.error-text { color: var(--danger); font-size: var(--fs-caption); }
-
-/* 网格预览：容器收缩到图片实际显示尺寸，覆盖层与图片严格重合 */
-.tm-block { display: flex; flex-direction: column; gap: var(--sp-3); }
-.tm-block-title { margin: 0; font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
-.tm-stage-wrap { display: flex; justify-content: center; }
-.tm-stage {
-  position: relative;
-  outline: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--stage);
-}
-.tm-img {
-  display: block;
-  max-width: 100%;
-  max-height: 56vh;
-  object-fit: contain;
-  image-rendering: pixelated;
-  user-select: none;
-}
-.tm-grid {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-/* 切片预览 */
-.tm-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
-  gap: var(--sp-2);
-  max-height: 42vh;
-  overflow: auto;
-  padding: var(--sp-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--stage);
-}
-.tm-tile { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
-.tm-tile img {
-  width: 56px;
-  height: 56px;
-  object-fit: contain;
-  image-rendering: pixelated;
-  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 10px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-}
-.tm-tile figcaption {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10px;
-  color: var(--text-faint);
-}
-
-@media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
-  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
-}
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-/* 左栏图集列表条目：缩略图 + 名称 + 尺寸 + 移除 */
-.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
-.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-</style>

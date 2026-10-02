@@ -240,85 +240,85 @@ function clearResults(): void {
 </script>
 
 <template>
-  <div class="onion-page" @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
-    <div v-if="dragging" class="drop-overlay">松手导入帧序列（图片按文件名排序）</div>
-    <div class="onion-content">
-      <div class="onion-left">
-        <section class="frames-panel panel">
-          <div class="panel-title">帧序列 <span class="badge">{{ frameCount }} 帧</span></div>
-          <div class="frames-body">
-            <div class="frames-actions">
+  <div class="relative flex-1 min-h-0 h-auto overflow-hidden" @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
+    <div v-if="dragging" class="absolute inset-2 z-5 flex items-center justify-center text-accent-strong text-body bg-[rgb(20_24_34_/_0.72)] border-2 border-dashed border-accent rounded-md pointer-events-none">松手导入帧序列（图片按文件名排序）</div>
+    <div class="h-full grid grid-cols-[300px_minmax(0,1fr)] gap-px bg-line">
+      <div class="min-w-0 min-h-0 flex flex-col gap-px bg-line">
+        <section class="panel min-w-0 min-h-0 flex flex-col overflow-hidden flex-[3_1_60%]">
+          <div class="h-9 flex-none flex items-center gap-2 px-3 text-muted border-b border-line text-caption">帧序列 <span class="badge">{{ frameCount }} 帧</span></div>
+          <div class="flex-1 min-h-0 flex flex-col p-3 overflow-hidden">
+            <div class="flex-none flex flex-col items-start gap-1.5">
               <input ref="input" hidden type="file" accept="image/*" multiple @change="onPick" />
               <button class="btn btn-primary" @click="input?.click()">导入帧序列</button>
-              <span class="muted">多选 / 拖入图片按文件名排序 · 透明背景精灵帧效果最佳</span>
-              <div class="sheet-box" title="把一张按网格排列多帧的精灵图（spritesheet）按列×行切成帧序列；逐张导入或视频帧送入无需此功能">
-                <span class="sheet-label">精灵图切格 · 一张网格大图切成帧序列</span>
-                <div class="sheet-row">
+              <span class="muted text-caption">多选 / 拖入图片按文件名排序 · 透明背景精灵帧效果最佳</span>
+              <div class="flex flex-col items-stretch gap-1.5 w-full pt-2.5 border-t border-dashed border-line" title="把一张按网格排列多帧的精灵图（spritesheet）按列×行切成帧序列；逐张导入或视频帧送入无需此功能">
+                <span class="text-muted text-caption whitespace-nowrap overflow-hidden text-ellipsis">精灵图切格 · 一张网格大图切成帧序列</span>
+                <div class="flex items-center justify-between gap-2 text-caption">
                   <input ref="sheetInput" hidden type="file" accept="image/*" @change="onPickSheet" />
-                  <span class="sheet-size">
-                    <input v-model.number="sheetCols" class="input" type="number" min="1" max="32" title="列数" />列
+                  <span class="flex items-center gap-1 text-faint">
+                    <input v-model.number="sheetCols" class="input w-11" type="number" min="1" max="32" title="列数" />列
                     <span class="muted">×</span>
-                    <input v-model.number="sheetRows" class="input" type="number" min="1" max="32" title="行数" />行
+                    <input v-model.number="sheetRows" class="input w-11" type="number" min="1" max="32" title="行数" />行
                   </span>
                   <button class="btn" @click="sheetInput?.click()">切为帧序列</button>
                 </div>
               </div>
             </div>
-            <div v-if="!frameCount" class="strip-empty">导入图片序列后开始洋葱皮预览</div>
-            <div v-else class="strip">
+            <div v-if="!frameCount" class="text-faint py-6 text-caption">导入图片序列后开始洋葱皮预览</div>
+            <div v-else class="flex-1 min-h-0 grid grid-cols-2 gap-2.5 content-start overflow-y-auto pt-3 pr-1 pb-1 pl-1">
               <button
                 v-for="(frame, index) in stripFrames"
                 :key="frame.id"
-                class="frame-card"
-                :class="{ active: currentId === frame.id, tween: frame.tween }"
+                class="min-w-0 p-1 text-left bg-raised border rounded-sm"
+                :class="[currentId === frame.id ? 'border-accent' : 'border-line', frame.tween ? 'border-dashed' : 'border-solid']"
                 @click="currentId = frame.id"
               >
-                <img :src="frame.url" :alt="`帧 ${index + 1}`" />
-                <span><b>#{{ index + 1 }}</b><template v-if="frame.tween"> 补</template> {{ frame.name }}</span>
+                <img class="w-full h-19 object-contain bg-checker-a bg-[linear-gradient(45deg,#232734_25%,transparent_25%),linear-gradient(-45deg,transparent_75%,#232734_75%)] bg-[length:12px_12px]" :src="frame.url" :alt="`帧 ${index + 1}`" />
+                <span class="block pt-[3px] text-faint font-mono text-[11px] leading-[normal] overflow-hidden text-ellipsis whitespace-nowrap"><b>#{{ index + 1 }}</b><template v-if="frame.tween"> 补</template> {{ frame.name }}</span>
               </button>
             </div>
           </div>
         </section>
 
-        <aside class="settings-panel panel">
-          <h2 class="section-title">帧间补间</h2>
-          <div class="settings-body">
-            <p class="muted">相邻帧逐像素混合生成中间过渡帧，适合手绘动画缺帧时补过渡。</p>
-            <label class="setting-row">
+        <aside class="panel min-w-0 min-h-0 flex flex-col overflow-hidden flex-[2_1_40%]">
+          <h2 class="section-title flex-none m-0 pt-3.5 px-4 pb-3 border-b border-line">帧间补间</h2>
+          <div class="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
+            <p class="muted text-caption leading-normal">相邻帧逐像素混合生成中间过渡帧，适合手绘动画缺帧时补过渡。</p>
+            <label class="flex items-center justify-between gap-2 text-caption">
               <span>每对生成</span>
-              <span class="setting-input">
-                <input v-model.number="workspace.onion.tweenCount" class="input" type="number" min="1" max="5" @change="clampTweenCount" />
-                <span class="muted">帧</span>
+              <span class="flex items-center gap-1.5">
+                <input v-model.number="workspace.onion.tweenCount" class="input w-14" type="number" min="1" max="5" @change="clampTweenCount" />
+                <span class="muted text-caption leading-normal">帧</span>
               </span>
             </label>
-            <label class="setting-row">
+            <label class="flex items-center justify-between gap-2 text-caption">
               <span>权重曲线</span>
               <select v-model="workspace.onion.tweenEasing" class="input">
                 <option value="linear">匀速</option>
                 <option value="ease">缓入缓出</option>
               </select>
             </label>
-            <label class="setting-row">
+            <label class="flex items-center justify-between gap-2 text-caption">
               <span>循环补间（末帧→首帧）</span>
               <input v-model="workspace.onion.tweenLoop" type="checkbox" />
             </label>
-            <button class="btn btn-primary full" :disabled="frameCount < 2 || workspace.onion.status === 'tweening'" @click="runTween">
+            <button class="btn btn-primary w-full justify-center" :disabled="frameCount < 2 || workspace.onion.status === 'tweening'" @click="runTween">
               {{ workspace.onion.status === 'tweening' ? '生成中…' : '生成补间' }}
             </button>
-            <p v-if="workspace.onion.error" class="range-error">{{ workspace.onion.error }}</p>
+            <p v-if="workspace.onion.error" class="text-danger text-caption m-0">{{ workspace.onion.error }}</p>
 
             <template v-if="resultCount">
-              <div class="result-head">
+              <div class="flex items-center justify-between gap-2 pt-2 border-t border-line text-caption">
                 <strong>补间结果</strong>
                 <span class="badge">{{ resultCount }} 帧</span>
               </div>
-              <div class="results">
-                <div v-for="result in workspace.onion.tweenResults" :key="result.id" class="result-card">
-                  <img :src="result.url" :alt="result.name" />
-                  <span class="mono">{{ result.name }}</span>
+              <div class="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2">
+                <div v-for="result in workspace.onion.tweenResults" :key="result.id" class="p-1 bg-raised border border-line rounded-sm">
+                  <img class="w-full h-15 object-contain bg-checker-a bg-[linear-gradient(45deg,#232734_25%,transparent_25%),linear-gradient(-45deg,transparent_75%,#232734_75%)] bg-[length:12px_12px]" :src="result.url" :alt="result.name" />
+                  <span class="mono block pt-[3px] text-faint text-[10px] leading-[normal] overflow-hidden text-ellipsis whitespace-nowrap">{{ result.name }}</span>
                 </div>
               </div>
-              <div class="result-actions">
+              <div class="flex flex-wrap gap-2">
                 <button class="btn" @click="exportZip">导出 ZIP</button>
                 <button class="btn" @click="applyMergedToSequence">合并序列加入帧序列</button>
                 <button class="btn" @click="clearResults">清空</button>
@@ -328,18 +328,18 @@ function clearResults(): void {
         </aside>
       </div>
 
-      <section class="preview-panel panel">
-        <div class="panel-title">
+      <section class="panel min-w-0 min-h-0 flex flex-col overflow-hidden">
+        <div class="h-9 flex-none flex items-center gap-2 px-3 text-muted border-b border-line text-caption">
           洋葱皮预览
-          <div v-if="resultCount" class="mode-switch" role="group" aria-label="预览序列切换">
-            <button class="mode-btn" :class="{ active: previewMode === 'source' }" @click="setPreviewMode('source')">原帧 {{ frameCount }}</button>
-            <button class="mode-btn" :class="{ active: previewMode === 'tween' }" @click="setPreviewMode('tween')">含补间 {{ mergedFrames.length }}</button>
+          <div v-if="resultCount" class="flex gap-0.5 p-0.5 bg-raised border border-line rounded-sm" role="group" aria-label="预览序列切换">
+            <button class="h-[22px] px-2 rounded-[calc(var(--radius-s)-2px)] text-caption" :class="previewMode === 'source' ? 'bg-accent-dim text-accent-strong' : 'text-faint hover:text-ink'" @click="setPreviewMode('source')">原帧 {{ frameCount }}</button>
+            <button class="h-[22px] px-2 rounded-[calc(var(--radius-s)-2px)] text-caption" :class="previewMode === 'tween' ? 'bg-accent-dim text-accent-strong' : 'text-faint hover:text-ink'" @click="setPreviewMode('tween')">含补间 {{ mergedFrames.length }}</button>
           </div>
-          <label class="tint-toggle" title="过去帧染暖橙、未来帧染冷蓝，便于分辨轨迹方向">
+          <label class="flex items-center gap-[5px] text-faint text-caption cursor-pointer" title="过去帧染暖橙、未来帧染冷蓝，便于分辨轨迹方向">
             <input v-model="workspace.onion.tint" type="checkbox" />
             <span>前后帧着色</span>
           </label>
-          <span class="kbd-hint">←/→ 逐帧 · 空格播放</span>
+          <span class="ml-auto text-faint font-mono text-[11px] leading-[normal]">←/→ 逐帧 · 空格播放</span>
         </div>
         <FramePreviewPlayer
           ref="player"
@@ -357,49 +357,3 @@ function clearResults(): void {
     </div>
   </div>
 </template>
-
-<style scoped>
-.onion-page { position: relative; flex: 1; min-height: 0; height: auto; overflow: hidden; }
-.drop-overlay { position: absolute; inset: 8px; z-index: 5; display: flex; align-items: center; justify-content: center; color: var(--accent-strong); font-size: var(--fs-body); background: rgba(20, 24, 34, 0.72); border: 2px dashed var(--accent); border-radius: var(--radius-m); pointer-events: none; }
-.onion-content { height: 100%; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 1px; background: var(--border); }
-.onion-left { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 1px; background: var(--border); }
-.frames-panel, .preview-panel, .settings-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
-.frames-panel { flex: 3 1 60%; }
-.settings-panel { flex: 2 1 40%; }
-.panel-title { height: 36px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--text-muted); border-bottom: 1px solid var(--border); font-size: var(--fs-caption); }
-.mode-switch { display: flex; gap: 2px; padding: 2px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-s); }
-.mode-btn { height: 22px; padding: 0 8px; color: var(--text-faint); border-radius: calc(var(--radius-s) - 2px); font-size: var(--fs-caption); }
-.mode-btn:hover { color: var(--text); }
-.mode-btn.active { color: var(--accent-strong); background: var(--accent-dim); }
-.tint-toggle { display: flex; align-items: center; gap: 5px; color: var(--text-faint); font-size: var(--fs-caption); cursor: pointer; }
-.kbd-hint { margin-left: auto; color: var(--text-faint); font: 11px var(--font-mono); }
-.frames-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px; overflow: hidden; }
-.frames-actions { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-.frames-actions .muted { font-size: var(--fs-caption); }
-.sheet-box { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; padding-top: 10px; border-top: 1px dashed var(--border); }
-.sheet-label { color: var(--text-muted); font-size: var(--fs-caption); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-caption); }
-.sheet-size { display: flex; align-items: center; gap: 4px; color: var(--text-faint); }
-.sheet-size .input { width: 44px; }
-.strip { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-content: start; overflow-y: auto; padding: 12px 4px 4px; }
-.strip-empty { color: var(--text-faint); padding: 24px 0; font-size: var(--fs-caption); }
-.frame-card { min-width: 0; padding: 4px; text-align: left; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-s); }
-.frame-card.active { border-color: var(--accent); }
-.frame-card.tween { border-style: dashed; }
-.frame-card img { width: 100%; height: 76px; object-fit: contain; background-color: var(--checker-a); background-image: linear-gradient(45deg, #232734 25%, transparent 25%), linear-gradient(-45deg, transparent 75%, #232734 75%); background-size: 12px 12px; }
-.frame-card span { display: block; padding-top: 3px; color: var(--text-faint); font: 11px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.settings-panel .section-title { flex: none; margin: 0; padding: 14px 16px 12px; border-bottom: 1px solid var(--border); }
-.settings-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-.settings-body .muted { font-size: var(--fs-caption); line-height: 1.5; }
-.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-caption); }
-.setting-input { display: flex; align-items: center; gap: 6px; }
-.setting-input .input { width: 56px; }
-.full { width: 100%; justify-content: center; }
-.range-error { color: var(--danger); font-size: var(--fs-caption); margin: 0; }
-.result-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: var(--fs-caption); }
-.results { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
-.result-card { padding: 4px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-s); }
-.result-card img { width: 100%; height: 60px; object-fit: contain; background-color: var(--checker-a); background-image: linear-gradient(45deg, #232734 25%, transparent 25%), linear-gradient(-45deg, transparent 75%, #232734 75%); background-size: 12px 12px; }
-.result-card .mono { display: block; padding-top: 3px; color: var(--text-faint); font: 10px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.result-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-</style>

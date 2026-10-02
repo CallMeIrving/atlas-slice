@@ -67,7 +67,7 @@ function clearAll(): void {
 
 <template>
   <div class="modal-backdrop" @click.self="emit('close')">
-    <section class="modal frame-crop" role="dialog" aria-modal="true" aria-labelledby="frame-crop-title">
+    <section class="modal flex w-[min(900px,calc(100vw-48px))] max-h-[calc(100vh-48px)] flex-col" role="dialog" aria-modal="true" aria-labelledby="frame-crop-title">
       <div class="modal-head">
         <div>
           <h2 id="frame-crop-title">批量裁切</h2>
@@ -78,7 +78,7 @@ function clearAll(): void {
         </div>
         <button class="btn-icon modal-close" aria-label="关闭" @click="emit('close')">×</button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
         <FrameCropEditor v-model="cropRect" :source-url="baseUrl" />
         <TaskProgress
           v-if="busy || statusText || errorText"
@@ -94,31 +94,9 @@ function clearAll(): void {
         <button class="btn btn-danger" :disabled="busy || !croppedCount" @click="clearAll">
           清除全部裁切（{{ croppedCount }}）
         </button>
-        <span class="foot-spacer"></span>
+        <span class="flex-1"></span>
         <button class="btn btn-primary" :disabled="busy || !workspace.video.frames.length" @click="applyAll">应用到全部帧</button>
       </div>
     </section>
   </div>
 </template>
-
-<style scoped>
-.frame-crop {
-  width: min(900px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
-  display: flex;
-  flex-direction: column;
-}
-
-.frame-crop .modal-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
-.foot-spacer {
-  flex: 1;
-}
-</style>

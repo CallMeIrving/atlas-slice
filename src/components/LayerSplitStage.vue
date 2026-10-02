@@ -129,39 +129,8 @@ watch(
 </script>
 
 <template>
-  <figure class="ls-stage">
-    <canvas ref="canvas" @click="onClick"></canvas>
-    <figcaption v-if="error" class="faint">{{ error }}</figcaption>
+  <figure class="m-0 flex h-full min-h-0 min-w-0 flex-col items-center justify-center gap-2 overflow-hidden rounded-sm border border-line bg-stage p-3">
+    <canvas ref="canvas" class="max-h-full min-h-0 max-w-full shadow-[0_0_0_1px_var(--border)]" @click="onClick"></canvas>
+    <figcaption v-if="error" class="faint flex-none text-caption">{{ error }}</figcaption>
   </figure>
 </template>
-
-<style scoped>
-.ls-stage {
-  margin: 0;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  overflow: hidden;
-  padding: var(--sp-3);
-  background: var(--stage);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-}
-
-.ls-stage canvas {
-  max-width: 100%;
-  max-height: 100%;
-  min-height: 0;
-  box-shadow: 0 0 0 1px var(--border);
-}
-
-.ls-stage figcaption {
-  flex: none;
-  font-size: var(--fs-caption);
-}
-</style>

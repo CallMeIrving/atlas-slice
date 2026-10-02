@@ -717,18 +717,18 @@ function confirm(): void {
 </script>
 
 <template>
-  <div class="box-editor">
-    <div class="editor-toolbar">
+  <div class="flex min-h-0 flex-1 flex-col gap-2">
+    <div class="flex flex-none items-center gap-2">
       <button class="btn btn-primary" :disabled="detecting" @click="autoDetect">
         {{ detecting ? '检测中…' : '自动检测' }}
       </button>
       <button class="btn" :disabled="!boxes.length" @click="clearAll">清空全部</button>
-      <span class="spacer"></span>
+      <span class="flex-1"></span>
       <span class="muted">共 {{ boxCount }} 个框</span>
-      <span class="spacer"></span>
-      <span class="zoom-controls">
+      <span class="flex-1"></span>
+      <span class="flex items-center gap-1">
         <button class="btn btn-ghost" title="缩小" @click="zoomStep(1 / 1.25)">−</button>
-        <span class="mono zoom-value">{{ zoomPercent }}</span>
+        <span class="mono min-w-13 text-center text-caption">{{ zoomPercent }}</span>
         <button class="btn btn-ghost" title="放大" @click="zoomStep(1.25)">+</button>
         <button class="btn btn-ghost" title="适应：整图完整展示" @click="fitView">适应</button>
       </span>
@@ -738,31 +738,31 @@ function confirm(): void {
     <p v-if="errorText" class="warn">{{ errorText }}</p>
 
     <!-- 画布：单一 Konva.Stage，底图与框共用同一坐标系 -->
-    <div ref="wrap" class="stage-wrap">
+    <div ref="wrap" class="relative min-h-0 flex-1 overflow-hidden rounded-sm border border-line bg-stage [&_div]:outline-none">
       <!-- 选中框的属性编辑：悬浮在画布左上角，可拖动，不占布局空间 -->
       <div
         v-if="selectedBox"
-        class="box-props"
+        class="absolute top-0 left-0 z-10 flex w-42 cursor-move flex-col items-stretch gap-2 rounded-sm border border-line bg-raised p-2 shadow-[0_2px_8px_rgba(0,0,0,0.25)] select-none"
         :style="{ transform: `translate(${propsPos.x}px, ${propsPos.y}px)` }"
         @pointerdown="onPropsPointerDown"
         @pointermove="onPropsPointerMove"
         @pointerup="onPropsPointerUp"
       >
-        <span class="drag-handle" title="按住拖动面板">⠿ 属性</span>
-        <label class="field">
+        <span class="flex-none cursor-grab text-caption text-faint" title="按住拖动面板">⠿ 属性</span>
+        <label class="field items-start gap-0.5">
           <span class="field-label">类别</span>
-          <select class="input" :value="selectedBox.category" @change="onCategoryChange">
+          <select class="input w-full cursor-auto text-caption" :value="selectedBox.category" @change="onCategoryChange">
             <option v-for="(label, key) in CATEGORY_LABELS" :key="key" :value="key">{{ label }}</option>
           </select>
         </label>
-        <label class="field">
+        <label class="field items-start gap-0.5">
           <span class="field-label">名称</span>
-          <input class="input" v-model="selectedBox.label" maxlength="48" />
+          <input class="input w-full cursor-auto text-caption" v-model="selectedBox.label" maxlength="48" />
         </label>
         <span class="mono faint">
           {{ Math.round(selectedBox.w) }}×{{ Math.round(selectedBox.h) }} · ({{ Math.round(selectedBox.x) }}, {{ Math.round(selectedBox.y) }})
         </span>
-        <button class="btn btn-ghost" @click="deleteSelected">删除（Del）</button>
+        <button class="btn btn-ghost cursor-auto justify-center" @click="deleteSelected">删除（Del）</button>
       </div>
 
       <v-stage v-if="stageSize.width" ref="stageRef" :config="stageConfig">
@@ -777,122 +777,9 @@ function confirm(): void {
       </v-stage>
     </div>
 
-    <p class="hint muted">
+    <p class="hint muted flex-none text-center text-caption">
       空白拖拽画框 · 点框体拖动移动 · 拖控制点缩放大小 · <strong>双击重叠区域逐层向下切换</strong> ·
       滚轮缩放 · 按住 Space/中键拖拽平移
     </p>
   </div>
 </template>
-
-<style scoped>
-.box-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  min-height: 0;
-  flex: 1;
-}
-
-.editor-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex: none;
-}
-
-.editor-toolbar .spacer {
-  flex: 1;
-}
-
-.zoom-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-}
-
-.zoom-value {
-  min-width: 52px;
-  text-align: center;
-  font-size: var(--fs-caption);
-}
-
-.box-props {
-  /* 悬浮在画布左上角（top/left 为 0，位置由 transform 平移），absolute 不占布局空间 */
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 10;
-  /* 上下布局：字段纵向堆叠成紧凑卡片 */
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--sp-2);
-  width: 168px;
-  padding: var(--sp-2);
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  user-select: none;
-  cursor: move;
-}
-
-.box-props input,
-.box-props select,
-.box-props button {
-  cursor: auto;
-}
-
-.drag-handle {
-  color: var(--text-faint);
-  font-size: var(--fs-caption);
-  cursor: grab;
-  flex: none;
-}
-
-.box-props .field {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-}
-
-.box-props .field-label {
-  font-size: var(--fs-caption);
-  color: var(--text-faint);
-}
-
-.box-props .input {
-  width: 100%;
-  height: 28px;
-  font-size: var(--fs-caption);
-}
-
-.box-props .mono {
-  font-size: var(--fs-caption);
-}
-
-.box-props .btn {
-  justify-content: center;
-}
-
-.stage-wrap {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--stage);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-}
-
-.stage-wrap :deep(div) {
-  outline: none;
-}
-
-.hint {
-  flex: none;
-  font-size: var(--fs-caption);
-  text-align: center;
-}
-</style>

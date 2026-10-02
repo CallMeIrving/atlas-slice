@@ -211,8 +211,8 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="stage"
-    class="cmp-stage"
-    :class="{ 'selection-mode': props.selectionMode, panning }"
+    class="cmp-stage relative h-full w-full min-h-0 overflow-hidden rounded-sm border border-line bg-stage touch-none"
+    :class="panning ? 'cursor-grabbing' : props.selectionMode ? 'cursor-crosshair' : 'cursor-default'"
     @wheel.prevent="onWheel"
     @pointerdown="onStageDown"
     @pointermove="onStageMove"
@@ -220,138 +220,44 @@ onBeforeUnmount(() => {
     @pointercancel="onStageUp"
     @dblclick="resetView"
   >
-    <div class="cmp-layer">
-      <div class="cmp-box" :style="boxStyle">
-        <img ref="beforeImage" :src="props.beforeUrl" alt="原图" draggable="false" @load="onBeforeLoad" />
-        <div class="cmp-overlay">
+    <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+      <div class="relative flex-none" :style="boxStyle">
+        <img ref="beforeImage" class="block h-full w-full object-fill select-none [-webkit-user-drag:none]" :src="props.beforeUrl" alt="原图" draggable="false" @load="onBeforeLoad" />
+        <div class="pointer-events-none absolute inset-0">
           <!-- 叠加内容位于 transform 容器内，与 img 显示盒重合，天然跟随缩放平移 -->
           <slot name="overlay" :img="beforeImage" :natural="natural" :display="fitSize" :zoom="zoom"></slot>
         </div>
       </div>
     </div>
 
-    <div v-if="props.afterUrl" class="cmp-layer cmp-after" :style="{ clipPath: `inset(0 0 0 ${props.divider}%)` }">
-      <div class="cmp-box" :style="boxStyle">
-        <img :src="props.afterUrl" alt="结果图" draggable="false" />
+    <div v-if="props.afterUrl" class="pointer-events-none absolute inset-0 flex items-center justify-center [clip-path:inset(0_0_0_50%)]" :style="{ clipPath: `inset(0 0 0 ${props.divider}%)` }">
+      <div class="relative flex-none" :style="boxStyle">
+        <img class="block h-full w-full object-fill select-none [-webkit-user-drag:none]" :src="props.afterUrl" alt="结果图" draggable="false" />
       </div>
     </div>
 
     <div
       v-if="props.afterUrl"
-      class="cmp-divider"
+      class="absolute inset-y-0 z-2 -ml-px w-0.5 cursor-ew-resize bg-accent"
       :style="{ left: `${props.divider}%` }"
       @pointerdown.stop="onDividerDown"
       @pointermove="onDividerMove"
       @pointerup="onDividerUp"
       @pointercancel="onDividerUp"
     >
-      <span class="cmp-divider-handle">⇔</span>
+      <span class="absolute top-1/2 left-1/2 flex size-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-accent text-title text-[#1a140a] select-none">⇔</span>
     </div>
 
     <template v-if="props.afterUrl">
-      <span class="cmp-label label-before">{{ props.beforeLabel }}</span>
-      <span class="cmp-label label-after">{{ props.afterLabel }}</span>
+      <span class="pointer-events-none absolute top-2 left-2 z-2 rounded-sm bg-[rgb(8_10_14_/_0.66)] px-2 py-0.5 text-caption text-ink">{{ props.beforeLabel }}</span>
+      <span class="pointer-events-none absolute top-2 right-2 z-2 rounded-sm bg-[rgb(8_10_14_/_0.66)] px-2 py-0.5 text-caption text-ink">{{ props.afterLabel }}</span>
     </template>
 
-    <div class="cmp-zoombar" @pointerdown.stop>
-      <button class="cmp-zoom-btn" :disabled="zoom <= props.minZoom" title="缩小" @click="applyZoom(zoom / 1.2)">−</button>
-      <span class="cmp-zoom-value mono">{{ Math.round(zoom * 100) }}%</span>
-      <button class="cmp-zoom-btn" :disabled="zoom >= props.maxZoom" title="放大" @click="applyZoom(zoom * 1.2)">＋</button>
-      <button class="cmp-fit-btn" title="复位视图" @click="resetView">复位</button>
+    <div class="absolute right-2 bottom-2 z-2 flex items-center gap-1 rounded-sm border border-line bg-raised p-1" @pointerdown.stop>
+      <button class="size-[26px] cursor-pointer rounded-sm border border-line bg-raised text-[15px] leading-none text-ink enabled:hover:border-accent enabled:hover:text-accent disabled:cursor-default disabled:opacity-40" :disabled="zoom <= props.minZoom" title="缩小" @click="applyZoom(zoom / 1.2)">−</button>
+      <span class="mono min-w-11 text-center text-muted">{{ Math.round(zoom * 100) }}%</span>
+      <button class="size-[26px] cursor-pointer rounded-sm border border-line bg-raised text-[15px] leading-none text-ink enabled:hover:border-accent enabled:hover:text-accent disabled:cursor-default disabled:opacity-40" :disabled="zoom >= props.maxZoom" title="放大" @click="applyZoom(zoom * 1.2)">＋</button>
+      <button class="h-[26px] cursor-pointer rounded-sm border border-line bg-raised px-2 text-caption text-ink hover:border-accent hover:text-accent" title="复位视图" @click="resetView">复位</button>
     </div>
   </div>
 </template>
-
-<style scoped>
-.cmp-stage {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--stage);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  touch-action: none;
-  cursor: default;
-}
-.cmp-stage.selection-mode { cursor: crosshair; }
-.cmp-stage.panning { cursor: grabbing; }
-
-/* 图层铺满舞台并居中，transform 只作用于内层显示盒 */
-.cmp-layer {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-/* after 层的 clip-path 作用在舞台空间：分割线屏幕位置恒定，不随平移漂移 */
-.cmp-after { clip-path: inset(0 0 0 50%); }
-
-.cmp-box { position: relative; flex: none; }
-.cmp-box img { width: 100%; height: 100%; display: block; object-fit: fill; user-select: none; -webkit-user-drag: none; }
-
-.cmp-overlay { position: absolute; inset: 0; pointer-events: none; }
-
-.cmp-divider {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  margin-left: -1px;
-  background: var(--accent);
-  cursor: ew-resize;
-  z-index: 2;
-}
-.cmp-divider-handle {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #1a140a;
-  font-size: 14px;
-  user-select: none;
-}
-
-.cmp-label {
-  position: absolute;
-  top: 8px;
-  z-index: 2;
-  padding: 2px 8px;
-  border-radius: var(--radius-s);
-  background: rgba(8, 10, 14, 0.66);
-  color: var(--text);
-  font-size: var(--fs-caption);
-  pointer-events: none;
-}
-.label-before { left: 8px; }
-.label-after { right: 8px; }
-
-.cmp-zoombar {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--surface-raised);
-}
-.cmp-zoom-btn { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised); color: var(--text); cursor: pointer; font-size: 15px; line-height: 1; }
-.cmp-zoom-btn:disabled { opacity: 0.4; cursor: default; }
-.cmp-zoom-value { min-width: 44px; font-size: var(--fs-caption); color: var(--text-muted); text-align: center; }
-.cmp-fit-btn { height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised); color: var(--text); font-size: var(--fs-caption); cursor: pointer; }
-.cmp-zoom-btn:not(:disabled):hover, .cmp-fit-btn:hover { border-color: var(--accent); color: var(--accent); }
-</style>

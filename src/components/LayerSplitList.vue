@@ -131,55 +131,58 @@ async function download(layer: SplitLayer): Promise<void> {
 </script>
 
 <template>
-  <section class="layer-panel panel">
-    <div class="list-head">
-      <h2 class="section-title">图层 <span class="badge">{{ layers.length }}</span></h2>
-      <span class="muted">拖拽调整层序</span>
+  <section class="panel flex min-h-0 min-w-0 flex-col overflow-hidden">
+    <div class="flex flex-none items-center gap-2 px-3 pt-3 pb-2">
+      <h2 class="section-title m-0">图层 <span class="badge">{{ layers.length }}</span></h2>
+      <span class="muted flex-1 text-right text-caption">拖拽调整层序</span>
     </div>
-    <div class="list-actions">
-      <button class="btn" :disabled="selected.length < 2 || merging" @click="mergeSelection">
+    <div class="flex flex-none gap-2 px-3 pb-2">
+      <button class="btn flex-1 justify-center" :disabled="selected.length < 2 || merging" @click="mergeSelection">
         {{ merging ? '合并中…' : `合并选中（${selected.length}）` }}
       </button>
-      <button class="btn btn-ghost" title="清空结果，回到待拆分" @click="emit('reset')">重置</button>
+      <button class="btn btn-ghost flex-1 justify-center" title="清空结果，回到待拆分" @click="emit('reset')">重置</button>
     </div>
-    <p v-if="error" class="warn">{{ error }}</p>
+    <p v-if="error" class="warn mx-3 flex-none">{{ error }}</p>
 
-    <ul class="layer-list">
+    <ul class="m-0 flex min-h-0 flex-1 list-none flex-col gap-0.5 overflow-y-auto px-2 pb-2">
       <li
         v-for="(layer, index) in layers"
         :key="layer.id"
-        class="layer-item"
-        :class="{ active: selectedSet.has(layer.id), hidden: !layer.visible }"
+        class="flex cursor-pointer flex-col gap-0.5 rounded-sm border border-transparent px-1.5 py-1 hover:bg-hover"
+        :class="[
+          selectedSet.has(layer.id) ? 'border-accent-border bg-accent-dim' : '',
+          !layer.visible ? '[&_.thumb]:opacity-40 [&_.name-input]:opacity-40' : '',
+        ]"
         draggable="true"
         @dragstart="draggingId = layer.id"
         @dragover.prevent
         @drop.prevent="drop(layer.id)"
         @click="toggleSelect(layer.id, $event)"
       >
-        <div class="row-main">
-          <span class="layer-index mono">{{ index + 1 }}</span>
-          <label class="layer-check" title="参与合成与导出" @click.stop>
-            <input v-model="layer.visible" type="checkbox" />
+        <div class="flex min-w-0 items-center gap-2">
+          <span class="mono w-4 flex-none text-right text-faint">{{ index + 1 }}</span>
+          <label class="m-0 flex flex-none" title="参与合成与导出" @click.stop>
+            <input v-model="layer.visible" class="accent-accent" type="checkbox" />
           </label>
           <img
-            class="thumb"
+            class="size-8 flex-none rounded-[3px] border border-line object-contain bg-[repeating-conic-gradient(var(--checker-a)_0_25%,var(--checker-b)_0_50%)] bg-[length:10px_10px]"
             :src="layer.pngUrl"
             :alt="layer.name"
             title="双击查看大图"
             @dblclick.stop="previewId = layer.id"
           />
-          <input v-model="layer.name" class="input name-input" maxlength="48" title="重命名（只影响导出的文件名）" @click.stop />
+          <input v-model="layer.name" class="input h-[26px] min-w-0 flex-1 text-caption" maxlength="48" title="重命名（只影响导出的文件名）" @click.stop />
         </div>
-        <div class="row-meta">
-          <span class="faint mono">
+        <div class="flex items-center gap-1 pl-6 text-caption">
+          <span class="faint mono min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
             {{ categoryLabel(layer.category) }} · {{ layer.label }} · {{ scoreText(layer.score) }} ·
             {{ layer.alphaBbox.w }}×{{ layer.alphaBbox.h }}
           </span>
-          <span class="row-spacer"></span>
-          <button class="mini" title="查看大图" @click.stop="previewId = layer.id">⤢</button>
-          <button class="mini" title="置顶" @click.stop="raise(layer.id, true)">⇧</button>
-          <button class="mini" title="置底" @click.stop="raise(layer.id, false)">⇩</button>
-          <button class="mini" :disabled="downloading === layer.id" title="下载该层 PNG" @click.stop="download(layer)">⤓</button>
+          <span class="flex-1"></span>
+          <button class="size-5 flex-none rounded-[3px] border border-line text-[11px] leading-none text-faint enabled:hover:border-accent-border enabled:hover:text-accent-strong disabled:cursor-not-allowed disabled:opacity-35" title="查看大图" @click.stop="previewId = layer.id">⤢</button>
+          <button class="size-5 flex-none rounded-[3px] border border-line text-[11px] leading-none text-faint enabled:hover:border-accent-border enabled:hover:text-accent-strong disabled:cursor-not-allowed disabled:opacity-35" title="置顶" @click.stop="raise(layer.id, true)">⇧</button>
+          <button class="size-5 flex-none rounded-[3px] border border-line text-[11px] leading-none text-faint enabled:hover:border-accent-border enabled:hover:text-accent-strong disabled:cursor-not-allowed disabled:opacity-35" title="置底" @click.stop="raise(layer.id, false)">⇩</button>
+          <button class="size-5 flex-none rounded-[3px] border border-line text-[11px] leading-none text-faint enabled:hover:border-accent-border enabled:hover:text-accent-strong disabled:cursor-not-allowed disabled:opacity-35" :disabled="downloading === layer.id" title="下载该层 PNG" @click.stop="download(layer)">⤓</button>
         </div>
       </li>
     </ul>
@@ -192,166 +195,3 @@ async function download(layer: SplitLayer): Promise<void> {
     />
   </section>
 </template>
-
-<style scoped>
-.layer-panel {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.list-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-3) var(--sp-2);
-}
-
-.list-head .section-title {
-  margin: 0;
-}
-
-.list-head .muted {
-  flex: 1;
-  font-size: var(--fs-caption);
-  text-align: right;
-}
-
-.list-actions {
-  flex: none;
-  display: flex;
-  gap: var(--sp-2);
-  padding: 0 var(--sp-3) var(--sp-2);
-}
-
-.list-actions .btn {
-  flex: 1;
-  justify-content: center;
-}
-
-.layer-panel .warn {
-  flex: none;
-  margin: 0 var(--sp-3) var(--sp-2);
-}
-
-.layer-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: 0 var(--sp-2) var(--sp-2);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.layer-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-s);
-  cursor: pointer;
-}
-
-.layer-item:hover {
-  background: var(--surface-hover);
-}
-
-.layer-item.active {
-  background: var(--accent-dim);
-  border-color: var(--accent-border);
-}
-
-.layer-item.hidden .thumb,
-.layer-item.hidden .name-input {
-  opacity: 0.4;
-}
-
-.row-main {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-.layer-index {
-  flex: none;
-  width: 16px;
-  color: var(--text-faint);
-  font-size: var(--fs-caption);
-  text-align: right;
-}
-
-.layer-check {
-  flex: none;
-  margin: 0;
-  display: flex;
-}
-
-.layer-check input {
-  accent-color: var(--accent);
-}
-
-.thumb {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  object-fit: contain;
-  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 10px 10px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-}
-
-.name-input {
-  flex: 1;
-  min-width: 0;
-  height: 26px;
-  font-size: var(--fs-caption);
-}
-
-.row-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  padding-left: 24px;
-  font-size: var(--fs-caption);
-}
-
-.row-meta .faint {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row-spacer {
-  flex: 1;
-}
-
-.mini {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  color: var(--text-faint);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  line-height: 1;
-  font-size: 11px;
-}
-
-.mini:hover:not(:disabled) {
-  color: var(--accent-strong);
-  border-color: var(--accent-border);
-}
-
-.mini:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-</style>

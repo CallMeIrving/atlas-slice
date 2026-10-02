@@ -31,13 +31,13 @@ const progressPct = () => {
   <div class="app">
     <TopBar />
     <div v-if="workspace.page === 'atlas'" class="workspace">
-      <aside class="rail panel">
+      <aside class="panel min-w-0 overflow-hidden border-r border-line">
         <FrameList />
       </aside>
-      <main class="stage-col">
+      <main class="min-h-0 min-w-0 overflow-hidden">
         <CanvasStage />
       </main>
-      <aside class="inspector-col">
+      <aside class="min-h-0 min-w-0 overflow-hidden">
         <Inspector />
       </aside>
     </div>
@@ -55,59 +55,17 @@ const progressPct = () => {
     <FontPage v-else-if="workspace.page === 'font'" />
     <OnionSkinPage v-else-if="workspace.page === 'onion'" />
     <!-- 兜底：页面枚举与分支不同步时也不会整屏空白 -->
-    <div v-else class="page-fallback">未知页面</div>
+    <div v-else class="p-6 text-faint">未知页面</div>
 
     <ModelManagerModal v-if="modelManager.open" @close="modelManager.open = false" />
 
     <div class="progress-bar" v-if="store.progress" :style="{ width: progressPct() + '%' }"></div>
     <div class="toast-wrap">
-      <div v-if="store.error" class="toast toast-error">
+      <div v-if="store.error" class="toast toast-error flex items-center gap-3">
         <span>{{ store.error }}</span>
-        <button class="toast-close" @click="dismissError()">×</button>
+        <button class="text-base leading-none opacity-70 hover:opacity-100" @click="dismissError()">×</button>
       </div>
       <div v-if="store.notice" class="toast">{{ store.notice }}</div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.rail {
-  border-right: 1px solid var(--border);
-  min-width: 0;
-  overflow: hidden;
-}
-
-.stage-col {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.inspector-col {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.toast {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-}
-
-.toast-close {
-  color: inherit;
-  font-size: 16px;
-  line-height: 1;
-  opacity: 0.7;
-}
-
-.toast-close:hover {
-  opacity: 1;
-}
-
-.page-fallback {
-  padding: 24px;
-  color: var(--text-faint);
-}
-</style>

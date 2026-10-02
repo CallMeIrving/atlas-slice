@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
@@ -61,7 +62,7 @@ function modelFilesPlugin() {
 }
 
 export default defineConfig({
-  plugins: [vue(), modelFilesPlugin()],
+  plugins: [vue(), tailwindcss(), modelFilesPlugin()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

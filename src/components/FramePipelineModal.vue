@@ -225,7 +225,7 @@ onMounted(() => { if (pipeline.cropEnabled) void prepareCropSource() })
 
 <template>
   <div class="modal-backdrop" @click.self="close">
-    <section class="modal pipeline-modal" role="dialog" aria-modal="true" aria-labelledby="frame-pipeline-title">
+    <section class="modal pipeline-modal w-[min(960px,calc(100vw-48px))] max-h-[calc(100vh-48px)] flex flex-col" role="dialog" aria-modal="true" aria-labelledby="frame-pipeline-title">
       <div class="modal-head">
         <div>
           <h2 id="frame-pipeline-title">一键处理</h2>
@@ -233,45 +233,45 @@ onMounted(() => { if (pipeline.cropEnabled) void prepareCropSource() })
         </div>
         <button class="btn-icon modal-close" aria-label="关闭" @click="close">×</button>
       </div>
-      <div ref="body" class="modal-body">
-        <section class="step">
-          <h3 class="step-title"><span class="step-no">1</span>抽帧 <span class="badge badge-accent">必选</span></h3>
+      <div ref="body" class="modal-body flex-1 min-h-0 overflow-auto flex flex-col gap-5">
+        <section class="step flex flex-col gap-3 pb-4 border-b border-line last:border-b-0 last:pb-0">
+          <h3 class="step-title flex items-center gap-2 m-0 text-head"><span class="step-no inline-grid place-items-center w-5 h-5 rounded-full bg-accent-dim text-accent-strong font-mono text-[12px] leading-none font-semibold">1</span>抽帧 <span class="badge badge-accent">必选</span></h3>
           <ExtractSettingsFields />
         </section>
 
-        <section class="step">
-          <h3 class="step-title">
-            <label class="check-row"><input v-model="pipeline.cropEnabled" type="checkbox" /><span class="step-no">2</span>裁切</label>
-            <span class="faint">勾选后按同一区域裁切全部帧，未勾选则跳过</span>
+        <section class="step flex flex-col gap-3 pb-4 border-b border-line last:border-b-0 last:pb-0">
+          <h3 class="step-title flex items-center gap-2 m-0 text-head">
+            <label class="check-row"><input v-model="pipeline.cropEnabled" type="checkbox" /><span class="step-no inline-grid place-items-center w-5 h-5 rounded-full bg-accent-dim text-accent-strong font-mono text-[12px] leading-none font-semibold">2</span>裁切</label>
+            <span class="faint text-caption">勾选后按同一区域裁切全部帧，未勾选则跳过</span>
           </h3>
           <template v-if="pipeline.cropEnabled">
             <FrameCropEditor v-model="cropRect" :source-url="cropSource" />
-            <p v-if="cropMissing" class="step-warn">请先在上方框选有效的裁切区域</p>
+            <p v-if="cropMissing" class="step-warn m-0 text-danger text-caption">请先在上方框选有效的裁切区域</p>
           </template>
-          <p v-else class="faint step-skip">已跳过裁切步骤</p>
+          <p v-else class="faint step-skip m-0">已跳过裁切步骤</p>
         </section>
 
-        <section class="step">
-          <h3 class="step-title">
-            <label class="check-row"><input v-model="pipeline.matteEnabled" type="checkbox" /><span class="step-no">3</span>抠图</label>
-            <span class="faint">默认使用 AI 模型（ISNet），可切回纯色背景算法</span>
+        <section class="step flex flex-col gap-3 pb-4 border-b border-line last:border-b-0 last:pb-0">
+          <h3 class="step-title flex items-center gap-2 m-0 text-head">
+            <label class="check-row"><input v-model="pipeline.matteEnabled" type="checkbox" /><span class="step-no inline-grid place-items-center w-5 h-5 rounded-full bg-accent-dim text-accent-strong font-mono text-[12px] leading-none font-semibold">3</span>抠图</label>
+            <span class="faint text-caption">默认使用 AI 模型（ISNet），可切回纯色背景算法</span>
           </h3>
           <template v-if="pipeline.matteEnabled">
             <MatteSettingsFields />
-            <div v-if="needsModel" class="model-row">
+            <div v-if="needsModel" class="model-row flex items-center justify-between gap-3 text-muted">
               <span>{{ modelLabel }} · {{ modelStateLabel(modelState) }}</span>
               <button class="btn" :disabled="modelState === 'loading' || modelState === 'ready'" @click="preloadModel">预加载模型</button>
             </div>
-            <p v-if="needsModel" class="faint step-help">
+            <p v-if="needsModel" class="faint step-help m-0 leading-normal">
               执行前会先确保模型加载完成。权重按「抠图方式 + 模型精度 + 推理设备 + 资源地址」分别缓存，
               其中任一项变了就是另一份权重，需要单独下载一次；同一组合只需下载一次，之后由 Service Worker 缓存复用。
             </p>
           </template>
-          <p v-else class="faint step-skip">已跳过抠图步骤</p>
+          <p v-else class="faint step-skip m-0">已跳过抠图步骤</p>
         </section>
 
-        <section class="step">
-          <h3 class="step-title">执行</h3>
+        <section class="step flex flex-col gap-3 pb-4 border-b border-line last:border-b-0 last:pb-0">
+          <h3 class="step-title flex items-center gap-2 m-0 text-head">执行</h3>
           <TaskProgress
             :running="busy"
             :done="done"
@@ -284,16 +284,16 @@ onMounted(() => { if (pipeline.cropEnabled) void prepareCropSource() })
           />
         </section>
 
-        <section v-if="finished && workspace.video.frames.length" class="step">
-          <h3 class="step-title">结果预览与导出 <span class="badge">{{ workspace.video.frames.length }} 帧</span></h3>
-          <div class="result-preview"><FramePreviewPlayer v-model:current-id="previewId" :frames="workspace.video.frames.map((frame) => ({ id: frame.id, url: frameImageUrl(frame) }))" /></div>
-          <div class="result-actions">
+        <section v-if="finished && workspace.video.frames.length" class="step flex flex-col gap-3 pb-4 border-b border-line last:border-b-0 last:pb-0">
+          <h3 class="step-title flex items-center gap-2 m-0 text-head">结果预览与导出 <span class="badge">{{ workspace.video.frames.length }} 帧</span></h3>
+          <div class="result-preview h-[260px] flex min-h-0"><FramePreviewPlayer v-model:current-id="previewId" :frames="workspace.video.frames.map((frame) => ({ id: frame.id, url: frameImageUrl(frame) }))" /></div>
+          <div class="result-actions flex gap-2 justify-end">
             <FrameExportActions :frames="workspace.video.frames" :current-id="previewId" :zip-name="zipName" />
           </div>
         </section>
       </div>
       <div class="modal-foot">
-        <span class="foot-spacer"></span>
+        <span class="foot-spacer flex-1"></span>
         <button class="btn" @click="close">关闭</button>
         <button v-if="busy" class="btn btn-danger" :disabled="cancelling" @click="cancel">
           {{ cancelling ? '取消中…' : running ? `取消（${done}/${total}）` : '取消加载' }}
@@ -303,96 +303,3 @@ onMounted(() => { if (pipeline.cropEnabled) void prepareCropSource() })
     </section>
   </div>
 </template>
-
-<style scoped>
-.pipeline-modal {
-  width: min(960px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
-  display: flex;
-  flex-direction: column;
-}
-
-.pipeline-modal .modal-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-5);
-}
-
-.step {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  padding-bottom: var(--sp-4);
-  border-bottom: 1px solid var(--border);
-}
-
-.step:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.step-title {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin: 0;
-  font-size: var(--fs-head);
-}
-
-.step-title .faint {
-  font-size: var(--fs-caption);
-}
-
-.step-no {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--accent-dim);
-  color: var(--accent-strong);
-  font: 600 12px/1 var(--font-mono);
-}
-
-.step-skip {
-  margin: 0;
-}
-
-.step-warn {
-  margin: 0;
-  color: var(--danger);
-  font-size: var(--fs-caption);
-}
-
-.step-help {
-  margin: 0;
-  line-height: 1.5;
-}
-
-.model-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  color: var(--text-muted);
-}
-
-.result-preview {
-  height: 260px;
-  display: flex;
-  min-height: 0;
-}
-
-.result-actions {
-  display: flex;
-  gap: var(--sp-2);
-  justify-content: flex-end;
-}
-
-.foot-spacer {
-  flex: 1;
-}
-</style>

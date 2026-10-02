@@ -87,8 +87,9 @@ const pageStatus = computed(() => {
 const imgInput = ref<HTMLInputElement>()
 const metaInput = ref<HTMLInputElement>()
 
-/** 「2D 工具」下拉框展开状态 */
+/** 「2D 工具」下拉框展开状态与容器引用（用于点击外部收起） */
 const toolsOpen = ref(false)
+const toolsMenu = ref<HTMLElement>()
 
 /** 选择 2D 工具：未实现的条目忽略，已实现的切页并收起菜单 */
 function selectTool(page: WorkspacePage | null): void {
@@ -100,7 +101,7 @@ function selectTool(page: WorkspacePage | null): void {
 /** 点击下拉框外部时收起 */
 function onDocClick(e: MouseEvent): void {
   if (!toolsOpen.value) return
-  if (!(e.target as HTMLElement).closest('.tools-menu')) toolsOpen.value = false
+  if (!toolsMenu.value?.contains(e.target as Node)) toolsOpen.value = false
 }
 
 /** Esc 收起下拉框 */
@@ -141,27 +142,29 @@ defineExpose({})
         <p class="brand-sub">本地动画素材处理工具</p>
       </div>
     </div>
-    <nav class="page-nav" aria-label="功能页面">
-      <button class="nav-item" :class="{ active: workspace.page === 'atlas' }" @click="setPage('atlas')">精灵图 <span v-if="store.frames.length" class="nav-count">{{ store.frames.length }}</span></button>
-      <button class="nav-item" :class="{ active: workspace.page === 'matte' }" @click="setPage('matte')">抠图 <span v-if="workspace.matte.status === 'done'" class="nav-dot">●</span></button>
-      <button class="nav-item" :class="{ active: workspace.page === 'video' }" @click="setPage('video')">视频帧 <span v-if="workspace.video.frames.length" class="nav-count">{{ workspace.video.frames.length }}</span></button>
-      <button class="nav-item" :class="{ active: workspace.page === 'watermark' }" @click="setPage('watermark')">去水印 <span v-if="workspace.watermark.status === 'done'" class="nav-dot">●</span></button>
-      <button class="nav-item" :class="{ active: workspace.page === 'layersplit' }" @click="setPage('layersplit')">图层拆分 <span v-if="workspace.layersplit.status === 'done'" class="nav-dot">●</span></button>
-      <button class="nav-item" :class="{ active: workspace.page === 'audio' }" @click="setPage('audio')">音频工具 <span v-if="audioState.outputs.length" class="nav-count">{{ audioState.outputs.length }}</span></button>
-      <div class="tools-menu" @click.stop>
-        <button class="nav-item" :class="{ active: isToolPage }" aria-haspopup="menu" :aria-expanded="toolsOpen" @click="toolsOpen = !toolsOpen">{{ toolLabel }} <span class="nav-caret">▾</span></button>
-        <div v-if="toolsOpen" class="tools-dropdown" role="menu">
+    <nav class="ml-4 flex items-center gap-1 self-stretch" aria-label="功能页面">
+      <button class="h-8 rounded-sm px-3 text-muted hover:bg-hover hover:text-ink" :class="workspace.page === 'atlas' && 'bg-accent-dim text-accent-strong'" @click="setPage('atlas')">精灵图 <span v-if="store.frames.length" class="ml-1 font-mono text-[11px] text-accent">{{ store.frames.length }}</span></button>
+      <button class="h-8 rounded-sm px-3 text-muted hover:bg-hover hover:text-ink" :class="workspace.page === 'matte' && 'bg-accent-dim text-accent-strong'" @click="setPage('matte')">抠图 <span v-if="workspace.matte.status === 'done'" class="ml-1 font-mono text-[11px] text-accent">●</span></button>
+      <button class="h-8 rounded-sm px-3 text-muted hover:bg-hover hover:text-ink" :class="workspace.page === 'video' && 'bg-accent-dim text-accent-strong'" @click="setPage('video')">视频帧 <span v-if="workspace.video.frames.length" class="ml-1 font-mono text-[11px] text-accent">{{ workspace.video.frames.length }}</span></button>
+      <button class="h-8 rounded-sm px-3 text-muted hover:bg-hover hover:text-ink" :class="workspace.page === 'watermark' && 'bg-accent-dim text-accent-strong'" @click="setPage('watermark')">去水印 <span v-if="workspace.watermark.status === 'done'" class="ml-1 font-mono text-[11px] text-accent">●</span></button>
+      <button class="h-8 rounded-sm px-3 text-muted hover:bg-hover hover:text-ink" :class="workspace.page === 'layersplit' && 'bg-accent-dim text-accent-strong'" @click="setPage('layersplit')">图层拆分 <span v-if="workspace.layersplit.status === 'done'" class="ml-1 font-mono text-[11px] text-accent">●</span></button>
+      <button class="h-8 rounded-sm px-3 text-muted hover:bg-hover hover:text-ink" :class="workspace.page === 'audio' && 'bg-accent-dim text-accent-strong'" @click="setPage('audio')">音频工具 <span v-if="audioState.outputs.length" class="ml-1 font-mono text-[11px] text-accent">{{ audioState.outputs.length }}</span></button>
+      <div ref="toolsMenu" class="relative" @click.stop>
+        <button class="h-8 rounded-sm px-3 text-muted hover:bg-hover hover:text-ink" :class="isToolPage && 'bg-accent-dim text-accent-strong'" aria-haspopup="menu" :aria-expanded="toolsOpen" @click="toolsOpen = !toolsOpen">{{ toolLabel }} <span class="ml-1 text-[10px]">▾</span></button>
+        <div v-if="toolsOpen" class="absolute top-[calc(100%+6px)] left-0 z-30 flex min-w-40 flex-col gap-0.5 rounded-md border border-line bg-raised p-1 shadow-[0_8px_24px_rgb(0_0_0_/_35%)]" role="menu">
           <button
             v-for="entry in TOOL_ENTRIES"
             :key="entry.label"
-            class="tools-option"
-            :class="{ active: entry.page === workspace.page, disabled: !entry.page }"
+            class="flex h-7 items-center justify-between gap-3 rounded-sm px-2.5 text-left"
+            :class="entry.page === workspace.page
+              ? 'bg-accent-dim text-accent-strong'
+              : entry.page ? 'text-muted hover:bg-hover hover:text-ink' : 'cursor-not-allowed text-faint'"
             role="menuitem"
             :disabled="!entry.page"
             @click="selectTool(entry.page)"
           >
             <span>{{ entry.label }}</span>
-            <span v-if="!entry.page" class="tools-soon">规划中</span>
+            <span v-if="!entry.page" class="font-mono text-[11px] opacity-70">规划中</span>
           </button>
         </div>
       </div>
@@ -177,32 +180,7 @@ defineExpose({})
         自动识别
         </button>
       </template>
-      <span v-else class="page-status">{{ pageStatus }}</span>
+      <span v-else class="text-caption text-faint uppercase">{{ pageStatus }}</span>
     </div>
   </header>
 </template>
-
-<style scoped>
-.page-nav { display:flex; align-self:stretch; align-items:center; gap:4px; margin-left:16px; }
-.nav-item { height:32px; padding:0 12px; color:var(--text-muted); border-radius:var(--radius-s); }
-.nav-item:hover { color:var(--text); background:var(--surface-hover); }
-.nav-item.active { color:var(--accent-strong); background:var(--accent-dim); }
-.nav-count, .nav-dot { margin-left:4px; color:var(--accent); font:11px var(--font-mono); }
-.page-status { color:var(--text-faint); font-size:var(--fs-caption); text-transform:uppercase; }
-.tools-menu { position:relative; }
-.nav-caret { margin-left:4px; font-size:10px; }
-.tools-dropdown {
-  position:absolute; top:calc(100% + 6px); left:0; z-index:30; min-width:160px;
-  display:flex; flex-direction:column; gap:2px; padding:4px;
-  background:var(--surface-raised, var(--surface)); border:1px solid var(--border);
-  border-radius:var(--radius-m); box-shadow:0 8px 24px rgb(0 0 0 / 35%);
-}
-.tools-option {
-  display:flex; align-items:center; justify-content:space-between; gap:12px;
-  height:28px; padding:0 10px; color:var(--text-muted); border-radius:var(--radius-s); text-align:left;
-}
-.tools-option:hover:not(.disabled) { color:var(--text); background:var(--surface-hover); }
-.tools-option.active { color:var(--accent-strong); background:var(--accent-dim); }
-.tools-option.disabled { color:var(--text-faint); cursor:not-allowed; }
-.tools-soon { font:11px var(--font-mono); opacity:.7; }
-</style>

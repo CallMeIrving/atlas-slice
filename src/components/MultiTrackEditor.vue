@@ -405,17 +405,20 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="editor" :class="{ dragging }">
-    <header class="editor-bar">
-      <div class="bar-group">
+  <section
+    class="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-line bg-surface"
+    :class="dragging && 'select-none'"
+  >
+    <header class="flex flex-none items-center justify-between gap-3 border-b border-line px-3 py-2">
+      <div class="flex items-center gap-2">
         <button class="btn" @click="addTrack()">＋ 音轨</button>
-        <span class="muted small mono">
+        <span class="muted mono text-caption">
           {{ trackCount }} 轨 · {{ clipCount }} 片段 · {{ fmtDuration(timelineDurationSec) }}
         </span>
       </div>
-      <div class="bar-group">
+      <div class="flex items-center gap-2">
         <button class="btn btn-icon" title="缩小（Ctrl/⌘ + 滚轮也行）" :disabled="pxPerSec <= ZOOM_MIN" @click="zoomBy(-1)">−</button>
-        <span class="muted small mono zoom">{{ zoomLabel }} px/s</span>
+        <span class="muted mono min-w-[62px] text-center text-caption">{{ zoomLabel }} px/s</span>
         <button class="btn btn-icon" title="放大（Ctrl/⌘ + 滚轮也行）" :disabled="pxPerSec >= ZOOM_MAX" @click="zoomBy(1)">＋</button>
         <button class="btn" title="把整段时间轴缩放到一屏" @click="fitToView()">适应窗口</button>
         <button class="btn" :disabled="!canEdit || preparing" @click="togglePlay()">
@@ -425,30 +428,40 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div ref="scrollRef" class="editor-scroll" @wheel="onWheel">
-      <div class="ruler-row">
-        <div class="head-cell ruler-spacer">时间轴</div>
-        <div class="ruler" :style="{ width: `${laneWidth}px` }">
-          <div v-for="tick in ticks" :key="tick" class="tick" :style="{ left: `${tick * pxPerSec}px` }">
-            <span>{{ fmtTick(tick) }}</span>
+    <div ref="scrollRef" class="relative min-h-0 flex-1 overflow-auto" @wheel="onWheel">
+      <div class="sticky top-0 z-4 flex h-7">
+        <div class="sticky left-0 z-5 flex w-[156px] flex-none items-center border-r border-line bg-surface px-3 text-caption text-faint">时间轴</div>
+        <div class="relative flex-none border-b border-line" :style="{ width: `${laneWidth}px` }">
+          <div v-for="tick in ticks" :key="tick" class="absolute inset-y-0 border-l border-line" :style="{ left: `${tick * pxPerSec}px` }">
+            <span class="absolute top-[5px] left-1 font-mono text-[10px] whitespace-nowrap text-faint">{{ fmtTick(tick) }}</span>
           </div>
-          <div class="playhead" :style="{ left: `${playhead * pxPerSec}px` }"></div>
+          <div class="pointer-events-none absolute inset-y-0 w-px bg-accent-strong" :style="{ left: `${playhead * pxPerSec}px` }"></div>
         </div>
       </div>
 
-      <div v-for="track in audioState.tracks" :key="track.id" class="track-row">
-        <div class="head-cell track-head">
+      <div v-for="track in audioState.tracks" :key="track.id" class="flex h-16 border-t border-line">
+        <div class="sticky left-0 z-3 flex w-[156px] flex-none flex-col gap-1 border-r border-line bg-surface p-2">
           <input
-            class="track-name"
+            class="w-full rounded-[3px] border border-transparent bg-transparent px-1 py-px text-caption hover:border-line-strong hover:bg-raised focus:border-line-strong focus:bg-raised"
             :value="track.name"
             title="双击可重命名"
             @change="onRenameInput(track.id, $event)"
           />
-          <div class="track-btns">
-            <button class="chip" :class="{ on: track.muted }" title="静音" @click="toggleTrackMute(track.id)">M</button>
-            <button class="chip" :class="{ on: track.solo }" title="独奏" @click="toggleTrackSolo(track.id)">S</button>
+          <div class="flex gap-1">
             <button
-              class="chip"
+              class="inline-flex h-5 w-6 items-center justify-center rounded-[3px] border font-mono text-[11px] enabled:hover:border-line-strong disabled:cursor-not-allowed disabled:opacity-40"
+              :class="track.muted ? 'border-accent-border bg-accent-dim text-accent-strong' : 'border-line bg-raised text-muted'"
+              title="静音"
+              @click="toggleTrackMute(track.id)"
+            >M</button>
+            <button
+              class="inline-flex h-5 w-6 items-center justify-center rounded-[3px] border font-mono text-[11px] enabled:hover:border-line-strong disabled:cursor-not-allowed disabled:opacity-40"
+              :class="track.solo ? 'border-accent-border bg-accent-dim text-accent-strong' : 'border-line bg-raised text-muted'"
+              title="独奏"
+              @click="toggleTrackSolo(track.id)"
+            >S</button>
+            <button
+              class="inline-flex h-5 w-6 items-center justify-center rounded-[3px] border border-line bg-raised font-mono text-[11px] text-muted enabled:hover:border-line-strong disabled:cursor-not-allowed disabled:opacity-40"
               title="删除音轨"
               :disabled="trackCount <= 1"
               @click="removeTrack(track.id)"
@@ -459,7 +472,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div
-          class="lane"
+          class="relative flex-none bg-[linear-gradient(to_right,var(--border)_1px,transparent_0)] bg-repeat"
           :ref="(el) => setLaneRef(track.id, el)"
           :style="{ width: `${laneWidth}px`, backgroundSize: `${tickWidth}px 100%` }"
           @dragover="onDragOver"
@@ -469,8 +482,13 @@ onBeforeUnmount(() => {
           <div
             v-for="clip in track.clips"
             :key="clip.id"
-            class="clip"
-            :class="{ active: clip.id === audioState.activeClipId, silent: track.muted || (audioState.tracks.some((t) => t.solo) && !track.solo) }"
+            class="absolute top-[5px] bottom-[5px] flex cursor-grab flex-col justify-center overflow-hidden rounded-sm border bg-raised touch-none"
+            :class="[
+              clip.id === audioState.activeClipId
+                ? 'border-accent-strong shadow-[0_0_0_1px_var(--accent-border)]'
+                : 'border-accent-border',
+              (track.muted || (audioState.tracks.some((t) => t.solo) && !track.solo)) && 'opacity-[0.42]',
+            ]"
             :style="clipStyle(clip)"
             :title="assetOf(clip)?.fileName"
             @pointerdown="beginDrag($event, clip.id, 'move')"
@@ -481,321 +499,46 @@ onBeforeUnmount(() => {
               :color="clip.id === audioState.activeClipId ? '#f2b453' : '#e8a23d'"
               :axis="false"
             />
-            <span class="clip-name">{{ assetOf(clip)?.fileName ?? '素材已移除' }}</span>
-            <span class="clip-tag mono" v-if="clip.fadeInSec > 0 || clip.fadeOutSec > 0">
+            <span class="pointer-events-none absolute right-[10px] bottom-px left-[10px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-muted">{{ assetOf(clip)?.fileName ?? '素材已移除' }}</span>
+            <span class="mono pointer-events-none absolute top-px left-[10px] text-[10px] text-faint" v-if="clip.fadeInSec > 0 || clip.fadeOutSec > 0">
               fade {{ clip.fadeInSec.toFixed(2) }}/{{ clip.fadeOutSec.toFixed(2) }}
             </span>
-            <span class="clip-tag gain mono" v-if="clip.gainDb !== 0">
+            <span class="mono pointer-events-none absolute top-px right-[10px] left-auto text-[10px] text-accent-strong" v-if="clip.gainDb !== 0">
               {{ clip.gainDb > 0 ? '+' : '' }}{{ clip.gainDb.toFixed(1) }} dB
             </span>
-            <span class="clip-handle left" title="拖动裁剪起点" @pointerdown.stop="beginDrag($event, clip.id, 'trim-start')"></span>
-            <span class="clip-handle right" title="拖动裁剪终点" @pointerdown.stop="beginDrag($event, clip.id, 'trim-end')"></span>
+            <span class="absolute inset-y-0 left-0 w-[7px] cursor-ew-resize bg-[linear-gradient(to_right,rgba(232,162,61,0.28),transparent)]" title="拖动裁剪起点" @pointerdown.stop="beginDrag($event, clip.id, 'trim-start')"></span>
+            <span class="absolute inset-y-0 right-0 w-[7px] cursor-ew-resize bg-[linear-gradient(to_left,rgba(232,162,61,0.28),transparent)]" title="拖动裁剪终点" @pointerdown.stop="beginDrag($event, clip.id, 'trim-end')"></span>
           </div>
-          <div class="playhead lane-playhead" :style="{ left: `${playhead * pxPerSec}px` }"></div>
+          <div class="pointer-events-none absolute inset-y-0 z-2 w-px bg-accent-strong opacity-75" :style="{ left: `${playhead * pxPerSec}px` }"></div>
         </div>
       </div>
 
-      <p v-if="!clipCount" class="lane-hint">
+      <p v-if="!clipCount" class="pointer-events-none absolute top-11 left-[180px] m-0 rounded-sm border border-dashed border-line-strong px-3 py-2 text-caption text-faint">
         把左侧素材库里的音频拖到任意音轨上；拖动片段可换位或换轨，拖动片段两侧边缘可裁剪；
         素材太长时用 Ctrl / ⌘ + 滚轮缩放，或点「适应窗口」一屏看全
       </p>
     </div>
 
-    <footer v-if="activeClip" class="clip-bar">
-      <span class="clip-title" :title="assetOf(activeClip)?.fileName">{{ assetOf(activeClip)?.fileName ?? '素材已移除' }}</span>
-      <span class="muted small mono">
+    <footer v-if="activeClip" class="flex flex-none flex-wrap items-center gap-3 border-t border-line bg-raised px-3 py-2">
+      <span class="max-w-[220px] overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="assetOf(activeClip)?.fileName">{{ assetOf(activeClip)?.fileName ?? '素材已移除' }}</span>
+      <span class="muted mono text-caption">
         {{ activeClip.startSec.toFixed(2) }}s → {{ (activeClip.startSec + clipDuration(activeClip)).toFixed(2) }}s · 长
         {{ clipDuration(activeClip).toFixed(2) }}s
       </span>
-      <label class="mini-field">
+      <label class="flex items-center gap-2 text-caption text-faint">
         <span>音量(dB)</span>
-        <input v-model.number="gainValue" class="input" type="number" min="-60" max="24" step="0.5" />
+        <input v-model.number="gainValue" class="input w-[84px] px-1.5 py-0.5" type="number" min="-60" max="24" step="0.5" />
       </label>
-      <label class="mini-field">
+      <label class="flex items-center gap-2 text-caption text-faint">
         <span>淡入(s)</span>
-        <input v-model.number="fadeInValue" class="input" type="number" min="0" step="0.01" />
+        <input v-model.number="fadeInValue" class="input w-[84px] px-1.5 py-0.5" type="number" min="0" step="0.01" />
       </label>
-      <label class="mini-field">
+      <label class="flex items-center gap-2 text-caption text-faint">
         <span>淡出(s)</span>
-        <input v-model.number="fadeOutValue" class="input" type="number" min="0" step="0.01" />
+        <input v-model.number="fadeOutValue" class="input w-[84px] px-1.5 py-0.5" type="number" min="0" step="0.01" />
       </label>
       <button class="btn" @click="duplicateClip(activeClip.id)">复制片段</button>
       <button class="btn btn-danger" @click="removeClip(activeClip.id)">删除片段</button>
     </footer>
   </section>
 </template>
-
-<style scoped>
-.editor {
-  display: flex;
-  flex-direction: column;
-  /* 作为 .tool-body 的唯一弹性子项撑满剩余高度 */
-  flex: 1;
-  height: 100%;
-  min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--surface);
-  overflow: hidden;
-}
-.editor.dragging {
-  user-select: none;
-}
-
-.editor-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border-bottom: 1px solid var(--border);
-}
-.bar-group {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-.zoom {
-  min-width: 62px;
-  text-align: center;
-}
-.small {
-  font-size: var(--fs-caption);
-}
-
-.editor-scroll {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.ruler-row,
-.track-row {
-  display: flex;
-}
-.ruler-row {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  height: 28px;
-}
-.track-row {
-  height: 64px;
-  border-top: 1px solid var(--border);
-}
-
-.head-cell {
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  flex: none;
-  width: 156px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-}
-.ruler-spacer {
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  padding: 0 var(--sp-3);
-  font-size: var(--fs-caption);
-  color: var(--text-faint);
-}
-
-.track-head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  padding: var(--sp-2);
-}
-.track-name {
-  width: 100%;
-  padding: 1px 4px;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: none;
-  font-size: var(--fs-caption);
-}
-.track-name:hover,
-.track-name:focus {
-  border-color: var(--border-strong);
-  background: var(--surface-raised);
-}
-.track-btns {
-  display: flex;
-  gap: var(--sp-1);
-}
-.chip {
-  width: 24px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  font: 11px var(--font-mono);
-  color: var(--text-muted);
-  background: var(--surface-raised);
-}
-.chip:hover:not(:disabled) {
-  border-color: var(--border-strong);
-}
-.chip.on {
-  background: var(--accent-dim);
-  border-color: var(--accent-border);
-  color: var(--accent-strong);
-}
-.chip:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.ruler {
-  position: relative;
-  flex: none;
-  border-bottom: 1px solid var(--border);
-}
-.tick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-left: 1px solid var(--border);
-}
-.tick span {
-  position: absolute;
-  top: 5px;
-  left: 4px;
-  font: 10px var(--font-mono);
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-
-.lane {
-  position: relative;
-  flex: none;
-  background-image: linear-gradient(to right, var(--border) 1px, transparent 0);
-  background-repeat: repeat;
-}
-
-.clip {
-  position: absolute;
-  top: 5px;
-  bottom: 5px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  overflow: hidden;
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius-s);
-  background: var(--surface-raised);
-  cursor: grab;
-  touch-action: none;
-}
-.clip.active {
-  border-color: var(--accent-strong);
-  box-shadow: 0 0 0 1px var(--accent-border);
-}
-.clip.silent {
-  opacity: 0.42;
-}
-.clip-name {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 1px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10px;
-  color: var(--text-muted);
-  pointer-events: none;
-}
-.clip-tag {
-  position: absolute;
-  top: 1px;
-  left: 10px;
-  font-size: 10px;
-  color: var(--text-faint);
-  pointer-events: none;
-}
-.clip-tag.gain {
-  left: auto;
-  right: 10px;
-  color: var(--accent-strong);
-}
-.clip-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 7px;
-  cursor: ew-resize;
-  background: linear-gradient(to right, rgba(232, 162, 61, 0.28), transparent);
-}
-.clip-handle.right {
-  background: linear-gradient(to left, rgba(232, 162, 61, 0.28), transparent);
-}
-.clip-handle.left {
-  left: 0;
-}
-.clip-handle.right {
-  right: 0;
-}
-
-.playhead {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--accent-strong);
-  pointer-events: none;
-}
-.lane-playhead {
-  z-index: 2;
-  opacity: 0.75;
-}
-
-.lane-hint {
-  position: absolute;
-  /* 尺子 28px + 首条轨 64px → 落在第一条空轨泳道内 */
-  left: 180px;
-  top: 44px;
-  margin: 0;
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-s);
-  color: var(--text-faint);
-  font-size: var(--fs-caption);
-  pointer-events: none;
-}
-
-.clip-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-  padding: var(--sp-2) var(--sp-3);
-  border-top: 1px solid var(--border);
-  background: var(--surface-raised);
-}
-.clip-title {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-caption);
-}
-.mini-field {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-caption);
-  color: var(--text-faint);
-}
-.mini-field .input {
-  width: 84px;
-  padding: 2px 6px;
-}
-</style>

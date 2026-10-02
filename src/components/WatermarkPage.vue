@@ -380,15 +380,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+  <div class="grid h-full min-h-0" :class="hasSource ? 'grid-cols-[280px_minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)_320px]'">
     <!-- 左栏：当前来源列表（单图为导入图，帧模式为样板帧画面），无来源时整栏不显示 -->
-    <section v-if="hasSource" class="tool-sidebar panel">
+    <section v-if="hasSource" class="panel overflow-auto border-r border-line">
       <div class="section">
         <h2 class="section-title">图集列表</h2>
-        <ul class="asset-list">
-          <li class="asset-row">
-            <img class="asset-thumb" :src="sourceUrl" :alt="workspace.watermark.fileName" draggable="false" />
-            <span class="asset-name" :title="workspace.watermark.fileName">{{ workspace.watermark.fileName }}</span>
+        <ul class="m-0 flex list-none flex-col gap-2 p-0">
+          <li class="flex items-center gap-2">
+            <img class="size-10 flex-none rounded-sm border border-line bg-stage object-contain" :src="sourceUrl" :alt="workspace.watermark.fileName" draggable="false" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="workspace.watermark.fileName">{{ workspace.watermark.fileName }}</span>
             <!-- 帧模式尺寸取视频帧尺寸；单图模式 store 未记录尺寸，不显示 -->
             <span v-if="isFrames && workspace.video.width" class="mono faint">{{ workspace.video.width }}×{{ workspace.video.height }}</span>
             <button class="btn btn-icon btn-danger" title="移除" @click="resetAll">×</button>
@@ -397,13 +397,13 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
+    <main class="flex min-h-0 min-w-0 flex-col">
+      <div class="flex h-16 flex-none items-center justify-between gap-4 border-b border-line px-6">
         <div>
-          <h2>去水印工作区</h2>
-          <p>{{ isFrames ? `样板帧 #${frames.findIndex((frame) => frame.id === sampleFrame?.id) + 1} · ${frames.length} 帧待处理` : (workspace.watermark.fileName || '导入一张图片开始处理') }}</p>
+          <h2 class="m-0 text-head">去水印工作区</h2>
+          <p class="mt-0.5 mb-0 text-faint">{{ isFrames ? `样板帧 #${frames.findIndex((frame) => frame.id === sampleFrame?.id) + 1} · ${frames.length} 帧待处理` : (workspace.watermark.fileName || '导入一张图片开始处理') }}</p>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-3">
           <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="load(($event.target as HTMLInputElement).files?.[0])" />
           <button class="btn btn-primary" @click="input?.click()">导入图片</button>
           <button class="btn" :disabled="!frames.length" @click="startWatermarkFromFrame(workspace.watermark.frameId)">使用视频帧列表（{{ frames.length }} 帧）</button>
@@ -411,7 +411,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="tool-body">
+      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6">
         <div v-if="!hasSource" class="empty-state">
           <span class="big">▨</span>
           <strong>还没有可处理的画面</strong>
@@ -420,7 +420,7 @@ onBeforeUnmount(() => {
 
         <template v-else>
           <!-- 单舞台：框选态编辑 ROI，处理完成后自动切换为前后对比（缩放/平移/分割线） -->
-          <div class="wm-stage">
+          <div class="flex min-h-[360px] flex-1 [&>.cmp-stage]:flex-1">
             <ImageCompareViewer
               ref="viewer"
               :before-url="sourceUrl"
@@ -433,16 +433,16 @@ onBeforeUnmount(() => {
             >
               <template #overlay="{ zoom }">
                 <template v-if="editingRoi && roiReady && natural.width">
-                  <div class="roi-dim" :style="dimStyles.top"></div>
-                  <div class="roi-dim" :style="dimStyles.bottom"></div>
-                  <div class="roi-dim" :style="dimStyles.left"></div>
-                  <div class="roi-dim" :style="dimStyles.right"></div>
-                  <div class="roi-box" :style="[roiBoxStyle, { borderWidth: `${1 / zoom}px` }]" @pointerdown.stop="onBoxDown($event)">
+                  <div class="pointer-events-none absolute bg-[rgb(8_10_14_/_0.55)]" :style="dimStyles.top"></div>
+                  <div class="pointer-events-none absolute bg-[rgb(8_10_14_/_0.55)]" :style="dimStyles.bottom"></div>
+                  <div class="pointer-events-none absolute bg-[rgb(8_10_14_/_0.55)]" :style="dimStyles.left"></div>
+                  <div class="pointer-events-none absolute bg-[rgb(8_10_14_/_0.55)]" :style="dimStyles.right"></div>
+                  <div class="pointer-events-auto absolute cursor-move border border-accent" :style="[roiBoxStyle, { borderWidth: `${1 / zoom}px` }]" @pointerdown.stop="onBoxDown($event)">
                     <span
                       v-for="handle in handles"
                       :key="handle"
-                      class="roi-handle"
-                      :class="`rh-${handle}`"
+                      class="pointer-events-auto absolute size-2.5 rounded-[2px] border border-[#1a140a] bg-accent"
+                      :class="{ 'cursor-nwse-resize': handle === 'nw' || handle === 'se', 'cursor-nesw-resize': handle === 'ne' || handle === 'sw', 'cursor-ns-resize': handle === 'n' || handle === 's', 'cursor-ew-resize': handle === 'e' || handle === 'w' }"
                       :style="handleStyle(handle, zoom)"
                       @pointerdown.stop="onHandleDown(handle, $event)"
                     ></span>
@@ -453,14 +453,14 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 底部 ROI 实时预览：框选区域原图裁切 + 结果同区域裁切并列 -->
-          <div v-if="roiReady" class="roi-preview">
-            <figure class="roi-preview-pane">
-              <figcaption class="faint">框选区域 · {{ roiLabel }}</figcaption>
-              <div class="roi-preview-stage checker"><canvas ref="sourceCanvas" aria-label="框选区域预览"></canvas></div>
+          <div v-if="roiReady" class="flex flex-none gap-4">
+            <figure class="m-0 flex min-w-0 flex-1 flex-col gap-2">
+              <figcaption class="faint overflow-hidden text-ellipsis whitespace-nowrap text-caption">框选区域 · {{ roiLabel }}</figcaption>
+              <div class="flex h-[110px] items-center justify-center overflow-hidden rounded-sm border border-line bg-checker-b p-2 [background-image:linear-gradient(45deg,var(--checker-a)_25%,transparent_25%),linear-gradient(-45deg,var(--checker-a)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--checker-a)_75%),linear-gradient(-45deg,transparent_75%,var(--checker-a)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px]"><canvas ref="sourceCanvas" class="block h-auto max-h-full w-auto max-w-full" aria-label="框选区域预览"></canvas></div>
             </figure>
-            <figure v-if="!editingRoi && resultUrl" class="roi-preview-pane">
-              <figcaption class="faint">结果同区域</figcaption>
-              <div class="roi-preview-stage checker"><canvas ref="resultCanvas" aria-label="结果同区域预览"></canvas></div>
+            <figure v-if="!editingRoi && resultUrl" class="m-0 flex min-w-0 flex-1 flex-col gap-2">
+              <figcaption class="faint overflow-hidden text-ellipsis whitespace-nowrap text-caption">结果同区域</figcaption>
+              <div class="flex h-[110px] items-center justify-center overflow-hidden rounded-sm border border-line bg-checker-b p-2 [background-image:linear-gradient(45deg,var(--checker-a)_25%,transparent_25%),linear-gradient(-45deg,var(--checker-a)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,var(--checker-a)_75%),linear-gradient(-45deg,transparent_75%,var(--checker-a)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px]"><canvas ref="resultCanvas" class="block h-auto max-h-full w-auto max-w-full" aria-label="结果同区域预览"></canvas></div>
             </figure>
           </div>
         </template>
@@ -478,7 +478,7 @@ onBeforeUnmount(() => {
     </main>
 
     <!-- 右栏：框选区域、修复方式与参数配置 -->
-    <section class="tool-sidepanel panel">
+    <section class="panel overflow-auto border-l border-line">
       <div class="section">
         <h2 class="section-title">去水印</h2>
         <label v-if="isFrames && frames.length" class="field">
@@ -491,9 +491,9 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
-      <div class="section">
+      <div class="section [&_.field+.field]:mt-3">
         <h2 class="section-title">框选区域（ROI）</h2>
-        <div class="roi-grid">
+        <div class="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-3 [&_.field]:min-w-0 [&_.input]:w-full">
           <label class="field">
             <span class="field-label">X</span>
             <input v-model.number="box.x" class="input" type="number" min="0" step="1" :max="natural.width" @change="normalizeRoiBox" />
@@ -518,30 +518,30 @@ onBeforeUnmount(() => {
             <button class="seg-item" :class="{ active: tool === 'draw' }" @click="tool = 'draw'">重新框选</button>
           </div>
         </div>
-        <button class="btn full" :disabled="!roiReady || editingRoi" @click="roiEditMode = true">重新框选区域</button>
+        <button class="btn w-full justify-center" :disabled="!roiReady || editingRoi" @click="roiEditMode = true">重新框选区域</button>
       </div>
 
       <div class="section">
         <h2 class="section-title">修复方式</h2>
-        <select v-model="workspace.watermark.settings.mode" class="select full">
+        <select v-model="workspace.watermark.settings.mode" class="select w-full justify-center">
           <option v-for="item in MODE_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
         <p class="muted">{{ activeModeHint }}</p>
       </div>
 
-      <div class="section">
+      <div class="section [&_.field+.check-row]:mt-3 [&_.field+.field]:mt-3 [&_p+.field]:mt-3">
         <h2 class="section-title">参数</h2>
         <div v-if="workspace.watermark.settings.mode === 'alpha'" class="field">
           <span class="field-label">水印本色（解算用）</span>
           <div class="field-row">
             <input
-              class="color-input"
+              class="h-[28px] w-[42px] flex-none rounded-sm border border-line bg-raised p-0.5"
               type="color"
               :value="workspace.watermark.settings.watermarkColor || '#ffffff'"
               @input="workspace.watermark.settings.watermarkColor = ($event.target as HTMLInputElement).value"
             />
-            <span class="mono faint">{{ workspace.watermark.settings.watermarkColor || '自动估算' }}</span>
-            <button class="btn btn-ghost" :disabled="!workspace.watermark.settings.watermarkColor" @click="workspace.watermark.settings.watermarkColor = ''">自动</button>
+            <span class="mono faint min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{{ workspace.watermark.settings.watermarkColor || '自动估算' }}</span>
+            <button class="btn btn-ghost h-[26px] px-2 text-caption" :disabled="!workspace.watermark.settings.watermarkColor" @click="workspace.watermark.settings.watermarkColor = ''">自动</button>
           </div>
         </div>
 
@@ -549,19 +549,19 @@ onBeforeUnmount(() => {
           <span class="field-label">底色</span>
           <div class="field-row">
             <input
-              class="color-input"
+              class="h-[28px] w-[42px] flex-none rounded-sm border border-line bg-raised p-0.5"
               type="color"
               :value="workspace.watermark.settings.baseColor || sampledBase || '#000000'"
               @input="workspace.watermark.settings.baseColor = ($event.target as HTMLInputElement).value"
             />
-            <span class="mono faint">{{ sampledBase ? `环带采样 ${sampledBase}` : '待采样' }}</span>
-            <button class="btn btn-ghost" :disabled="!workspace.watermark.settings.baseColor" @click="workspace.watermark.settings.baseColor = ''">自动</button>
+            <span class="mono faint min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{{ sampledBase ? `环带采样 ${sampledBase}` : '待采样' }}</span>
+            <button class="btn btn-ghost h-[26px] px-2 text-caption" :disabled="!workspace.watermark.settings.baseColor" @click="workspace.watermark.settings.baseColor = ''">自动</button>
           </div>
         </div>
 
         <label v-if="usesThreshold" class="field">
           <span class="field-label">色差阈值 {{ workspace.watermark.settings.threshold }}</span>
-          <input v-model.number="workspace.watermark.settings.threshold" class="range" type="range" min="1" max="150" />
+          <input v-model.number="workspace.watermark.settings.threshold" class="w-full accent-accent" type="range" min="1" max="150" />
         </label>
         <label v-if="usesThreshold" class="check-row">
           <input v-model="workspace.watermark.settings.keepNoise" type="checkbox" /> 保留底色噪点
@@ -569,7 +569,7 @@ onBeforeUnmount(() => {
 
         <label v-if="isTextureMode" class="field">
           <span class="field-label">重建精细度</span>
-          <select v-model.number="workspace.watermark.settings.quality" class="select full">
+          <select v-model.number="workspace.watermark.settings.quality" class="select w-full justify-center">
             <option v-for="item in QUALITY_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option>
           </select>
         </label>
@@ -577,74 +577,17 @@ onBeforeUnmount(() => {
         <div v-if="degraded" class="warn">水印色与底色过于接近，投影无意义，已自动退化为「按蒙版替换水印像素」。</div>
       </div>
 
-      <div class="section actions">
-        <button class="btn btn-primary full" :disabled="!roiReady || processing" @click="runWatermark">
+      <div class="section flex flex-col gap-2">
+        <button class="btn btn-primary w-full justify-center" :disabled="!roiReady || processing" @click="runWatermark">
           {{ processing ? '处理中…' : '去水印' }}
         </button>
         <template v-if="isFrames">
-          <button class="btn full" :disabled="!plan || batch.running || !frames.length" @click="batchApply">应用到全部帧</button>
-          <button class="btn full" :disabled="!watermarkedCount || batch.running" @click="restoreFrames">还原全部帧（{{ watermarkedCount }}）</button>
+          <button class="btn w-full justify-center" :disabled="!plan || batch.running || !frames.length" @click="batchApply">应用到全部帧</button>
+          <button class="btn w-full justify-center" :disabled="!watermarkedCount || batch.running" @click="restoreFrames">还原全部帧（{{ watermarkedCount }}）</button>
         </template>
-        <button class="btn full" :disabled="!resultUrl" @click="downloadResult">下载 PNG</button>
-        <button class="btn btn-ghost full" :disabled="batch.running" @click="resetAll">重置去水印</button>
+        <button class="btn w-full justify-center" :disabled="!resultUrl" @click="downloadResult">下载 PNG</button>
+        <button class="btn btn-ghost w-full justify-center" :disabled="batch.running" @click="resetAll">重置去水印</button>
       </div>
     </section>
   </div>
 </template>
-
-<style scoped>
-/* 页面骨架：左栏来源列表 + 中间工作区 + 右栏参数配置（与九宫格页同构的三栏布局）；无来源时左栏隐藏 */
-.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
-.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: var(--fs-head); }
-.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 24px; }
-.full { width: 100%; justify-content: center; }
-.actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-.section .field + .field, .section .field + .check-row { margin-top: var(--sp-3); }
-.section p + .field { margin-top: var(--sp-3); }
-.range { width: 100%; accent-color: var(--accent); }
-.color-input { width: 42px; height: 28px; flex: none; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-raised); }
-.field-row .btn { height: 26px; padding: 0 var(--sp-2); font-size: var(--fs-caption); }
-.field-row .faint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 单舞台：对比组件占满剩余高度 */
-.wm-stage { flex: 1; min-height: 360px; display: flex; }
-.wm-stage > :deep(.cmp-stage) { flex: 1; }
-/* ROI 框选覆盖层：百分比定位跟随图像，压暗 + 强调框 + 控制点 */
-.roi-dim { position: absolute; background: rgba(8, 10, 14, 0.55); pointer-events: none; }
-.roi-box { position: absolute; border: 1px solid var(--accent); cursor: move; pointer-events: auto; }
-.roi-handle { position: absolute; width: 10px; height: 10px; background: var(--accent); border: 1px solid #1a140a; border-radius: 2px; pointer-events: auto; }
-.rh-nw { cursor: nwse-resize; }
-.rh-n { cursor: ns-resize; }
-.rh-ne { cursor: nesw-resize; }
-.rh-e { cursor: ew-resize; }
-.rh-se { cursor: nwse-resize; }
-.rh-s { cursor: ns-resize; }
-.rh-sw { cursor: nesw-resize; }
-.rh-w { cursor: ew-resize; }
-/* 底部 ROI 实时预览条 */
-.roi-preview { flex: none; display: flex; gap: var(--sp-4); }
-.roi-preview-pane { margin: 0; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.roi-preview-pane figcaption { font-size: var(--fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.roi-preview-stage { height: 110px; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: var(--sp-2); background-color: var(--checker-b); background-image: linear-gradient(45deg, var(--checker-a) 25%, transparent 25%), linear-gradient(-45deg, var(--checker-a) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--checker-a) 75%), linear-gradient(-45deg, transparent 75%, var(--checker-a) 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; border: 1px solid var(--border); border-radius: var(--radius-s); }
-.roi-preview-stage canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; }
-/* 右栏 ROI 数值输入：2×2 网格，grid 项必须 min-width:0 防横向溢出 */
-.roi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
-.roi-grid .field { min-width: 0; }
-.roi-grid .input { width: 100%; }
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-/* 左栏来源列表条目：缩略图 + 名称 + 尺寸 + 移除 */
-.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
-.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-/* 窄屏适配：三栏收窄 */
-@media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
-  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
-}
-</style>

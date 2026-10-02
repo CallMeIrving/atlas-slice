@@ -355,15 +355,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+  <div class="grid h-full min-h-0" :class="hasSource ? 'grid-cols-[280px_minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)_320px]'">
     <!-- 左栏：已导入源图列表，未导入时整栏不显示 -->
-    <section v-if="hasSource" class="tool-sidebar panel">
+    <section v-if="hasSource" class="panel overflow-auto border-r border-line">
       <div class="section">
         <h2 class="section-title">图集列表</h2>
-        <ul class="asset-list">
-          <li class="asset-row">
-            <img class="asset-thumb" :src="split.sourceUrl" :alt="split.fileName" draggable="false" />
-            <span class="asset-name" :title="split.fileName">{{ split.fileName }}</span>
+        <ul class="m-0 flex list-none flex-col gap-2 p-0">
+          <li class="flex items-center gap-2">
+            <img class="size-10 flex-none rounded-sm border border-line bg-stage object-contain" :src="split.sourceUrl" :alt="split.fileName" draggable="false" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="split.fileName">{{ split.fileName }}</span>
             <span v-if="size.width" class="mono faint">{{ size.width }}×{{ size.height }}</span>
             <button class="btn btn-icon btn-danger" title="移除" @click="reset">×</button>
           </li>
@@ -371,13 +371,13 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
+    <main class="flex min-h-0 min-w-0 flex-col">
+      <div class="flex h-16 flex-none items-center justify-between gap-4 border-b border-line px-6">
         <div>
-          <h2>图层拆分工作区</h2>
-          <p>{{ split.fileName || '导入一张游戏 UI 截图，拆成可独立复用的图层' }}</p>
+          <h2 class="m-0 text-head">图层拆分工作区</h2>
+          <p class="mt-0.5 mb-0 text-faint">{{ split.fileName || '导入一张游戏 UI 截图，拆成可独立复用的图层' }}</p>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-3">
           <input
             ref="input"
             hidden
@@ -391,11 +391,11 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="tool-body">
-        <div v-if="!online" class="warn offline">
+      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6">
+        <div v-if="!online" class="warn">
           <p><strong>本地 Python 服务未连接</strong>：拆分必须由它执行推理。</p>
-          <p class="mono cmd">{{ START_COMMAND }}</p>
-          <div class="offline-actions">
+          <p class="mono my-2 select-all rounded-sm border border-line bg-raised px-2 py-1.5">{{ START_COMMAND }}</p>
+          <div class="flex gap-2">
             <button class="btn" @click="copy(START_COMMAND)">{{ copied ? '已复制' : '复制命令' }}</button>
             <button class="btn" :disabled="checking" @click="probeServer">{{ checking ? '连接中…' : '重试连接' }}</button>
           </div>
@@ -411,7 +411,7 @@ onUnmounted(() => {
             <strong>模型权重未就绪</strong>：可直接在此下载（约 1.5GB），或执行
             <span class="mono">{{ MODELS_COMMAND }}</span>。
           </p>
-          <div class="offline-actions">
+          <div class="flex gap-2">
             <button class="btn" :disabled="downloading" @click="downloadWeights(null)">
               {{ downloading ? '下载中…' : '下载权重' }}
             </button>
@@ -420,8 +420,8 @@ onUnmounted(() => {
 
         <div v-if="downloading || downloadText" class="warn">
           <p class="faint">{{ downloadText }}</p>
-          <div class="load-track">
-            <div class="load-fill" :style="{ width: (downloadPercent >= 0 ? downloadPercent : 100) + '%' }"></div>
+          <div class="mt-2 h-1.5 overflow-hidden rounded-[3px] bg-line">
+            <div class="h-full bg-accent [transition:width_0.2s_ease]" :style="{ width: (downloadPercent >= 0 ? downloadPercent : 100) + '%' }"></div>
           </div>
         </div>
 
@@ -431,15 +431,15 @@ onUnmounted(() => {
           <span>导入一张游戏 UI 截图（商店面板 / 背包 / HUD 等），或在左侧填好类别提示词</span>
         </div>
 
-        <div v-else class="ls-workspace">
+        <div v-else class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px] items-stretch gap-4">
           <LayerBoxEditor
             v-if="boxEditing"
             @confirm="confirmBoxEdit"
             @cancel="cancelBoxEdit"
           />
-          <figure v-else-if="!hasLayers" class="ls-source">
-            <img :src="split.sourceUrl" alt="待拆分素材" />
-            <figcaption class="faint">
+          <figure v-else-if="!hasLayers" class="m-0 flex min-h-0 flex-col items-center justify-center gap-2 overflow-hidden rounded-sm border border-line bg-stage p-3">
+            <img class="max-h-full min-h-0 max-w-full object-contain" :src="split.sourceUrl" alt="待拆分素材" />
+            <figcaption class="faint flex-none text-caption">
               {{ progress.running ? '正在拆分…' : '尚未拆分' }}
               <span v-if="downscaled" class="mono"> · 推理按 1/{{ (1 / size.scale).toFixed(2) }} 缩放，坐标已映射回原图</span>
             </figcaption>
@@ -467,16 +467,16 @@ onUnmounted(() => {
     </main>
 
     <!-- 右栏：素材信息、本地服务、拆分设置与导出 -->
-    <section class="tool-sidepanel panel">
+    <section class="panel overflow-auto border-l border-line">
       <div class="section">
         <h2 class="section-title">素材</h2>
-        <p class="muted file-name">
+        <p class="muted mt-2 mb-0 overflow-hidden text-ellipsis whitespace-nowrap">
           {{ split.fileName || '未选择素材' }}
           <span v-if="size.width" class="mono"> · {{ size.width }}×{{ size.height }}</span>
         </p>
       </div>
 
-      <div class="section">
+      <div class="section [&_.field-row+.field-row]:mt-2 [&_.muted+.field-row]:mt-2">
         <h2 class="section-title">本地服务</h2>
         <p class="muted">
           检测与分割由本机 Python 服务完成，素材不出本机
@@ -487,7 +487,7 @@ onUnmounted(() => {
           <button class="btn" :disabled="checking" @click="applyServerAddr">{{ checking ? '连接中…' : '应用' }}</button>
         </div>
         <div class="field-row">
-          <span class="status" :class="{ ok: online }">{{ online ? '已连接' : '未连接' }}</span>
+          <span class="flex-1 text-caption" :class="online ? 'text-accent-strong' : 'text-danger'">{{ online ? '已连接' : '未连接' }}</span>
           <button class="btn btn-ghost" :disabled="checking" @click="probeServer">重试连接</button>
           <button class="btn btn-ghost" @click="copy(START_COMMAND)">{{ copied ? '已复制' : '复制启动命令' }}</button>
         </div>
@@ -495,19 +495,19 @@ onUnmounted(() => {
 
       <LayerSplitSettingsFields />
 
-      <div class="section actions">
+      <div class="section flex flex-col gap-2">
         <template v-if="hasSource && !hasLayers && !boxEditing">
-          <button class="btn btn-primary full" :disabled="!canSplit" @click="startBoxEdit">
+          <button class="btn btn-primary w-full justify-center" :disabled="!canSplit" @click="startBoxEdit">
             框选编辑
           </button>
-          <button class="btn full" :disabled="!canSplit" @click="quickSplit">
+          <button class="btn w-full justify-center" :disabled="!canSplit" @click="quickSplit">
             快速拆分
           </button>
         </template>
-        <button v-if="hasLayers" class="btn btn-primary full" :disabled="!canSplit" @click="startBoxEdit">
+        <button v-if="hasLayers" class="btn btn-primary w-full justify-center" :disabled="!canSplit" @click="startBoxEdit">
           重新框选拆分
         </button>
-        <button v-if="boxEditing" class="btn full" @click="cancelBoxEdit">退出编辑</button>
+        <button v-if="boxEditing" class="btn w-full justify-center" @click="cancelBoxEdit">退出编辑</button>
         <TaskProgress
           v-if="progress.running || progress.text || errorText"
           :running="progress.running"
@@ -521,7 +521,7 @@ onUnmounted(() => {
         />
         <button
           v-if="missingRepo"
-          class="btn full"
+          class="btn w-full justify-center"
           :disabled="downloading"
           @click="downloadWeights(missingRepo, true)"
         >
@@ -529,57 +529,16 @@ onUnmounted(() => {
         </button>
         <p v-if="notice" class="muted">{{ notice }}</p>
         <template v-if="hasLayers">
-          <button class="btn btn-primary full" :disabled="exporting" @click="exportClientZip">
+          <button class="btn btn-primary w-full justify-center" :disabled="exporting" @click="exportClientZip">
             {{ exporting ? '打包中…' : `导出 ZIP（${split.layers.filter((layer) => layer.visible).length} 层）` }}
           </button>
-          <button class="btn full" :disabled="exporting || !split.jobId" @click="exportServerBundle">下载服务端整包</button>
+          <button class="btn w-full justify-center" :disabled="exporting || !split.jobId" @click="exportServerBundle">下载服务端整包</button>
           <p class="muted">
             客户端 ZIP 尊重改名、隐藏与层序；服务端整包按原样命名，并附带可直接导入「精灵图」页的 atlas.json。
           </p>
         </template>
-        <button class="btn btn-ghost full" :disabled="!hasSource" @click="reset">重置</button>
+        <button class="btn btn-ghost w-full justify-center" :disabled="!hasSource" @click="reset">重置</button>
       </div>
     </section>
   </div>
 </template>
-
-<style scoped>
-/* 页面骨架：左栏源图列表 + 中间工作区 + 右栏参数配置（与九宫格页同构的三栏布局）；未导入时左栏隐藏 */
-.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
-.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: var(--fs-head); }
-.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 24px; }
-.full { width: 100%; justify-content: center; }
-.actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-.file-name { margin: var(--sp-2) 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.status { flex: 1; color: var(--danger); font-size: var(--fs-caption); }
-.status.ok { color: var(--accent-strong); }
-.section .field-row + .field-row { margin-top: var(--sp-2); }
-.section .muted + .field-row { margin-top: var(--sp-2); }
-.offline .cmd { margin: var(--sp-2) 0; padding: 6px 8px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-s); user-select: all; }
-.offline-actions { display: flex; gap: var(--sp-2); }
-/* 权重下载进度：与「模型管理」卡片的加载条同构 */
-.load-track { height: 6px; margin-top: var(--sp-2); background: var(--border); border-radius: 3px; overflow: hidden; }
-.load-fill { height: 100%; background: var(--accent); transition: width 0.2s ease; }
-/* 工作区：左侧合成舞台，右侧图层面板 */
-.ls-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--sp-4); align-items: stretch; }
-.ls-source { margin: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-3); background: var(--stage); border: 1px solid var(--border); border-radius: var(--radius-s); overflow: hidden; }
-.ls-source img { max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; }
-.ls-source figcaption { flex: none; font-size: var(--fs-caption); }
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-/* 左栏源图列表条目：缩略图 + 名称 + 尺寸 + 移除 */
-.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
-.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-/* 窄屏适配：三栏收窄 */
-@media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
-  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
-}
-</style>

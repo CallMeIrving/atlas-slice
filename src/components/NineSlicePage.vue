@@ -345,15 +345,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="tool-page" :class="{ 'no-list': !hasSource }">
+  <div class="grid h-full min-h-0" :class="hasSource ? 'grid-cols-[280px_minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)_320px]'">
     <!-- 左栏：已导入图片列表，未导入时整栏不显示 -->
-    <section v-if="hasSource" class="tool-sidebar panel">
+    <section v-if="hasSource" class="panel overflow-auto border-r border-line">
       <div class="section">
         <h2 class="section-title">图集列表</h2>
-        <ul class="asset-list">
-          <li class="asset-row">
-            <img class="asset-thumb" :src="state.sourceUrl" :alt="state.fileName" draggable="false" />
-            <span class="asset-name" :title="state.fileName">{{ state.fileName }}</span>
+        <ul class="m-0 flex list-none flex-col gap-2 p-0">
+          <li class="flex items-center gap-2">
+            <img class="size-10 flex-none rounded-sm border border-line bg-stage object-contain" :src="state.sourceUrl" :alt="state.fileName" draggable="false" />
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-caption" :title="state.fileName">{{ state.fileName }}</span>
             <span class="mono faint">{{ state.image?.width }}×{{ state.image?.height }}</span>
             <button class="btn btn-icon btn-danger" title="移除" @click="resetAll">×</button>
           </li>
@@ -361,45 +361,45 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <main class="tool-main">
-      <div class="tool-header">
+    <main class="flex min-h-0 min-w-0 flex-col">
+      <div class="flex h-16 flex-none items-center justify-between gap-4 border-b border-line px-6">
         <div>
-          <h2>九宫格工作区</h2>
-          <p>{{ state.image ? `${state.image.width}×${state.image.height} px · 分割线可拖动` : '导入一张 UI 图开始切分' }}</p>
+          <h2 class="m-0 text-head">九宫格工作区</h2>
+          <p class="mt-0.5 mb-0 text-faint">{{ state.image ? `${state.image.width}×${state.image.height} px · 分割线可拖动` : '导入一张 UI 图开始切分' }}</p>
         </div>
-        <div class="header-actions">
+        <div class="flex items-center gap-3">
           <input ref="input" hidden type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
           <button class="btn btn-primary" @click="input?.click()">导入图片</button>
           <span v-if="slices" class="badge badge-accent">{{ NINE_SLICE_KEYS.filter((k) => slices?.[k]).length }} 块已切出</span>
         </div>
       </div>
 
-      <div class="tool-body">
+      <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6">
         <div v-if="!hasSource" class="empty-state">
           <span class="big">▦</span>
           <strong>还没有可切分的图片</strong>
           <span>导入一张游戏 UI 面板 / 按钮 / 气泡框图片（PNG / JPG / WebP，≤ 10MB）</span>
         </div>
 
-        <div v-else class="ns-workspace">
-          <section class="ns-column">
-            <h3 class="faint">原图与分割线</h3>
-            <div class="ns-stage" tabindex="0" @keydown="onKeydown">
-              <img class="ns-img" :src="state.sourceUrl" alt="九宫格源图" draggable="false" />
-              <div ref="stage" class="ns-overlay">
+        <div v-else class="grid grid-cols-2 items-start gap-4">
+          <section class="flex min-w-0 flex-col gap-2">
+            <h3 class="faint m-0 text-caption font-medium">原图与分割线</h3>
+            <div class="relative self-center rounded-sm border border-line bg-stage outline-none focus:border-accent" tabindex="0" @keydown="onKeydown">
+              <img class="block max-h-[52vh] max-w-full object-contain select-none" :src="state.sourceUrl" alt="九宫格源图" draggable="false" />
+              <div ref="stage" class="absolute inset-0">
                 <div
                   v-for="line in VERTICAL_LINES"
                   :key="line"
-                  class="ns-guide ns-guide-v"
-                  :class="{ active: selected === line }"
+                  class="absolute inset-y-0 ml-[-3.5px] w-1.75 cursor-col-resize bg-transparent after:absolute after:inset-y-0 after:left-1/2 after:ml-[-0.5px] after:w-px after:bg-accent after:opacity-85 after:content-[''] hover:after:opacity-100 hover:after:shadow-[0_0_0_1px_var(--accent-dim)]"
+                  :class="selected === line && 'after:opacity-100 after:shadow-[0_0_0_1px_var(--accent-dim)]'"
                   :style="guideStyle(line)"
                   @pointerdown="startDrag(line, $event)"
                 ></div>
                 <div
                   v-for="line in HORIZONTAL_LINES"
                   :key="line"
-                  class="ns-guide ns-guide-h"
-                  :class="{ active: selected === line }"
+                  class="absolute inset-x-0 mt-[-3.5px] h-1.75 cursor-row-resize bg-transparent after:absolute after:inset-x-0 after:top-1/2 after:mt-[-0.5px] after:h-px after:bg-accent after:opacity-85 after:content-[''] hover:after:opacity-100 hover:after:shadow-[0_0_0_1px_var(--accent-dim)]"
+                  :class="selected === line && 'after:opacity-100 after:shadow-[0_0_0_1px_var(--accent-dim)]'"
                   :style="guideStyle(line)"
                   @pointerdown="startDrag(line, $event)"
                 ></div>
@@ -407,18 +407,18 @@ onBeforeUnmount(() => {
             </div>
           </section>
 
-          <section class="ns-column">
-            <h3 class="faint">拉伸预览（{{ state.previewSize.width }}×{{ state.previewSize.height }}）</h3>
-            <div ref="previewWrap" class="ns-preview-wrap">
+          <section class="flex min-w-0 flex-col gap-2">
+            <h3 class="faint m-0 text-caption font-medium">拉伸预览（{{ state.previewSize.width }}×{{ state.previewSize.height }}）</h3>
+            <div ref="previewWrap" class="flex justify-center overflow-hidden rounded-sm border border-dashed border-line bg-stage p-3">
               <div
                 v-if="slices"
-                class="ns-grid"
+                class="grid"
                 :style="{ gridTemplateColumns: gridCols, gridTemplateRows: gridRows }"
               >
                 <img
                   v-for="key in NINE_SLICE_KEYS"
                   :key="key"
-                  class="ns-cell"
+                  class="block size-full [image-rendering:auto]"
                   :src="slices[key]"
                   :alt="key"
                   draggable="false"
@@ -432,7 +432,7 @@ onBeforeUnmount(() => {
     </main>
 
     <!-- 右栏：配置、参数与导出 -->
-    <section class="tool-sidepanel panel">
+    <section class="panel overflow-auto border-l border-line">
       <div class="section">
         <h2 class="section-title">九宫格切图</h2>
         <p class="muted">本地处理，不上传素材</p>
@@ -440,7 +440,7 @@ onBeforeUnmount(() => {
 
       <div class="section">
         <h2 class="section-title">四边距离（px）</h2>
-        <div class="border-grid">
+        <div class="grid grid-cols-2 gap-x-3 gap-y-2 [&_.input]:w-full">
           <label v-for="line in BORDER_LINES" :key="line" class="field">
             <span class="field-label">{{ GUIDE_LABELS[line] }}</span>
             <input
@@ -459,7 +459,7 @@ onBeforeUnmount(() => {
 
       <div class="section">
         <h2 class="section-title">拉伸预览尺寸</h2>
-        <div class="field-row">
+        <div class="field-row [&_.field]:min-w-0 [&_.field]:flex-1 [&_.input]:min-w-0 [&_.input]:flex-1">
           <label class="field">
             <span class="field-label">宽</span>
             <input v-model.number="state.previewSize.width" class="input" type="number" min="1" :disabled="!hasSource" />
@@ -471,7 +471,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="section">
+      <div class="section [&>p+.field]:mt-3">
         <h2 class="section-title">导出选项</h2>
         <label class="check-row"><input v-model="export2x" type="checkbox" :disabled="!hasSource" /> @2x 多倍率切块</label>
         <label class="check-row"><input v-model="export3x" type="checkbox" :disabled="!hasSource" /> @3x 多倍率切块</label>
@@ -479,163 +479,22 @@ onBeforeUnmount(() => {
         <p class="muted">倍率切块按整图放大后重新切分，并附带缩放后的 border 元数据；.9.png 以上下左右黑线标记拉伸区与内容区。</p>
         <label class="field">
           <span class="field-label">切块命名模板</span>
-          <input v-model="nameTemplate" class="input template-input" type="text" spellcheck="false" placeholder="{name}{scale}_{part}.png" />
+          <input v-model="nameTemplate" class="input w-full font-mono text-caption" type="text" spellcheck="false" placeholder="{name}{scale}_{part}.png" />
         </label>
-        <p v-if="!templateValid" class="error-text">模板需同时包含 {name} 与 {part}，否则文件会互相覆盖（导出时按默认模板处理）。</p>
+        <p v-if="!templateValid" class="text-caption text-danger">模板需同时包含 {name} 与 {part}，否则文件会互相覆盖（导出时按默认模板处理）。</p>
         <p v-else class="muted">占位符：{name} 基础名 · {part} 块名 · {scale} 倍率（1x 为空）。预览：{{ templatePreview }}</p>
       </div>
 
-      <div class="section actions">
-        <button class="btn btn-primary full" :disabled="!slices || exporting" @click="exportZip">
+      <div class="section flex flex-col gap-2">
+        <button class="btn btn-primary w-full justify-center" :disabled="!slices || exporting" @click="exportZip">
           {{ exporting ? '打包中…' : '导出 ZIP（9 PNG + 元数据）' }}
         </button>
-        <button class="btn btn-ghost full" :disabled="!hasSource" @click="resetAll">重置</button>
-        <p v-if="errorText" class="error-text">{{ errorText }}</p>
+        <button class="btn btn-ghost w-full justify-center" :disabled="!hasSource" @click="resetAll">重置</button>
+        <p v-if="errorText" class="text-caption text-danger">{{ errorText }}</p>
       </div>
     </section>
 
   </div>
 </template>
 
-<style scoped>
-/* 页面骨架：左栏图集列表 + 中间工作区 + 右栏参数配置（与雪碧图页同构的三栏布局）；未导入时左栏隐藏 */
-.tool-page { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; height: 100%; min-height: 0; }
-.tool-page.no-list { grid-template-columns: minmax(0, 1fr) 320px; }
-.tool-sidebar { border-right: 1px solid var(--border); overflow: auto; }
-.tool-sidepanel { border-left: 1px solid var(--border); overflow: auto; }
-.tool-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.tool-header { height: 64px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.tool-header h2 { margin: 0; font-size: var(--fs-head); }
-.tool-header p { margin: 2px 0 0; color: var(--text-faint); }
-.tool-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4); padding: 24px; }
-.full { width: 100%; justify-content: center; }
-.actions { display: flex; flex-direction: column; gap: var(--sp-2); }
-/* 只给直接堆叠在 section 下的 field 加间距；border-grid / field-row 内的字段由 gap 控制，避免误加 margin 造成错位 */
-.section > .field + .field, .section > .field + .check-row { margin-top: var(--sp-3); }
-.section > p + .field { margin-top: var(--sp-3); }
-/* field 是 field-row 的 flex 项：允许收缩并填满行宽，否则 number 输入的固有宽度会把侧栏撑出横向滚动条 */
-.field-row .field { flex: 1; min-width: 0; }
-.field-row .input { flex: 1; min-width: 0; }
-.border-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-2) var(--sp-3);
-}
-/* 数值框覆盖全局 76px 固定宽，填满列宽与标签左缘对齐 */
-.border-grid .input { width: 100%; }
-/* 命名模板用等宽字体，占位符可读性更好 */
-.template-input { width: 100%; font-family: var(--font-mono); font-size: var(--fs-caption); }
-.ns-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--sp-4);
-  align-items: start;
-}
-.ns-column {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-.ns-column h3 { margin: 0; font-size: var(--fs-caption); font-weight: 500; }
-.ns-stage {
-  position: relative;
-  /* flex column 默认 stretch 会把 stage 拉满列宽，导致 overlay 比图片宽、横线溢出；居中收缩到图片宽度 */
-  align-self: center;
-  outline: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-s);
-  background: var(--stage);
-}
-.ns-stage:focus {
-  border-color: var(--accent);
-}
-.ns-img {
-  display: block;
-  max-width: 100%;
-  max-height: 52vh;
-  object-fit: contain;
-  user-select: none;
-}
-.ns-overlay {
-  position: absolute;
-  inset: 0;
-}
-.ns-guide {
-  position: absolute;
-  background: transparent;
-}
-.ns-guide-v {
-  top: 0;
-  bottom: 0;
-  width: 7px;
-  margin-left: -3.5px;
-  cursor: col-resize;
-}
-.ns-guide-h {
-  left: 0;
-  right: 0;
-  height: 7px;
-  margin-top: -3.5px;
-  cursor: row-resize;
-}
-.ns-guide::after {
-  content: '';
-  position: absolute;
-  background: var(--accent);
-  opacity: 0.85;
-}
-.ns-guide-v::after {
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  margin-left: -0.5px;
-}
-.ns-guide-h::after {
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 1px;
-  margin-top: -0.5px;
-}
-.ns-guide:hover::after,
-.ns-guide.active::after {
-  box-shadow: 0 0 0 1px var(--accent-dim);
-  opacity: 1;
-}
-.ns-preview-wrap {
-  display: flex;
-  justify-content: center;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-s);
-  padding: var(--sp-3);
-  overflow: hidden;
-  background: var(--stage);
-}
-.ns-grid {
-  display: grid;
-}
-.ns-cell {
-  width: 100%;
-  height: 100%;
-  display: block;
-  image-rendering: auto;
-}
-/* 窄屏适配：工作区两列堆叠为单列，侧栏收窄 */
-@media (max-width: 1100px) {
-  .tool-page { grid-template-columns: 220px minmax(0, 1fr) 280px; }
-  .tool-page.no-list { grid-template-columns: minmax(0, 1fr) 280px; }
-  .ns-workspace { grid-template-columns: minmax(0, 1fr); }
-}
-.header-actions { display: flex; align-items: center; gap: var(--sp-3); }
-/* 左栏图集列表条目：缩略图 + 名称 + 尺寸 + 移除 */
-.asset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
-.asset-row { display: flex; align-items: center; gap: var(--sp-2); }
-.asset-thumb { width: 40px; height: 40px; flex: none; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--stage); }
-.asset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
-.error-text {
-  color: var(--danger, #e8463a);
-  font-size: var(--fs-caption);
-}
-</style>
+
