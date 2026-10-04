@@ -47,8 +47,11 @@ let token: CancelToken = createCancelToken()
 
 const extractOptions = computed(() => extractOptionsFrom(workspace.video))
 const rangeError = computed(() => extractRangeError(extractOptions.value, workspace.video.duration, Boolean(workspace.video.sourceUrl)))
-/** 抠图引擎：纯色算法不需要模型，返回 null */
-const matteEngine = computed<ModelEngine | null>(() => (workspace.video.matte.mode === 'solid' ? null : (workspace.video.matte.mode as ModelEngine)))
+/** 抠图引擎：纯色算法与手动移除都不需要模型，返回 null */
+const matteEngine = computed<ModelEngine | null>(() => {
+  const mode = workspace.video.matte.mode
+  return mode === 'solid' || mode === 'manual' ? null : (mode as ModelEngine)
+})
 const needsModel = computed(() => pipeline.matteEnabled && matteEngine.value !== null)
 const modelKey = computed(() => (matteEngine.value ? matteModelKey(matteEngine.value) : ''))
 const modelState = computed(() => (modelKey.value ? (modelStatus[modelKey.value]?.state ?? 'unknown') : 'unknown'))
@@ -56,6 +59,10 @@ const modelLabel = computed(() => AI_ENGINES.find((engine) => engine.key === mat
 /** 有效的裁切区域：勾选裁切但没有框选到有效区域时视为跳过 */
 const validCrop = computed<ImageCropRect | null>(() => (pipeline.cropEnabled && cropRect.value.width > 0 && cropRect.value.height > 0 ? cropRect.value : null))
 const cropMissing = computed(() => pipeline.cropEnabled && !validCrop.value)
+/** 手动移除方式必须先在帧抠图弹窗里框选区域，否则该步骤等价于空操作 */
+const manualRectMissing = computed(() =>
+  pipeline.matteEnabled && workspace.video.matte.mode === 'manual' && !workspace.video.matte.manualRect,
+)
 const zipName = computed(() => `${workspace.video.fileName.replace(/\.[^.]+$/, '') || 'video'}-frames.zip`)
 
 /** 主按钮文案：跑过一次后改为「再次处理」；模型未加载时提示会先加载模型 */
@@ -66,7 +73,7 @@ const startLabel = computed(() => {
 })
 /** 是否有任务在进行（含仅加载模型阶段）：进行中才能取消 */
 const busy = computed(() => running.value || preparing.value)
-const startDisabled = computed(() => busy.value || cancelling.value || !props.video || !workspace.video.sourceUrl || Boolean(rangeError.value) || cropMissing.value)
+const startDisabled = computed(() => busy.value || cancelling.value || !props.video || !workspace.video.sourceUrl || Boolean(rangeError.value) || cropMissing.value || manualRectMissing.value)
 const taskText = computed(() => {
   if (cancelling.value) return '正在取消…'
   if (preparing.value) return workspace.matte.aiStatus || '加载模型中…'
@@ -254,10 +261,11 @@ onMounted(() => { if (pipeline.cropEnabled) void prepareCropSource() })
         <section class="step flex flex-col gap-3 pb-4 border-b border-line last:border-b-0 last:pb-0">
           <h3 class="step-title flex items-center gap-2 m-0 text-head">
             <label class="check-row"><input v-model="pipeline.matteEnabled" type="checkbox" /><span class="step-no inline-grid place-items-center w-5 h-5 rounded-full bg-accent-dim text-accent-strong font-mono text-[12px] leading-none font-semibold">3</span>抠图</label>
-            <span class="faint text-caption">默认使用 AI 模型（ISNet），可切回纯色背景算法</span>
+            <span class="faint text-caption">默认使用 AI 模型（ISNet），可切回纯色背景算法或手动框选移除</span>
           </h3>
           <template v-if="pipeline.matteEnabled">
             <MatteSettingsFields />
+            <p v-if="manualRectMissing" class="step-warn m-0 text-danger text-caption">已选「手动移除」，请先打开「移除背景」弹窗框选要抹掉的区域</p>
             <div v-if="needsModel" class="model-row flex items-center justify-between gap-3 text-muted">
               <span>{{ modelLabel }} · {{ modelStateLabel(modelState) }}</span>
               <button class="btn" :disabled="modelState === 'loading' || modelState === 'ready'" @click="preloadModel">预加载模型</button>

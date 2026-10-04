@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { persistMediaSettings, resetMatte as clearMatteSource, workspace, type MatteMode } from '@/store/workspace'
+import { persistMediaSettings, resetMatte as clearMatteSource, workspace, type MatteHistoryEntry, type MatteMode } from '@/store/workspace'
 import { downloadZip } from '@/core/media-export'
 import { applyColorKey, solidColorKey } from '@/core/color-key'
+import type { ImageCropRect } from '@/core/crop'
 import { removeWithImgly, removeWithTransformers, AI_ENGINES, AI_MAX_SIDE_OPTIONS, describeMattingError, deviceOptions, dtypeOptions, imglyDtypeForModel, resolveDevice, resolveDtype, type AiEngine, type MatteDtype, type MatteProgress } from '@/core/ai-matting'
 import { ensureMatteModelLoaded, matteModelKey, modelStateLabel, modelStatus, setModelState, type ModelEngine, type ModelState } from '@/store/model-status'
 
 const input = ref<HTMLInputElement>()
 const image = ref<HTMLImageElement>()
+/** 手动抠图的交互层，覆盖在原图上，坐标与图像像素 1:1 */
+const manualOverlay = ref<HTMLCanvasElement>()
 const canvasRef = ref<HTMLElement>()
 const isDragging = ref(false)
 const zoomLevel = ref(1)
@@ -15,6 +18,8 @@ const panOffset = ref({ x: 0, y: 0 })
 const panPointer = ref<{ id: number; x: number; y: number; startX: number; startY: number } | null>(null)
 const suppressImageClick = ref(false)
 const fitImageSize = ref({ width: 0, height: 0 })
+/** 上一次「适应画布」依据的图像原始尺寸，用于判断结果图刷新后是否需要重新适配 */
+const fitNatural = ref({ width: 0, height: 0 })
 let canvasResizeObserver: ResizeObserver | undefined
 const sampling = ref(false)
 const helpOpen = ref(false)
@@ -27,6 +32,7 @@ const methodHelp = [
   { title: '纯色背景抠图', kind: '颜色抠图', description: '从图片四边采样背景主色，再按容差生成透明区域。', scene: '白底商品图、纯色证件照背景、背景大体均匀的批量图片。', recommendation: '边缘主体较多或背景渐变明显时，手动取色或改用 AI。' },
   { title: 'ISNet（imgly）', kind: 'AI 模型', description: '本地运行的通用前景分割模型，默认使用 FP16。', scene: '常见人像、商品和插画的快速自动抠图。', recommendation: '通用场景优先试用；速度和内存占用相对均衡。' },
   { title: 'RMBG-1.4（BRIA）', kind: 'AI 模型', description: '通用显著性分割模型，输出蒙版并合成为透明 PNG。', scene: '主体明确、背景较复杂的单张图片。', recommendation: '仅限非商业用途；模型推理占用较多内存，浏览器资源不足时改用 ISNet。' },
+  { title: '手动抠图', kind: '手动', description: '画笔涂抹或框选矩形，被覆盖的像素直接变透明，不做任何颜色或模型判断。', scene: '知道该删哪一块的局部遮挡物、残留杂边、纯色底补刀。', recommendation: '始终从原图出发，结果即时生效；涂抹错了用“撤销”或“清空标记”回退。' },
 ]
 
 async function openHelp(): Promise<void> {
@@ -46,7 +52,13 @@ const modeOptions: { value: MatteMode; label: string }[] = [
   { value: 'solid', label: '纯色背景抠图' },
   { value: 'imgly', label: 'ISNet（imgly）' },
   { value: 'rmbg', label: 'RMBG-1.4（BRIA）' },
+  { value: 'manual', label: '手动抠图' },
 ]
+
+/** 处理方式的中文名：历史记录里用它标注每条结果出自哪种方式 */
+function modeLabelOf(mode: MatteMode): string {
+  return modeOptions.find((item) => item.value === mode)?.label ?? mode
+}
 
 const backgroundOptions: { value: 'checker' | 'white' | 'black' | 'original'; label: string }[] = [
   { value: 'checker', label: '棋盘格' },
@@ -60,6 +72,8 @@ function setBackground(value: 'checker' | 'white' | 'black' | 'original'): void 
 }
 
 const isAiMode = computed(() => ['imgly', 'rmbg'].includes(workspace.matte.mode))
+/** 手动抠图：在画布上涂抹或框选，直接改像素，不跑模型也不做颜色判据 */
+const isManual = computed(() => workspace.matte.mode === 'manual')
 const canPanImage = computed(() => Boolean(workspace.matte.sourceUrl))
 const zoomPercent = computed(() => `${Math.round(zoomLevel.value * 100)}%`)
 const imageViewStyle = computed(() => ({ width: fitImageSize.value.width ? `${fitImageSize.value.width}px` : 'auto', height: fitImageSize.value.height ? `${fitImageSize.value.height}px` : 'auto', transform: `translate3d(${panOffset.value.x}px, ${panOffset.value.y}px, 0) scale(${zoomLevel.value})` }))
@@ -109,6 +123,8 @@ function modelStateForEngine(engine: (typeof AI_ENGINES)[number]['key']): ModelS
 watch(
   () => ({
     mode: workspace.matte.mode,
+    brushSize: workspace.matte.brushSize,
+    manualTool: workspace.matte.manualTool,
     aiMaxSide: workspace.matte.aiMaxSide,
     imglyModel: workspace.matte.imglyModel,
     imglyPublicPath: workspace.matte.imglyPublicPath,
@@ -157,6 +173,7 @@ function load(file?: File): void {
   workspace.matte.fileName = file.name
   workspace.matte.sourceUrl = URL.createObjectURL(file)
   workspace.matte.resultUrl = ''
+  activeHistoryId.value = ''
   workspace.matte.sampledColor = ''
   workspace.matte.aiStatus = ''
   workspace.matte.aiProgress = -1
@@ -181,10 +198,22 @@ function fitImageToCanvas(resetZoom = false): void {
     width: Math.max(1, Math.round(img.naturalWidth * scale)),
     height: Math.max(1, Math.round(img.naturalHeight * scale)),
   }
+  fitNatural.value = { width: img.naturalWidth, height: img.naturalHeight }
   if (resetZoom) {
     zoomLevel.value = 1
     panOffset.value = { x: 0, y: 0 }
   }
+}
+
+/**
+ * 预览图加载完成。
+ * 手动涂抹时结果图会随每次落笔刷新，尺寸不变就保持当前缩放与平移，避免每涂一笔都跳回默认视图。
+ */
+function onPreviewLoad(): void {
+  const img = image.value
+  if (!img?.naturalWidth) return
+  if (isManual.value && img.naturalWidth === fitNatural.value.width && img.naturalHeight === fitNatural.value.height) return
+  fitImageToCanvas(true)
 }
 
 function applyZoom(nextZoom: number, localX?: number, localY?: number): void {
@@ -304,7 +333,8 @@ async function cropBlob(blob: Blob): Promise<Blob> {
 
 async function runMatte(): Promise<void> {
   const img = image.value
-  if (!workspace.matte.sourceUrl || !img) return
+  // naturalWidth 为 0 说明预览图还在解码（刚刷新过结果），此时取像素会抛 IndexSizeError
+  if (!workspace.matte.sourceUrl || !img?.naturalWidth) return
   const modelKey = selectedModelKey.value
   const mode = workspace.matte.mode
   workspace.matte.status = 'processing'
@@ -334,6 +364,7 @@ async function runMatte(): Promise<void> {
     workspace.matte.resultUrl = URL.createObjectURL(resultBlob)
     workspace.matte.aiStatus = baseColor ? `完成 · 基准色 ${baseColor}` : '完成'
     workspace.matte.status = 'done'
+    pushHistory(mode, resultBlob)
     if (modelKey) setModelState(modelKey, 'ready')
   } catch (error) {
     console.error('抠图处理失败', error)
@@ -382,6 +413,7 @@ function download(): void {
 function resetMatte(): void {
   if (workspace.matte.resultUrl) URL.revokeObjectURL(workspace.matte.resultUrl)
   workspace.matte.resultUrl = ''
+  activeHistoryId.value = ''
   workspace.matte.mode = 'auto'
   workspace.matte.tolerance = 24
   workspace.matte.cropTransparent = true
@@ -398,6 +430,373 @@ function removeSource(): void {
   resetMatte()
 }
 
+/**
+ * ---- 手动抠图 ----
+ * 工作画布（图像原始尺寸）是手动结果的唯一数据源：始终从原图重建一次，
+ * 之后每次落笔用 destination-out 擦除，可反复叠加而不产生误差。
+ * 操作按手势记录成 ops，撤销/清空只需重建画布再重放剩余 ops。
+ */
+
+/** 手动抠图的单次手势：画笔是一串连续点，框选是一个矩形，坐标均为图像像素 */
+type ManualOp =
+  | { tool: 'brush'; radius: number; points: { x: number; y: number }[] }
+  | { tool: 'rect'; rect: ImageCropRect }
+
+/** 已提交的手势，用于撤销与重放 */
+const manualOps = ref<ManualOp[]>([])
+/** 正在进行的拖拽：kind 决定按画笔还是框选收尾 */
+const manualDrag = ref<{ kind: 'brush' | 'rect'; start: { x: number; y: number }; last: { x: number; y: number }; op?: ManualOp } | null>(null)
+/** 框选过程中的橡皮筋矩形，仅用于预览 */
+const manualPendingRect = ref<ImageCropRect | null>(null)
+/** 标记色：与危险色一致，表示「这块会被删掉」 */
+const MANUAL_MARK = 'rgb(224 98 106 / 0.38)'
+let manualCanvas: HTMLCanvasElement | null = null
+let manualContext: CanvasRenderingContext2D | null = null
+/** 手动抠图的原图，撤销重放时用它复原画布 */
+let manualSource: HTMLImageElement | null = null
+let manualSourceUrl = ''
+
+/** 原图解码：手动抠图必须从原始图片出发，不能用已抠图的 resultUrl */
+function decodeManualSource(): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const source = new Image()
+    source.onload = () => {
+      manualSource = source
+      manualSourceUrl = workspace.matte.sourceUrl
+      resolve(source)
+    }
+    source.onerror = () => reject(new Error('原图加载失败，无法手动抠图'))
+    source.src = workspace.matte.sourceUrl
+  })
+}
+
+/** 指针位置 → 图像像素坐标；图像可能被缩放平移，每次手势都按实际渲染矩形换算 */
+function toImagePoint(event: PointerEvent): { x: number; y: number } | null {
+  const img = image.value
+  if (!img?.naturalWidth || !img.naturalHeight) return null
+  const bounds = img.getBoundingClientRect()
+  if (!bounds.width || !bounds.height) return null
+  const x = ((event.clientX - bounds.left) / bounds.width) * img.naturalWidth
+  const y = ((event.clientY - bounds.top) / bounds.height) * img.naturalHeight
+  return { x: Math.max(0, Math.min(img.naturalWidth, x)), y: Math.max(0, Math.min(img.naturalHeight, y)) }
+}
+
+/** 两点之间的规范化矩形（可反向拖拽） */
+function rectBetween(from: { x: number; y: number }, to: { x: number; y: number }): ImageCropRect {
+  return {
+    x: Math.min(from.x, to.x),
+    y: Math.min(from.y, to.y),
+    width: Math.abs(to.x - from.x),
+    height: Math.abs(to.y - from.y),
+  }
+}
+
+/** 在画布上以「擦除」模式执行绘制：颜色不参与运算，擦掉的地方 alpha 直接归零 */
+function withErase(context: CanvasRenderingContext2D, draw: () => void): void {
+  const previous = context.globalCompositeOperation
+  context.fillStyle = '#000'
+  context.strokeStyle = '#000'
+  context.globalCompositeOperation = 'destination-out'
+  draw()
+  context.globalCompositeOperation = previous
+}
+
+function fillBrushDab(context: CanvasRenderingContext2D, point: { x: number; y: number }, radius: number): void {
+  context.beginPath()
+  context.arc(point.x, point.y, radius, 0, Math.PI * 2)
+  context.fill()
+}
+
+function strokeBrushSegment(context: CanvasRenderingContext2D, from: { x: number; y: number }, to: { x: number; y: number }, radius: number): void {
+  context.lineWidth = radius * 2
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+  context.beginPath()
+  context.moveTo(from.x, from.y)
+  context.lineTo(to.x, to.y)
+  context.stroke()
+}
+
+/** 把一个手势画到目标画布上（工作画布用擦除模式，交互层用标记色） */
+function paintOp(context: CanvasRenderingContext2D, op: ManualOp): void {
+  if (op.tool === 'rect') {
+    context.fillRect(op.rect.x, op.rect.y, op.rect.width, op.rect.height)
+    return
+  }
+  if (op.points.length === 1) {
+    fillBrushDab(context, op.points[0], op.radius)
+    return
+  }
+  for (let index = 1; index < op.points.length; index += 1) {
+    strokeBrushSegment(context, op.points[index - 1], op.points[index], op.radius)
+  }
+}
+
+/** 按剩余 ops 重建工作画布：先画原图，再重放全部手势 */
+function replayManualOps(): void {
+  const canvas = manualCanvas
+  const context = manualContext
+  if (!canvas || !context || !manualSource) return
+  context.globalCompositeOperation = 'source-over'
+  context.clearRect(0, 0, canvas.width, canvas.height)
+  context.drawImage(manualSource, 0, 0)
+  withErase(context, () => {
+    for (const op of manualOps.value) paintOp(context, op)
+  })
+}
+
+/** 把工作画布落盘为结果：手动模式下 resultUrl 就是这份可继续编辑的画面 */
+async function refreshManualResult(): Promise<void> {
+  const canvas = manualCanvas
+  if (!canvas) return
+  const blob = await canvasToBlob(canvas)
+  if (workspace.matte.resultUrl) URL.revokeObjectURL(workspace.matte.resultUrl)
+  workspace.matte.resultUrl = URL.createObjectURL(blob)
+  workspace.matte.aiStatus = manualOps.value.length ? `手动标记 ${manualOps.value.length} 处` : '尚未标记任何区域'
+  workspace.matte.status = 'done'
+  // 同一段手动编辑只占一条历史：已有条目就地刷新，首次落笔才新建
+  if (manualEntryId) updateHistoryEntry(manualEntryId, blob, manualOps.value.length)
+  else if (manualOps.value.length > 0) manualEntryId = pushHistory('manual', blob, manualOps.value.length)
+}
+
+/** 进入手动抠图：丢弃上一次处理结果，从原图重建工作画布与交互层 */
+async function startManual(): Promise<void> {
+  if (!workspace.matte.sourceUrl) return
+  manualOps.value = []
+  manualDrag.value = null
+  manualPendingRect.value = null
+  // 新的手动编辑段落单独占一条历史
+  manualEntryId = ''
+  activeHistoryId.value = ''
+  if (workspace.matte.resultUrl) URL.revokeObjectURL(workspace.matte.resultUrl)
+  workspace.matte.resultUrl = ''
+  workspace.matte.status = 'ready'
+  workspace.matte.aiStatus = ''
+  workspace.matte.aiProgress = -1
+  try {
+    const source = manualSourceUrl === workspace.matte.sourceUrl && manualSource ? manualSource : await decodeManualSource()
+    const canvas = document.createElement('canvas')
+    canvas.width = source.naturalWidth
+    canvas.height = source.naturalHeight
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('无法创建绘图画布')
+    context.drawImage(source, 0, 0)
+    manualCanvas = canvas
+    manualContext = context
+    await nextTick()
+    const overlay = manualOverlay.value
+    if (overlay) {
+      overlay.width = source.naturalWidth
+      overlay.height = source.naturalHeight
+    }
+  } catch (error) {
+    workspace.matte.status = 'error'
+    workspace.matte.aiStatus = error instanceof Error ? error.message : '手动抠图初始化失败'
+  }
+}
+
+/** 退出手动抠图：释放工作画布并丢弃手动结果，避免其他方式沿用一份无法再编辑的画面 */
+function stopManual(): void {
+  manualOps.value = []
+  manualDrag.value = null
+  manualPendingRect.value = null
+  manualCanvas = null
+  manualContext = null
+  manualEntryId = ''
+  if (workspace.matte.resultUrl) URL.revokeObjectURL(workspace.matte.resultUrl)
+  workspace.matte.resultUrl = ''
+  workspace.matte.status = workspace.matte.sourceUrl ? 'ready' : 'empty'
+}
+
+function clearManualOverlay(): void {
+  const overlay = manualOverlay.value
+  if (overlay) overlay.getContext('2d')?.clearRect(0, 0, overlay.width, overlay.height)
+}
+
+/** 把当前手势画到交互层上做实时预览（工作画布等松手才提交，避免每次移动都编码图片） */
+function paintManualOverlay(gesture: ManualOp, replace: boolean): void {
+  const overlay = manualOverlay.value
+  const context = overlay?.getContext('2d')
+  if (!overlay || !context) return
+  if (replace) context.clearRect(0, 0, overlay.width, overlay.height)
+  context.fillStyle = MANUAL_MARK
+  context.strokeStyle = MANUAL_MARK
+  context.lineWidth = 2
+  if (gesture.tool === 'rect') {
+    context.fillRect(gesture.rect.x, gesture.rect.y, gesture.rect.width, gesture.rect.height)
+    context.strokeRect(gesture.rect.x, gesture.rect.y, gesture.rect.width, gesture.rect.height)
+    return
+  }
+  paintOp(context, gesture)
+}
+
+function onManualDown(event: PointerEvent): void {
+  if (!isManual.value || !manualContext || event.button !== 0) return
+  const point = toImagePoint(event)
+  if (!point) return
+  event.preventDefault()
+  // 指针可能已释放，捕获失败不影响本次涂抹
+  try {
+    ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  } catch {
+    /* 忽略无效指针 */
+  }
+  clearManualOverlay()
+  if (workspace.matte.manualTool === 'rect') {
+    manualPendingRect.value = { x: point.x, y: point.y, width: 0, height: 0 }
+    manualDrag.value = { kind: 'rect', start: point, last: point }
+    return
+  }
+  const op: ManualOp = { tool: 'brush', radius: Math.max(1, workspace.matte.brushSize / 2), points: [point] }
+  manualDrag.value = { kind: 'brush', start: point, last: point, op }
+  paintManualOverlay(op, true)
+}
+
+function onManualMove(event: PointerEvent): void {
+  const drag = manualDrag.value
+  if (!drag) return
+  const point = toImagePoint(event)
+  if (!point) return
+  if (drag.kind === 'rect') {
+    manualPendingRect.value = rectBetween(drag.start, point)
+    paintManualOverlay({ tool: 'rect', rect: manualPendingRect.value }, true)
+    return
+  }
+  const op = drag.op
+  if (!op || op.tool !== 'brush') return
+  const previous = op.points[op.points.length - 1]
+  op.points.push(point)
+  paintManualOverlay({ tool: 'brush', radius: op.radius, points: [previous, point] }, false)
+}
+
+function onManualUp(event: PointerEvent): void {
+  const drag = manualDrag.value
+  const context = manualContext
+  manualDrag.value = null
+  manualPendingRect.value = null
+  clearManualOverlay()
+  if (!drag || !context) return
+  const point = toImagePoint(event) ?? drag.last
+  if (drag.kind === 'rect') {
+    const rect = rectBetween(drag.start, point)
+    // 单击不产生矩形，避免误删一整个像素
+    if (rect.width < 1 || rect.height < 1) return
+    const op: ManualOp = { tool: 'rect', rect }
+    manualOps.value.push(op)
+    withErase(context, () => paintOp(context, op))
+  } else {
+    const op = drag.op
+    if (!op) return
+    manualOps.value.push(op)
+    withErase(context, () => paintOp(context, op))
+  }
+  void refreshManualResult()
+}
+
+/** 撤销最后一次手势：重放剩余 ops 即可，比保存像素快照省内存 */
+function undoManual(): void {
+  if (!manualOps.value.length) return
+  manualOps.value.pop()
+  replayManualOps()
+  void refreshManualResult()
+}
+
+/** 清空全部手势，回到原图 */
+function clearManual(): void {
+  if (!manualOps.value.length) return
+  manualOps.value = []
+  replayManualOps()
+  void refreshManualResult()
+}
+
+/**
+ * ---- 抠图历史 ----
+ * 每次抠图产出的结果 PNG 都留一份快照，仅存在内存里（刷新即失效）。
+ * 快照自带图像数据，因此不依赖源图，可直接回看、重新导出。
+ */
+
+/** 历史条数上限：超出后丢弃最早的快照并释放地址 */
+const MAX_HISTORY = 24
+/** 预览区当前展示的历史条目 id；为空表示展示的是本次刚生成的结果 */
+const activeHistoryId = ref('')
+/** 手动抠图正在写入的历史条目 id：同一段手动编辑只占一条，避免每落一笔都新增 */
+let manualEntryId = ''
+
+function historyTime(entry: MatteHistoryEntry): string {
+  const date = new Date(entry.createdAt)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/** 记录一次结果快照，返回新条目 id */
+function pushHistory(mode: MatteMode, blob: Blob, markCount?: number): string {
+  const entry: MatteHistoryEntry = {
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    fileName: workspace.matte.fileName || 'cutout.png',
+    mode,
+    blob,
+    url: URL.createObjectURL(blob),
+    createdAt: Date.now(),
+    markCount,
+  }
+  workspace.matte.history.unshift(entry)
+  while (workspace.matte.history.length > MAX_HISTORY) {
+    const dropped = workspace.matte.history.pop()
+    if (dropped) URL.revokeObjectURL(dropped.url)
+  }
+  activeHistoryId.value = entry.id
+  return entry.id
+}
+
+/** 就地刷新某条历史（手动抠图反复落笔时用，避免历史被同一次编辑刷屏） */
+function updateHistoryEntry(id: string, blob: Blob, markCount: number): void {
+  const entry = workspace.matte.history.find((item) => item.id === id)
+  if (!entry) return
+  URL.revokeObjectURL(entry.url)
+  entry.blob = blob
+  entry.url = URL.createObjectURL(blob)
+  entry.markCount = markCount
+  entry.createdAt = Date.now()
+}
+
+function removeHistory(entry: MatteHistoryEntry): void {
+  const index = workspace.matte.history.indexOf(entry)
+  if (index < 0) return
+  URL.revokeObjectURL(entry.url)
+  workspace.matte.history.splice(index, 1)
+  if (activeHistoryId.value === entry.id) activeHistoryId.value = ''
+  if (manualEntryId === entry.id) manualEntryId = ''
+}
+
+function clearHistory(): void {
+  workspace.matte.history.forEach((entry) => URL.revokeObjectURL(entry.url))
+  workspace.matte.history = []
+  activeHistoryId.value = ''
+  manualEntryId = ''
+}
+
+function downloadEntry(entry: MatteHistoryEntry): void {
+  const base = entry.fileName.replace(/\.[^.]+$/, '') || 'cutout'
+  const link = document.createElement('a')
+  link.href = entry.url
+  link.download = `${base}-cutout.png`
+  link.click()
+}
+
+/** 把历史结果重新载入预览区；手动模式先退出，避免交互层与历史结果互相覆盖 */
+async function restoreHistory(entry: MatteHistoryEntry): Promise<void> {
+  if (isManual.value) {
+    workspace.matte.mode = 'auto'
+    // 等 stopManual 跑完（它会清空并 revoke 当前结果），再挂上历史结果
+    await nextTick()
+  }
+  if (workspace.matte.resultUrl) URL.revokeObjectURL(workspace.matte.resultUrl)
+  workspace.matte.resultUrl = URL.createObjectURL(entry.blob)
+  workspace.matte.aiStatus = `已载入历史：${modeLabelOf(entry.mode)}`
+  workspace.matte.status = 'done'
+  activeHistoryId.value = entry.id
+}
+
 async function exportPackage(): Promise<void> {
   const base = workspace.matte.fileName.replace(/\.[^.]+$/, '') || 'cutout'
   const mode = workspace.matte.mode
@@ -409,6 +808,7 @@ async function exportPackage(): Promise<void> {
   if (mode === 'imgly') { config.engine = 'imgly'; config.model = workspace.matte.imglyModel; config.publicPath = workspace.matte.imglyPublicPath || undefined }
   if (mode === 'rmbg') { config.engine = mode; config.modelId = workspace.matte.rmbgModelId; config.dtype = workspace.matte.aiDtype }
   if (['imgly', 'rmbg'].includes(mode)) { config.device = workspace.matte.aiDevice; config.maxSide = workspace.matte.aiMaxSide; config.modelHost = workspace.matte.aiModelHost }
+  if (mode === 'manual') { config.tool = workspace.matte.manualTool; config.brushSize = workspace.matte.brushSize; config.markCount = manualOps.value.length }
   await downloadZip([{ name: `${base}-cutout.png`, blob }, { name: 'config.json', blob: JSON.stringify(config, null, 2) }], `${base}-cutout.zip`)
 }
 
@@ -427,6 +827,20 @@ function onWindowResize(): void {
   fitImageToCanvas()
 }
 
+/** 进入/退出手动抠图时初始化和释放工作画布 */
+watch(isManual, (manual) => {
+  if (manual) void startManual()
+  else stopManual()
+})
+
+/** 手动模式下换图（含左栏移除后重新导入）要重建工作画布与交互层 */
+watch(
+  () => workspace.matte.sourceUrl,
+  () => {
+    if (isManual.value) void startManual()
+  },
+)
+
 onMounted(() => {
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('keydown', onWindowKeyDown)
@@ -437,12 +851,14 @@ onMounted(() => {
   }
   // 刷新后重新初始化运行时；模型文件会优先复用浏览器缓存或 models/。
   if (isAiMode.value) void preloadSelectedModel()
+  if (isManual.value) void startManual()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('keydown', onWindowKeyDown)
   window.removeEventListener('blur', onWindowBlur)
   canvasResizeObserver?.disconnect()
+  stopManual()
 })
 </script>
 
@@ -459,6 +875,27 @@ onBeforeUnmount(() => {
             <!-- 尺寸取工作区预览 img 元素的自然尺寸 -->
             <span v-if="image?.naturalWidth" class="mono faint">{{ image?.naturalWidth }}×{{ image?.naturalHeight }}</span>
             <button class="btn btn-icon btn-danger ml-auto text-faint" title="移除" @click="removeSource">×</button>
+          </li>
+        </ul>
+      </div>
+      <!-- 抠图历史：每次抠图产出的结果快照，仅本次会话保留 -->
+      <div v-if="workspace.matte.history.length" class="section">
+        <div class="flex items-start justify-between gap-2">
+          <h2 class="section-title">抠图历史</h2>
+          <button class="btn-icon -mt-[3px] text-faint" type="button" title="清空历史记录" @click="clearHistory">×</button>
+        </div>
+        <p class="muted">共 {{ workspace.matte.history.length }} 条 · 仅本次会话保留</p>
+        <ul class="m-0 flex list-none flex-col gap-2 p-0">
+          <li v-for="entry in workspace.matte.history" :key="entry.id" class="flex items-center gap-2 rounded-sm border p-1" :class="activeHistoryId === entry.id ? 'border-accent bg-accent-dim' : 'border-line'">
+            <button class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left" type="button" :title="`载入这条结果（${modeLabelOf(entry.mode)}）`" @click="restoreHistory(entry)">
+              <img class="size-10 flex-none rounded-sm border border-line bg-stage object-contain" :src="entry.url" :alt="modeLabelOf(entry.mode)" draggable="false" />
+              <span class="min-w-0 flex-1">
+                <span class="block text-caption text-ink">{{ modeLabelOf(entry.mode) }}</span>
+                <span class="block text-faint">{{ historyTime(entry) }}<template v-if="entry.markCount"> · {{ entry.markCount }} 处</template></span>
+              </span>
+            </button>
+            <button class="btn btn-icon text-faint" type="button" title="导出这张结果" @click="downloadEntry(entry)">⇩</button>
+            <button class="btn btn-icon btn-danger text-faint" type="button" title="删除这条记录" @click="removeHistory(entry)">×</button>
           </li>
         </ul>
       </div>
@@ -484,7 +921,11 @@ onBeforeUnmount(() => {
       <div ref="canvasRef" class="relative m-6 grid min-h-0 flex-1 place-items-center overflow-hidden border" :class="[isDragging ? 'border-accent' : 'border-line', panPointer ? 'cursor-grabbing select-none' : (canPanImage ? 'cursor-grab' : '')]" :style="backgroundStyle" @dragover.prevent="isDragging = true" @dragleave="isDragging = false" @drop="handleDrop" @click="sampleColor" @wheel.prevent="zoomAtPointer" @pointerdown="onPanStart" @pointermove="onPanMove" @pointerup="onPanEnd" @pointercancel="onPanEnd">
         <div v-if="!workspace.matte.sourceUrl" class="flex cursor-pointer flex-col items-center gap-2 text-faint" @click="openFile"><span class="text-[36px] text-accent">＋</span><strong class="text-ink">拖入图片</strong><span>PNG / JPG / WebP</span></div>
         <template v-else>
-          <img ref="image" class="h-auto max-h-[calc(100%-2px)] w-auto max-w-[calc(100%-2px)] origin-center object-contain" :class="{ 'cursor-crosshair': sampling }" :style="imageViewStyle" :src="workspace.matte.resultUrl || workspace.matte.sourceUrl" alt="预览" draggable="false" @load="fitImageToCanvas(true)" />
+          <div class="relative" :style="imageViewStyle">
+            <img ref="image" class="block size-full object-contain" :class="{ 'cursor-crosshair': sampling }" :src="workspace.matte.resultUrl || workspace.matte.sourceUrl" alt="预览" draggable="false" @load="onPreviewLoad" />
+            <!-- 手动抠图交互层：与图像像素 1:1，涂抹/框选在此绘制标记，松手才提交到工作画布 -->
+            <canvas v-if="isManual" ref="manualOverlay" class="absolute inset-0 size-full cursor-crosshair touch-none" @pointerdown="onManualDown" @pointermove="onManualMove" @pointerup="onManualUp" @pointercancel="onManualUp" />
+          </div>
         </template>
       </div>
     </main>
@@ -546,7 +987,18 @@ onBeforeUnmount(() => {
           </label>
           <p v-if="workspace.matte.mode === 'rmbg'" class="muted">RMBG 的模型输入被固定为 1024×1024，最大边长只影响合成输出的画布尺寸，不影响推理占用的内存</p>
         </template>
-        <label class="check-row"><input v-model="workspace.matte.cropTransparent" type="checkbox" /> 自动裁切透明边缘</label>
+        <template v-if="isManual">
+          <label class="field"><span class="field-label">手动工具</span>
+            <div class="seg w-full">
+              <button class="seg-item flex-1 justify-center" :class="{ active: workspace.matte.manualTool === 'brush' }" type="button" @click="workspace.matte.manualTool = 'brush'">画笔涂抹</button>
+              <button class="seg-item flex-1 justify-center" :class="{ active: workspace.matte.manualTool === 'rect' }" type="button" @click="workspace.matte.manualTool = 'rect'">框选矩形</button>
+            </div>
+          </label>
+          <label v-if="workspace.matte.manualTool === 'brush'" class="field"><span class="field-label">笔刷大小 {{ workspace.matte.brushSize }} px</span><input v-model.number="workspace.matte.brushSize" class="w-full accent-accent" type="range" min="2" max="200" /></label>
+          <p class="muted">在画布上涂抹或框选，覆盖的像素立即变透明；始终从原图出发，反复涂抹不叠加误差。</p>
+        </template>
+        <label class="check-row" :class="{ 'cursor-default opacity-50': isManual }"><input v-model="workspace.matte.cropTransparent" type="checkbox" :disabled="isManual" /> 自动裁切透明边缘</label>
+        <p v-if="isManual" class="muted">手动抠图结果与原图同尺寸，不做透明边裁切</p>
       </div>
       <div class="section">
         <h2 class="section-title">模型状态</h2>
@@ -562,7 +1014,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="section flex flex-col gap-2">
-        <button class="btn btn-primary w-full justify-center" :disabled="runDisabled" @click="runMatte">{{ workspace.matte.status === 'processing' ? '处理中…' : '开始抠图' }}</button>
+        <button v-if="!isManual" class="btn btn-primary w-full justify-center" :disabled="runDisabled" @click="runMatte">{{ workspace.matte.status === 'processing' ? '处理中…' : '开始抠图' }}</button>
+        <template v-else>
+          <p class="muted m-0">手动抠图即时生效：在画布上涂抹或框选即可，无需点击开始。</p>
+          <div class="flex gap-2">
+            <button class="btn flex-1 justify-center" :disabled="!manualOps.length" @click="undoManual">撤销</button>
+            <button class="btn flex-1 justify-center" :disabled="!manualOps.length" @click="clearManual">清空标记</button>
+          </div>
+        </template>
         <button class="btn w-full justify-center" :disabled="!workspace.matte.resultUrl" @click="download">导出透明 PNG</button>
         <button class="btn w-full justify-center" :disabled="!workspace.matte.resultUrl" @click="exportPackage">导出 PNG + 配置 ZIP</button>
         <button class="btn btn-ghost w-full justify-center" :disabled="!workspace.matte.sourceUrl || workspace.matte.status === 'processing'" @click="resetMatte">重置抠图</button>

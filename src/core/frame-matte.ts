@@ -3,6 +3,7 @@ import { applyColorKey, colorKeyBase, sampleEdgeColor, type ColorKeyBase } from 
 import { removeWithImgly, removeWithTransformers, resolveInferenceMaxSide, type MatteProgress } from '@/core/ai-matting'
 import { fitResultToSize, imageDataToUrl, imageToImageData, loadImage } from '@/core/image'
 import { recropFrame } from '@/core/frame-crop'
+import type { ImageCropRect } from '@/core/crop'
 import { frameCleanUrl, type VideoFrame, type VideoMatteSettings } from '@/store/workspace'
 import type { CancelToken } from '@/core/frame-extract'
 
@@ -68,6 +69,43 @@ export function matteSolidData(
 }
 
 /**
+ * 把矩形区域内的像素整块置为透明（alpha = 0）。
+ * 区域按图像边界收敛，越界部分自动忽略；不读取任何颜色，因此框到哪里就清到哪里。
+ */
+export function clearRegionAlpha(data: ImageData, rect: ImageCropRect): void {
+  const x0 = Math.max(0, Math.floor(rect.x))
+  const y0 = Math.max(0, Math.floor(rect.y))
+  const x1 = Math.min(data.width, Math.ceil(rect.x + rect.width))
+  const y1 = Math.min(data.height, Math.ceil(rect.y + rect.height))
+  for (let y = y0; y < y1; y += 1) {
+    let offset = (y * data.width + x0) * 4 + 3
+    for (let x = x0; x < x1; x += 1) {
+      data.data[offset] = 0
+      offset += 4
+    }
+  }
+}
+
+/**
+ * 手动移除：把框选区域内的像素直接置透明，不依赖 AI、也不做颜色判据。
+ * 与纯色方式一样始终在像素副本上运算，反复执行不会叠加误差；
+ * 未框选区域时原样返回（等价于未处理），避免误把整帧抹掉。
+ * @param source 可选的原始像素数据（调用方按帧缓存，避免调参时重复解码）
+ */
+export function matteManualData(
+  image: HTMLImageElement,
+  settings: VideoMatteSettings,
+  source?: ImageData,
+): string {
+  const origin = source ?? imageToImageData(image)
+  const rect = settings.manualRect
+  if (!rect) return imageDataToUrl(origin)
+  const work = new ImageData(new Uint8ClampedArray(origin.data), origin.width, origin.height)
+  clearRegionAlpha(work, rect)
+  return imageDataToUrl(work)
+}
+
+/**
  * 按当前设置对单帧图像执行抠图，返回结果 dataURL。
  * 始终从原始帧出发，保证反复调整参数时结果稳定、不叠加误差。
  */
@@ -79,6 +117,7 @@ export async function matteFrameImage(
 ): Promise<string> {
   const settings = context.settings
   if (settings.mode === 'solid') return matteSolidData(image, settings, source).url
+  if (settings.mode === 'manual') return matteManualData(image, settings, source)
   // 分辨率上限统一由 ai-matting 收敛（0 = 自动），这里不再各写一份
   const maxSide = resolveInferenceMaxSide(context.ai.aiMaxSide)
   const width = image.naturalWidth

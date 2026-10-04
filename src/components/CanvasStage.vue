@@ -619,7 +619,7 @@ onBeforeUnmount(() => {
       ></canvas>
       <div v-if="!store.source" class="empty-state absolute inset-0">
         <p class="big">拖入图集图片开始</p>
-        <p class="faint">支持 PNG / WebP / JPEG · 单文件 ≤ 10MB</p>
+        <p class="faint">支持 PNG / WebP / JPEG · 单文件 ≤ 20MB</p>
         <p class="faint">再导入 TexturePacker JSON / plist / XML 元数据，或直接「自动识别」</p>
       </div>
     </div>

@@ -431,7 +431,11 @@ onUnmounted(() => {
           <span>导入一张游戏 UI 截图（商店面板 / 背包 / HUD 等），或在左侧填好类别提示词</span>
         </div>
 
-        <div v-else class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px] items-stretch gap-4">
+        <div
+          v-else
+          class="grid min-h-0 flex-1 items-stretch gap-4"
+          :class="hasLayers ? 'grid-cols-[minmax(0,1fr)_300px]' : 'grid-cols-[minmax(0,1fr)]'"
+        >
           <LayerBoxEditor
             v-if="boxEditing"
             @confirm="confirmBoxEdit"

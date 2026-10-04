@@ -195,8 +195,8 @@ function setNotice(msg: string | null): void {
 
 /** 载入图集图片；无元数据时自动识别透明边缘生成帧 */
 export async function loadImage(file: File): Promise<void> {
-  if (file.size > 10 * 1024 * 1024) {
-    store.error = '图片超过 10MB 限制，无法载入'
+  if (file.size > 20 * 1024 * 1024) {
+    store.error = '图片超过 20MB 限制，无法载入'
     return
   }
   store.busy = true

@@ -30,13 +30,17 @@ const props = withDefaults(
 
 const modeOptions: { value: FrameMatteMode; label: string }[] = [
   { value: 'solid', label: '纯色背景（本地算法，零等待）' },
+  { value: 'manual', label: '手动移除（框选区域变透明）' },
   { value: 'imgly', label: 'ISNet（imgly）AI 模型' },
   { value: 'rmbg', label: 'RMBG-1.4（BRIA）AI 模型' },
 ]
 
 const isSolid = computed(() => workspace.video.matte.mode === 'solid')
-/** 当前抠图方式对应的 AI 引擎，纯色方式为 null */
-const engine = computed<AiEngine | null>(() => (isSolid.value ? null : (workspace.video.matte.mode as AiEngine)))
+const isManual = computed(() => workspace.video.matte.mode === 'manual')
+/** 当前抠图方式对应的 AI 引擎，纯色与手动移除都不需要模型，返回 null */
+const engine = computed<AiEngine | null>(() =>
+  isSolid.value || isManual.value ? null : (workspace.video.matte.mode as AiEngine),
+)
 /**
  * 当前生效的精度：ISNet 的精度由 imglyModel 决定（其余引擎走共享的 aiDtype），
  * 因此这里既做精度映射，也把引擎不支持的精度收敛掉。
@@ -128,7 +132,7 @@ function resetBaseColor(): void {
         </div>
       </div>
     </template>
-    <template v-else>
+    <template v-else-if="!isManual">
       <label class="field">
         <span class="field-label">推理设备</span>
         <select v-model="deviceValue" class="select">
@@ -142,5 +146,8 @@ function resetBaseColor(): void {
         </select>
       </label>
     </template>
+    <p v-else class="faint col-span-full m-0">
+      手动移除不跑模型：在原图上拖拽框选要抹掉的区域，框内像素直接变透明；未框选时不改动画面。
+    </p>
   </div>
 </template>

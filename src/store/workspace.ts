@@ -8,17 +8,37 @@ import type { CharsetOptions, FontKerningPair, FontRenderMode, FontSceneTemplate
 
 export type WorkspacePage = 'atlas' | 'matte' | 'video' | 'watermark' | 'layersplit' | 'nineslice' | 'palette' | 'atlaspack' | 'directionsprite' | 'tilemap' | 'audio' | 'font' | 'onion'
 
-export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'rmbg'
+export type MatteMode = 'auto' | 'color' | 'solid' | 'imgly' | 'rmbg' | 'manual'
+
+/** 一次抠图结果快照：自带 PNG 数据，可在不依赖源图的情况下回看与导出 */
+export interface MatteHistoryEntry {
+  id: string
+  fileName: string
+  mode: MatteMode
+  /** 结果 PNG 快照 */
+  blob: Blob
+  /** 预览与恢复用的对象地址，删除或清空时必须 revoke */
+  url: string
+  /** 生成时间（毫秒） */
+  createdAt: number
+  /** 手动模式下累计的标记处数，其他方式为空 */
+  markCount?: number
+}
 
 export interface MatteState {
   fileName: string
   sourceUrl: string
   resultUrl: string
+  /** 抠图结果历史（仅本次会话，内存中保留，不写 localStorage） */
+  history: MatteHistoryEntry[]
   mode: MatteMode
   background: 'checker' | 'white' | 'black' | 'original'
   tolerance: number
   cropTransparent: boolean
+  /** 手动抠图的笔刷直径（图像像素） */
   brushSize: number
+  /** 手动抠图的子工具：画笔自由涂抹 / 框选矩形区域 */
+  manualTool: 'brush' | 'rect'
   sampledColor: string
   /** AI 引擎参数 */
   aiMaxSide: number
@@ -92,8 +112,8 @@ export interface OnionState {
   error: string
 }
 
-/** 视频帧抠图方式：solid 走纯色背景色相判据，其余为 AI 模型 */
-export type FrameMatteMode = 'solid' | 'imgly' | 'rmbg'
+/** 视频帧抠图方式：solid 走纯色背景色相判据、manual 走框选区域置透明，其余为 AI 模型 */
+export type FrameMatteMode = 'solid' | 'imgly' | 'rmbg' | 'manual'
 
 export interface VideoMatteSettings {
   mode: FrameMatteMode
@@ -102,6 +122,8 @@ export interface VideoMatteSettings {
   shadow: ShadowMode
   /** 手动指定的背景基准色（#rrggbb）；为空时自动从图像四边采样 */
   baseColor: string
+  /** 手动移除区域（图像像素坐标）；仅 manual 方式使用，批量时同一区域应用到全部帧 */
+  manualRect: ImageCropRect | null
 }
 
 /** 一键处理流水线的步骤开关与裁切区域 */
@@ -540,8 +562,8 @@ export function frameImageUrl(frame: VideoFrame): string {
 export const workspace = reactive({
   page: 'atlas' as WorkspacePage,
   matte: {
-    fileName: '', sourceUrl: '', resultUrl: '', mode: 'auto', background: 'checker',
-    tolerance: 24, cropTransparent: true, brushSize: 24, sampledColor: '', status: 'empty',
+    fileName: '', sourceUrl: '', resultUrl: '', history: [], mode: 'auto', background: 'checker',
+    tolerance: 24, cropTransparent: true, brushSize: 24, manualTool: 'brush', sampledColor: '', status: 'empty',
     aiMaxSide: 0, imglyModel: 'isnet_fp16', imglyPublicPath: '', aiDevice: 'cpu', aiDtype: 'fp16', aiModelHost: 'huggingface.co',
     rmbgModelId: 'briaai/RMBG-1.4',
     aiStatus: '', aiProgress: -1,
@@ -549,7 +571,7 @@ export const workspace = reactive({
   video: {
     fileName: '', sourceUrl: '', duration: 0, width: 0, height: 0, fps: 30,
     start: 0, end: 0, mode: 'count', count: 12, targetFps: 12, flipX: false, rotation: 0, error: '', frames: [], status: 'empty',
-    matte: { mode: 'imgly', tolerance: 24, shadow: 'neutral', baseColor: '' } as VideoMatteSettings,
+    matte: { mode: 'imgly', tolerance: 24, shadow: 'neutral', baseColor: '', manualRect: null } as VideoMatteSettings,
     pipeline: { cropEnabled: false, matteEnabled: true, crop: null } as VideoPipelineSettings,
   } as VideoState,
   watermark: {
@@ -611,7 +633,7 @@ export const workspace = reactive({
 
 const SETTINGS_KEY = 'atlas-slice:media-settings'
 /** 界面支持的处理方式，用于丢弃本地设置里已下线的取值 */
-const MATTE_MODES: MatteMode[] = ['auto', 'color', 'solid', 'imgly', 'rmbg']
+const MATTE_MODES: MatteMode[] = ['auto', 'color', 'solid', 'imgly', 'rmbg', 'manual']
 /** 去水印支持的修复方式，同样用于收敛本地设置 */
 const WATERMARK_MODES: WatermarkMode[] = ['patch', 'alpha', 'region', 'texture']
 /** 图层拆分支持的类别与选项，用于丢弃本地设置里已下线的取值 */
@@ -647,6 +669,13 @@ function convergeLayerSettings(saved: Partial<LayerSplitSettings> | undefined): 
   if (!LAYER_DEVICES.includes(merged.device)) merged.device = base.device
   return merged
 }
+
+/** 手动移除区域：缺失或非法（空尺寸 / 非数值）时收敛为 null，避免把无效框带进抠图流程 */
+function normalizeManualRect(rect: ImageCropRect | null | undefined): ImageCropRect | null {
+  if (!rect || !Number.isFinite(rect.x) || !Number.isFinite(rect.y)) return null
+  if (!(rect.width >= 1) || !(rect.height >= 1)) return null
+  return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
+}
 try {
   const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null') as {
     matte?: Partial<MatteState>
@@ -663,6 +692,8 @@ try {
   // 旧版本可能存过已经移除的处理方式，直接收敛到默认值，避免下拉框出现空选项
   if (!MATTE_MODES.includes(workspace.matte.mode)) workspace.matte.mode = 'auto'
   if (saved?.video) Object.assign(workspace.video, saved.video)
+  // 手动移除区域不跨版本兼容：旧配置缺失该字段时补 null，异常矩形直接丢弃
+  workspace.video.matte.manualRect = normalizeManualRect(workspace.video.matte.manualRect)
   // 去水印只持久化参数（ROI 与来源不落盘，重新打开时按新画面重新定位）
   if (saved?.watermark?.settings) Object.assign(workspace.watermark.settings, saved.watermark.settings)
   if (!WATERMARK_MODES.includes(workspace.watermark.settings.mode)) workspace.watermark.settings.mode = 'alpha'
@@ -703,7 +734,7 @@ try {
 
 export function persistMediaSettings(): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-    matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, rmbgModelId: workspace.matte.rmbgModelId },
+    matte: { mode: workspace.matte.mode, background: workspace.matte.background, tolerance: workspace.matte.tolerance, cropTransparent: workspace.matte.cropTransparent, brushSize: workspace.matte.brushSize, manualTool: workspace.matte.manualTool, aiMaxSide: workspace.matte.aiMaxSide, imglyModel: workspace.matte.imglyModel, imglyPublicPath: workspace.matte.imglyPublicPath, aiDevice: workspace.matte.aiDevice, aiDtype: workspace.matte.aiDtype, aiModelHost: workspace.matte.aiModelHost, rmbgModelId: workspace.matte.rmbgModelId },
     video: { mode: workspace.video.mode, count: workspace.video.count, targetFps: workspace.video.targetFps, flipX: workspace.video.flipX, rotation: workspace.video.rotation, matte: { ...workspace.video.matte }, pipeline: { ...workspace.video.pipeline }, },
     watermark: { settings: { ...workspace.watermark.settings } },
     layersplit: { settings: { ...workspace.layersplit.settings, classes: workspace.layersplit.settings.classes.map((item) => ({ ...item })) } },
